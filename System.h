@@ -1328,10 +1328,12 @@ public:
 		Input.HitKeyProcess(VK_F1, KeyState::Down, [&] {
 			Skin.Base->SongSelect.SE.Don.Play();
 			NowScene = Scene::ConfigMenu;
-			PrevScene = Scene::ConfigMenu; });
+			PrevScene = Scene::SongSelect;
+			});
 		Input.HitKeyProcess(VK_F2, KeyState::Down, [&] { 
 			Skin.Base->SongSelect.SE.Don.Play();
-			EnumChart(Config.SongDirectories); });
+			EnumChart(Config.SongDirectories); 
+			});
 		Input.HitKeyProcess(VK_F3, KeyState::Down, [&] { 
 			Skin.Base->SongSelect.SE.Don.Play();
 			Config.Load();
@@ -2964,7 +2966,7 @@ RollType = '\0'
 			std::string str;
 			for (size_t c = 0; c < data.size(); c++) {
 				str += data[c];
-				if (data.size() > 1) {
+				if (c < data.size() - 1) {
 					str += ',';
 				}
 			}
@@ -3120,8 +3122,8 @@ RollType = '\0'
 				}
 				else {
 					ConfigGenre = ConfigGenreData::Genre;
-					ConfigSelector = 0;
 				}
+				ConfigSelector = 0;
 			});
 
 			Input.HitKeyProcess(VK_UP, KeyState::Down, [&] {
