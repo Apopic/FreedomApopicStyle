@@ -896,8 +896,10 @@ public:
 				Exsubstr(Lines[i], "BALLOON:", [&](const std::string& data) {
 					if (!data.empty()) {
 						auto datas = split(data, ',');
-						for (const auto d : datas) {
-							balloon.push_back(std::stoull(d));
+						for (const auto& d : datas) {
+							std::string s = strtrim(d);
+							if (s.empty()) continue;
+							balloon.push_back(std::stoull(s));
 						}
 					}
 					});
@@ -2631,6 +2633,7 @@ RollType = '\0'
 				if (data.RollEndTime < NowTime) {
 					data.BalloonFlag = 2;
 					data.HitFlag = true;
+					Chart.Roll.NowCount = 0;
 				}
 			}
 		}
