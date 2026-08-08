@@ -32,6 +32,8 @@ public:
 
 		JSONDATA(PlayerName);
 		JSONDATA(AutoPlay);
+		JSONDATA(ServerAddress);
+		JSONDATA(ServerPort);
 		JSONDATA(RandomRate);
 		JSONDATA(HiddenLevel);
 		JSONDATA(SuddenLevel);
@@ -39,6 +41,7 @@ public:
 		JSONDATA(JudgeOk);
 		JSONDATA(JudgeBad);
 		JSONDATA(SongOffset);
+		JSONDATA(JudgeOffset);
 		JSONDATA(ChartSpeed);
 		JSONDATA(SongSpeed);
 		JSONDATA(BGBrightness);
@@ -57,6 +60,7 @@ public:
 		JSONDATA(BufferSize);
 		JSONDATA(FullScreen);
 		JSONDATA(ViewDebug);
+		JSONDATA(MultiBoot);
 		JSONDATA(KaInputLeft);
 		JSONDATA(DonInputLeft);
 		JSONDATA(DonInputRight);
@@ -73,6 +77,8 @@ public:
 		nlohmann::ordered_json data = {
 			JSONDATA(PlayerName),
 			JSONDATA(AutoPlay),
+			JSONDATA(ServerAddress),
+			JSONDATA(ServerPort),
 			JSONDATA(RandomRate),
 			JSONDATA(HiddenLevel),
 			JSONDATA(SuddenLevel),
@@ -80,6 +86,7 @@ public:
 			JSONDATA(JudgeOk),
 			JSONDATA(JudgeBad),
 			JSONDATA(SongOffset),
+			JSONDATA(JudgeOffset),
 			JSONDATA(ChartSpeed),
 			JSONDATA(SongSpeed),
 			JSONDATA(BGBrightness),
@@ -97,6 +104,7 @@ public:
 			JSONDATA(SampleRate),
 			JSONDATA(BufferSize),
 			JSONDATA(FullScreen),
+			JSONDATA(MultiBoot),
 			JSONDATA(ViewDebug),
 			JSONDATA(KaInputLeft),
 			JSONDATA(DonInputLeft),
@@ -130,7 +138,9 @@ public:
 	}
 
 	std::string PlayerName = "NoName";
-	size_t PlayerNameStrlen = 0;
+
+	std::string ServerAddress = "localhost";
+	uint16_t ServerPort = 8080;
 
 	bool AutoPlay = false;
 	bool HitNoteDisp = true;
@@ -139,6 +149,7 @@ public:
 	bool Exclusive = false;
 	bool FullScreen = false;
 	bool ViewDebug = false;
+	bool MultiBoot = false;
 
 	int RandomRate = 0;
 	int SoundDeviceType = 0; // None = 0, WASAPI = 1, XAudio = 2, MMEwaveOut = 3, ASIO = 4
@@ -150,11 +161,12 @@ public:
 	double JudgeGood = 25;
 	double JudgeOk = 75;
 	double JudgeBad = 100;
+	double JudgeOffset = 0.0;
 	double SongOffset = 0;
 	double ChartSpeed = 1;
 	double SongSpeed = 1;
 	double BGBrightness = 100;
-	double RollSpeed = 10;
+	double RollSpeed = 30;
 	double FastDrawRate = 0.5;
 
 	float SongVolume = 62;
@@ -218,6 +230,7 @@ public:
 		const json& Titledata = data["Base"]["Title"];
 		const json& ModeSelectdata = data["Base"]["ModeSelect"];
 		const json& SongSelectdata = data["Base"]["SongSelect"];
+		const json& MultiRoomdata = data["Base"]["MultiRoom"];
 		const json& Playingdata = data["Base"]["Playing"];
 		const json& Resultdata = data["Base"]["Result"];
 		const json& ConfigMenudata = data["Base"]["ConfigMenu"];
@@ -289,12 +302,12 @@ public:
 
 #pragma region SongSelect
 
-		ValLoad(SongSelect, Config, BoxDistance);
 		ValLoad(SongSelect, Config, SongBoxListPos);
 		ValLoad(SongSelect, Config, BoxTitlePos);
 		ValLoad(SongSelect, Config, BoxSubTitlePos);
 		ValLoad(SongSelect, Config, CoursePos);
 		ValLoad(SongSelect, Config, LevelPos);
+		ValLoad(SongSelect, Config, BoxDistance);
 
 		DataLoad(SongSelect, Image, BackGround);
 		DataLoad(SongSelect, Image, Box);
@@ -311,6 +324,32 @@ public:
 
 		DataLoad(SongSelect, SE, Don);
 		DataLoad(SongSelect, SE, Ka);
+
+#pragma endregion
+
+#pragma region MultiRoom
+
+		ValLoad(MultiRoom, Config, PlayerPos);
+		ValLoad(MultiRoom, Config, TitlePos);
+		ValLoad(MultiRoom, Config, SubTitlePos);
+		ValLoad(MultiRoom, Config, CoursePos);
+		ValLoad(MultiRoom, Config, LevelPos);
+		ValLoad(MultiRoom, Config, BoxDistance);
+
+		DataLoad(MultiRoom, Image, BackGround);
+		DataLoad(MultiRoom, Image, PlayerBox);
+		DataLoad(MultiRoom, Image, TitleBox);
+		DataLoad(MultiRoom, Image, Crown);
+
+		DataLoad(MultiRoom, Font, String);
+		DataLoad(MultiRoom, Font, Player);
+		DataLoad(MultiRoom, Font, Title);
+		DataLoad(MultiRoom, Font, SubTitle);
+		DataLoad(MultiRoom, Font, Course);
+		DataLoad(MultiRoom, Font, Level);
+
+		DataLoad(MultiRoom, SE, Don);
+		DataLoad(MultiRoom, SE, Ka);
 
 #pragma endregion
 
@@ -356,6 +395,7 @@ public:
 
 		ValLoad(Result, Config, TitlePos);
 		ValLoad(Result, Config, SubTitlePos);
+		ValLoad(Result, Config, PlayerNamePos);
 		ValLoad(Result, Config, ScorePos);
 		ValLoad(Result, Config, AccracyPos);
 		ValLoad(Result, Config, GoodPos);
@@ -371,6 +411,7 @@ public:
 		DataLoad(Result, Image, Number);
 		DataLoad(Result, Image, Crown);
 
+		DataLoad(Result, Font, PlayerName);
 		DataLoad(Result, Font, Title);
 		DataLoad(Result, Font, SubTitle);
 
@@ -400,7 +441,6 @@ public:
 #undef ConfLoad
 #undef DataLoad
 
-		Config.PlayerNameStrlen = GetStrlen(Config.PlayerName, Skin.Base->Playing.Font.PlayerName.Handle);
 		IsLoading = false;
 
 	}
@@ -497,6 +537,36 @@ public:
 			struct _BGM {
 			} BGM;
 		} SongSelect;
+		struct _MultiRoom {
+			struct _Config {
+				Pos2D<float> PlayerPos;
+				Pos2D<float> TitlePos;
+				Pos2D<float> SubTitlePos;
+				Pos2D<float> CoursePos;
+				Pos2D<float> LevelPos;
+				float BoxDistance;
+			} Config;
+			struct _Image {
+				GraphData BackGround;
+				GraphData PlayerBox;
+				GraphData TitleBox;
+				GraphData Crown;
+			} Image;
+			struct _Font {
+				FontData String;
+				FontData Player;
+				FontData Title;
+				FontData SubTitle;
+				FontData Course;
+				FontData Level;
+			} Font;
+			struct _SE {
+				SoundData Don;
+				SoundData Ka;
+			} SE;
+			struct _BGM {
+			} BGM;
+		} MultiRoom;
 		struct _Playing {
 			struct _Config {
 				Pos2D<float> TitlePos;
@@ -543,6 +613,7 @@ public:
 			struct _Config {
 				Pos2D<float> TitlePos;
 				Pos2D<float> SubTitlePos;
+				Pos2D<float> PlayerNamePos;
 				Pos2D<float> ScorePos;
 				Pos2D<float> AccracyPos;
 				Pos2D<float> GoodPos;
@@ -562,6 +633,7 @@ public:
 			struct _Font {
 				FontData Title;
 				FontData SubTitle;
+				FontData PlayerName;
 			} Font;
 			struct _SE {
 				SoundData Don;
@@ -593,6 +665,139 @@ public:
 		} ConfigMenu;
 	} *Base = nullptr;
 } Skin;
+
+enum class JudgeType {
+	None = -1,
+	Good,
+	Ok,
+	Bad,
+	Roll
+};
+
+struct JudgeData {
+
+	JudgeType HitJudge = JudgeType::None;
+	uint64_t Score = 0;
+	uint64_t Good = 0;
+	uint64_t Ok = 0;
+	uint64_t Bad = 0;
+	uint64_t Roll = 0;
+	uint64_t Combo = 0;
+	uint64_t MaxCombo = 0;
+	uint64_t HitNote = 0;
+	double ScoreRateGood = 0.0;
+	double ScoreRateOk = 0.0;
+	double Accuracy = 0;
+	char NoteType = '\0';
+
+	void Hit(JudgeType type, uint64_t addscore, char note) {
+
+		HitJudge = type;
+		NoteType = note;
+
+		if (HitNote != 0) {
+			Accuracy = ((Good / (double)HitNote) + ((Ok / (double)HitNote) * 0.5)) * 100;
+		}
+
+		switch (type) {
+		case JudgeType::Good:
+			++Good;
+			++Combo;
+			Score += addscore * ScoreRateGood;
+			++HitNote;
+			break;
+		case JudgeType::Ok:
+			++Ok;
+			++Combo;
+			Score += addscore / 2 * ScoreRateOk;
+			++HitNote;
+			break;
+		case JudgeType::Bad:
+			++Bad;
+			Combo = 0;
+			++HitNote;
+			break;
+		case JudgeType::Roll:
+			++Roll;
+			Score += 100;
+			break;
+		}
+
+		if (Combo > MaxCombo) { ++MaxCombo; }
+	}
+};
+
+enum class HitType {
+	Null = -2,
+	Empty,
+	DonLeft,
+	KaLeft,
+	DonRight,
+	KaRight,
+	Enter,
+	Back
+};
+
+AES128::cbytearray<16> sharedkey = { '0', 'x', '7', '4', '0', 'x', '6', '5', '0', 'x', '7', '3', '0', 'x', '7', '4', };
+
+struct PlayerData {
+
+	JudgeData Judge = JudgeData();
+	HitType HitKey = HitType::Null;
+	std::string Name = "\0";
+	bool IsHost = false;
+	bool Standby = false;
+
+	Packet::bytearray ToBytes() const {
+		Packet::bytearray ret;
+		Packet::StoreBytes(ret, Judge);
+		Packet::StoreBytes(ret, HitKey);
+		Packet::StoreBytes(ret, Name);
+		Packet::StoreBytes(ret, IsHost);
+		Packet::StoreBytes(ret, Standby);
+		return ret;
+	}
+	Packet::byte_view FromBytes(Packet::byte_view view) {
+		Packet::LoadBytes(view, Judge);
+		Packet::LoadBytes(view, HitKey);
+		Packet::LoadBytes(view, Name);
+		Packet::LoadBytes(view, IsHost);
+		Packet::LoadBytes(view, Standby);
+		return view;
+	}
+};
+
+struct SharedData {
+	std::vector<PlayerData> Players = std::vector<PlayerData>();
+	std::vector<char> FileData = std::vector<char>();
+	std::vector<char> WaveData = std::vector<char>();
+	int MyIndex = 0;
+	int GetIndex = 0;
+	int CourseIndex = 0;
+	int PlayerCount = 0;
+
+	Packet::bytearray ToBytes() const {
+		Packet::bytearray ret;
+		Packet::StoreBytes(ret, Players);
+		Packet::StoreBytes(ret, FileData);
+		Packet::StoreBytes(ret, WaveData);
+		Packet::StoreBytes(ret, MyIndex);
+		Packet::StoreBytes(ret, GetIndex);
+		Packet::StoreBytes(ret, CourseIndex);
+		Packet::StoreBytes(ret, PlayerCount);
+		return ret;
+	}
+	Packet::byte_view FromBytes(Packet::byte_view view) {
+		Packet::LoadBytes(view, Players);
+		Packet::LoadBytes(view, FileData);
+		Packet::LoadBytes(view, WaveData);
+		Packet::LoadBytes(view, MyIndex);
+		Packet::LoadBytes(view, GetIndex);
+		Packet::LoadBytes(view, CourseIndex);
+		Packet::LoadBytes(view, PlayerCount);
+		return view;
+	}
+};
 
 class Game {
 public:
@@ -781,7 +986,7 @@ public:
 			std::string line;
 			std::vector<std::string> Lines;
 
-			while (std::getline(ifs,line)) {
+			while (std::getline(ifs, line)) {
 				Lines.push_back(line);
 			}
 
@@ -1251,10 +1456,10 @@ public:
 			if (IsCourseSelect) {
 				IsCourseSelect = false;
 			}
-			else {
+			else if (!IsMulti) {
 				NowScene = Scene::ModeSelect;
 			}
-			});
+		});
 		static auto DonInputProc = [&] {
 			Skin.Base->SongSelect.SE.Don.Play();
 			if (BoxDatas[BoxDataIndex]->IsGenre()) {
@@ -1346,27 +1551,287 @@ public:
 			});
 	}
 
+	SharedData Shared = SharedData();
+	TCPSocket Socket = TCPSocket();
+
+	bool IsMulti = false;
+	bool IsLoading = false;
+	bool IsSelectMode = false;
+	int GrantIndex = -1;
+
+	void MultiDataInit() {
+		Shared = SharedData();
+		Socket = TCPSocket();
+		IsMulti = false;
+		IsLoading = false;
+		IsSelectMode = false;
+	}
+	bool Connect(std::string address, uint16_t port) {
+		return Socket.Connect(IPAddress::SolveHostName(address)->Port(port));
+	}
+	void Send() {
+		Socket.ASyncEncryptionSend(Packet(Shared));
+	}
+	void Recv() {
+		if (Socket.Available() > 0) {
+			Shared = *Socket.ASyncEncryptionRecv().get()->Get<SharedData>();
+		}
+	}
+	std::vector<char> FileToMem(const fs::path& path, bool istext) {
+		std::vector<char> data;
+		if (fs::exists(path)) {
+			size_t file_size = fs::file_size(path);
+			std::vector<char> buffer(file_size);
+			std::ifstream file(path, std::ios::binary);
+			if (file.read(buffer.data(), file_size)) {
+				if (istext) {
+					buffer.erase(std::remove(buffer.begin(), buffer.end(), '\r'), buffer.end());
+				}
+				data = buffer;
+			}
+			file.close();
+		}
+		return data;
+	}
+	void MemToFile(const std::vector<char>& datas) {
+		std::ofstream ofs("temp.tja");
+		ofs << datas.data();
+	}
+
+	void MultiRoomInit() {
+		if (!IsMulti) {
+			if (Connect(Config.ServerAddress, Config.ServerPort)) {
+				IsMulti = true;
+				Socket.CryptEngine.Init(sharedkey);
+				Shared.Players.push_back(PlayerData(JudgeData(), HitType::Null, Config.PlayerName, false, false));
+				Send();
+			}
+		}
+	}
+	void MultiRoomEnd() {
+		DemoSong.Delete();
+	}
+	void MultiRoomDraw() {
+
+		Skin.Base->MultiRoom.Image.BackGround.Draw({});
+
+		if (!IsMulti) {
+			Skin.Base->MultiRoom.Font.String.Draw(
+				{ 16,16 },
+				GetColor(255, 255, 255),
+				GetColor(0, 0, 0),
+				"Server Connecting...");
+			return;
+		}
+
+		Skin.Base->MultiRoom.Image.TitleBox.Draw({});
+
+		if (IsLoading) {
+			Skin.Base->MultiRoom.Font.Title.Draw(
+				Skin.Base->MultiRoom.Config.TitlePos,
+				GetColor(255, 255, 255),
+				GetColor(0, 0, 0),
+				Chart.OriginalData.Title
+			);
+			Skin.Base->MultiRoom.Font.SubTitle.Draw(
+				Skin.Base->MultiRoom.Config.SubTitlePos,
+				GetColor(255, 255, 255),
+				GetColor(0, 0, 0),
+				Chart.OriginalData.Subtitle
+			);
+			Skin.Base->MultiRoom.Font.Course.Draw(
+				Skin.Base->MultiRoom.Config.CoursePos,
+				GetColor(255, 255, 255),
+				GetColor(0, 0, 0),
+				magic_enum::enum_name((CourseType)Shared.CourseIndex).data()
+			);
+			Skin.Base->MultiRoom.Font.Level.Draw(
+				Skin.Base->MultiRoom.Config.LevelPos,
+				GetColor(255, 255, 255),
+				GetColor(0, 0, 0),
+				u8StrToStr(u8"★×") + std::to_string(Chart.OriginalData.Courses[Shared.CourseIndex].Level)
+			);
+		}
+
+		for (size_t i = 0; i < Shared.Players.size(); i++) {
+
+			bool g = 1 - (GrantIndex == i) * IsSelectMode;
+			bool s = !Shared.Players[i].Standby;
+
+			Skin.Base->MultiRoom.Image.PlayerBox.Draw({ 0, 100.0f * i });
+			Skin.Base->MultiRoom.Font.Player.Draw({
+				Skin.Base->MultiRoom.Config.PlayerPos.X,
+				Skin.Base->MultiRoom.Config.PlayerPos.Y + 100.0f * i },
+				GetColor(255 * g, 255 * g, 255 * s),
+				GetColor(0, 0, 0),
+				GetStrlen(Shared.Players[i].Name, Skin.Base->MultiRoom.Font.Player.Handle),
+				Shared.Players[i].Name
+				);
+
+			if (Shared.Players[i].IsHost) {
+				Skin.Base->MultiRoom.Image.Crown.Draw({ 0, 100.0f * i }, 3);
+			}
+		}
+	}
+
+	void MultiRoomProc() {
+		if (IsMulti) {
+			if (IsLoading) {
+				if (Shared.Players[Shared.GetIndex].HitKey == HitType::Enter) {
+					Skin.Base->MultiRoom.SE.Don.Play();
+					WaitVSync(10);
+					Chart.NowTime.Start();
+					PrevScene = Scene::MultiRoom;
+					NowScene = Scene::Playing;
+				}
+				else {
+					if (!DemoSongPlayBlank.IsRunning()) {
+						DemoSong.Delete();
+						DemoSongPlayBlank.Start();
+					}
+					if (DemoSongPlayBlank.GetElapsed().Second() > DemoSongPlayBlankTime() && !DemoSong.IsPlay()) {
+						SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
+						if (Shared.Players[Shared.MyIndex].IsHost) {
+							DemoSong.Load(u8StrToStr(Chart.OriginalData.SongPath));
+						}
+						else {
+							DemoSong.Load(Shared.WaveData.data(), Shared.WaveData.size());
+						}
+						SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
+						DemoSong.SetCurrent(Chart.OriginalData.DemoStart);
+						DemoSong.SetVolume(Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
+						DemoSong.Play(FALSE);
+					}
+				}
+			}
+			else {
+
+				if (!Shared.WaveData.empty()) {
+					NowScene = Scene::Loading;
+				}
+
+				Input.HitKeyProcess(VK_TAB, KeyState::Down, [&] {
+					if (Shared.Players[Shared.MyIndex].IsHost && Shared.PlayerCount >= 2) {
+						Skin.Base->MultiRoom.SE.Don.Play();
+						GrantIndex = Shared.MyIndex;
+						IsSelectMode = true;
+					}
+					});
+
+			}
+
+			static auto DonInputProc = [&] {
+				if (IsSelectMode) {
+					Skin.Base->MultiRoom.SE.Don.Play();
+					for (auto&& p : Shared.Players) {
+						p.Standby = false;
+						p.IsHost = false;
+					}
+					Shared.Players[GrantIndex].IsHost = true;
+					GrantIndex = -1;
+					IsSelectMode = false;
+					Send();
+					return;
+				}
+				else if (Shared.Players[Shared.MyIndex].IsHost) {
+					if (!IsLoading) {
+						Skin.Base->MultiRoom.SE.Don.Play();
+						NowScene = Scene::SongSelect;
+					}
+					else if (std::ranges::all_of(Shared.Players, &PlayerData::Standby)) {
+						Skin.Base->MultiRoom.SE.Don.Play();
+						Shared.Players[Shared.MyIndex].HitKey = HitType::Enter;
+						Send();
+						WaitVSync(10);
+						Chart.NowTime.Start();
+						PrevScene = Scene::MultiRoom;
+						NowScene = Scene::Playing;
+					}
+				}
+				if (!Shared.Players[Shared.MyIndex].Standby && IsLoading) {
+					Skin.Base->MultiRoom.SE.Don.Play();
+					Shared.Players[Shared.MyIndex].Standby = true;
+					Send();
+				}
+				};
+
+			static auto KaInputProc = [&](bool direction) {
+				if (IsSelectMode) {
+					Skin.Base->MultiRoom.SE.Ka.Play();
+					if (!direction) {
+						GrantIndex <= 0 ? 0 : GrantIndex--;
+					}
+					else {
+						GrantIndex >= Shared.PlayerCount - 1 ? Shared.PlayerCount - 1 : GrantIndex++;
+					}
+				}
+				};
+
+			Input.HitKeyProcess(VK_UP, KeyState::Down, [&] { KaInputProc(false); });
+			Input.HitKeyProcess(VK_DOWN, KeyState::Down, [&] { KaInputProc(true); });
+
+			Input.HitKeyesProcess(Config.DonInputLeft, KeyState::Down, DonInputProc);
+			Input.HitKeyesProcess(Config.DonInputRight, KeyState::Down, DonInputProc);
+			Input.HitKeyProcess(VK_RETURN, KeyState::Down, DonInputProc);
+
+			Input.HitKeyProcess(VK_F1, KeyState::Down, [&] {
+				if (!Shared.Players[Shared.MyIndex].Standby) {
+					Skin.Base->MultiRoom.SE.Don.Play();
+					PrevScene = Scene::MultiRoom;
+					NowScene = Scene::ConfigMenu;
+				}
+				});
+		}
+
+		Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
+			if (Shared.Players[Shared.MyIndex].Standby) {
+				Shared.Players[Shared.MyIndex].Standby = false;
+				Send();
+			}
+			else {
+				MultiDataInit();
+				NowScene = Scene::ModeSelect;
+			}
+			});
+	}
+
+	double ScoreRateCalc(double judge, double basis) {
+		const double c = 0.9;
+		const double b = basis;
+		const double m = 10;
+		const double d = std::pow(b, std::pow(m, -1 / c));
+		return 1 / std::pow(std::log(judge * (b - d) / b + d) / std::log(b), c);
+	}
+
 	void LoadingDraw() {
-		DrawFormatString(0, 8, GetColor(255, 255, 255), "譜面読み込み中…");
+		DrawFormatString(0, 8, GetColor(255, 255, 255), "ChartLoading...");
 	}
 	void LoadingProc() {
 
-		ChartData LoadData = *BoxDatas[BoxDataIndex]->GetChart();
-		Chart.Init();
+		ChartData LoadData;
 
-		std::ifstream ifs(fs::path(LoadData.ChartPath));
-		if (!ifs.is_open()) {
-
-			NowScene = Scene::SongSelect;
-			return;
+		if (!IsMulti || Shared.Players[Shared.MyIndex].IsHost) {
+			LoadData = *BoxDatas[BoxDataIndex]->GetChart();
+		}
+		else {
+			CourseIndex = Shared.CourseIndex;
+			MemToFile(Shared.FileData);
+			LoadData.Load(u8"temp.tja");
 		}
 
 		std::string line;
 		std::vector<std::string> Lines;
-
+		std::ifstream ifs(fs::path(LoadData.ChartPath));
 		while (std::getline(ifs, line)) {
 			Lines.push_back(line);
 		}
+		ifs.close();
+
+		if (fs::exists("temp.tja")) {
+			fs::remove("temp.tja");
+		}
+
+		Chart.Init();
 
 		NoteData MainData;
 		Chart.OriginalData = LoadData;
@@ -1664,12 +2129,19 @@ RollType = '\0'
 
 		Chart.AddScore = LoadData.Courses[CourseIndex].AddScore;
 		if (Chart.AddScore == 0) {
-			Chart.AddScore = 100'0000 / (double)NoteCount;
+			Chart.AddScore = 1000000 / (double)NoteCount;
 		}
 
-		SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
-		Chart.SongData.Load(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath));
-		SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
+		if (!IsMulti || Shared.Players[Shared.MyIndex].IsHost) {
+			SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
+			Chart.SongData.Load(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath));
+			SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
+		}
+		else {
+			SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
+			Chart.SongData.Load(Shared.WaveData.data(), Shared.WaveData.size());
+			SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
+		}
 
 		if (!LoadData.MoviePath.empty()) {
 			Chart.Movie.Load(u8StrToStr(LoadData.MoviePath), Config.SongSpeed, (LoadData.MovieOffset < 0 ? LoadData.MovieOffset * -1000 : Chart.SongBlankTime));
@@ -1684,10 +2156,16 @@ RollType = '\0'
 		Skin.Base->Playing.SE.Ka.SetVolume(Chart.OriginalData.SeVolume * (Config.SEVolume / 100));
 		Skin.Base->Playing.SE.Balloon.SetVolume(Chart.OriginalData.SeVolume * (Config.SEVolume / 100));
 
-		HitNote = _HitNote();
-
-		for (auto&& taiko : MiniTaikoFlash) {
-			taiko.Reset();
+		if (IsMulti) {
+			if (Shared.Players[Shared.MyIndex].IsHost) {
+				Shared.CourseIndex = CourseIndex;
+				Shared.FileData = FileToMem(fs::path(LoadData.ChartPath), true);
+				Shared.WaveData = FileToMem(fs::path(LoadData.SongPath), false);
+				Send();
+			}
+			NowScene = Scene::MultiRoom;
+			IsLoading = true;
+			return;
 		}
 
 		WaitVSync(10);
@@ -1704,14 +2182,6 @@ RollType = '\0'
 		Normal,
 		BMSCROLL,
 		HBSCROLL,
-	};
-
-	enum class JudgeType {
-		None = -1,
-		Good,
-		Ok,
-		Bad,
-		Roll
 	};
 
 	struct NoteData {
@@ -1743,54 +2213,6 @@ RollType = '\0'
 		uint64_t BalloonCount = 0;
 		bool BarlineDisplay = false;
 		bool HitFlag = false;
-	};
-
-	struct JudgeData {
-
-		uint64_t Score = 0;
-		uint64_t Good = 0;
-		uint64_t Ok = 0;
-		uint64_t Bad = 0;
-		uint64_t Roll = 0;
-		uint64_t Combo = 0;
-		uint64_t MaxCombo = 0;
-		uint64_t HitNote = 0;
-		double ScoreRateGood = 0;
-		double ScoreRateOk = 0;
-		double Accuracy = 0;
-
-		void Hit(JudgeType type, uint64_t addscore) {
-
-			if (HitNote != 0) {
-				Accuracy = ((Good / (double)HitNote) + ((Ok / (double)HitNote) * 0.5)) * 100;
-			}
-
-			switch (type) {
-			case JudgeType::Good:
-				++Good;
-				++Combo;
-				++HitNote;
-				Score += addscore;
-				break;
-			case JudgeType::Ok:
-				++Ok;
-				++Combo;
-				++HitNote;
-				Score += addscore * 0.5;
-				break;
-			case JudgeType::Bad:
-				++Bad;
-				Combo = 0;
-				++HitNote;
-				break;
-			case JudgeType::Roll:
-				++Roll;
-				Score += 100;
-				break;
-			}
-
-			if (Combo > MaxCombo) { ++MaxCombo; }
-		}
 	};
 
 	struct HitNoteData {
@@ -1860,12 +2282,12 @@ RollType = '\0'
 
 		void Init() {
 			RawNoteDatas.clear();
+			Judge.clear();
 			SongData.Delete();
 			NowTime.Reset();
 			Movie.Init();
 			ScrollType = ScrollType::Normal;
 			OriginalData = ChartData();
-			Judge = JudgeData();
 			Roll = RollData();
 			AutoPlayLR = false;
 			NowGoGo = false;
@@ -1876,10 +2298,10 @@ RollType = '\0'
 		}
 
 		std::vector<NoteData> RawNoteDatas = std::vector<NoteData>();
+		std::vector<JudgeData> Judge = std::vector<JudgeData>();
 
 		ChartData OriginalData;
 
-		JudgeData Judge;
 		uint64_t AddScore = 0;
 
 		SoundData SongData;
@@ -1923,7 +2345,7 @@ RollType = '\0'
 
 	PlayData Chart;
 
-	Timer MiniTaikoFlash[4];
+	Timer MiniTaikoFlash[16];
 	double MiniTaikoFlashTime = 160;
 
 	double ChartNowTime(uint64_t elapsed) const {
@@ -1951,8 +2373,22 @@ RollType = '\0'
 				Index = 0;
 			}
 		}
-	} HitNote;
+	};
 
+	std::vector<_HitNote> HitNote = std::vector<_HitNote>();
+
+	void PlayingInit() {
+		for (auto&& player : Shared.Players) {
+			player.Standby = 0;
+		}
+		for (auto&& taiko : MiniTaikoFlash) {
+			taiko.Reset();
+		}
+		Chart.Judge.resize(Shared.PlayerCount <= 1 ? 1 : Shared.PlayerCount);
+		HitNote.resize(Shared.PlayerCount <= 1 ? 1 : Shared.PlayerCount);
+		Chart.Judge[0].ScoreRateGood = ScoreRateCalc(Config.JudgeGood, 25.0);
+		Chart.Judge[0].ScoreRateOk = ScoreRateCalc(Config.JudgeOk, 75.0);
+	}
 	void PlayingEnd() {
 		Chart.SongData.Delete();
 	}
@@ -1981,467 +2417,490 @@ RollType = '\0'
 			SetDrawBlendMode(0, 0);
 		}
 
-		if ((Chart.Movie.Handle != -1)) {
-			SetDrawBlendMode(DX_BLENDMODE_ALPHA, 225);
-		}
-		Skin.Base->Playing.Image.LaneFrame.Draw({});
-		Skin.Base->Playing.Image.Lane.Draw({});
-		SetDrawBlendMode(0, 0);
+		int idx = 0;
 
-		Skin.Base->Playing.Image.Note.Draw({});
+		do {
 
-		if (Chart.NowGoGo) {
-			Skin.Base->Playing.Image.GoGoFire.Draw({}, (size_t)(NowTime / Skin.Base->Playing.Config.GoGoFireFrameTime) % Skin.Base->Playing.Image.GoGoFire.Div.X);
-		}
+			Pos2D<float> DelayPos = {
+				0.0f,
+				idx * (Skin.Base->Playing.Image.Lane.Size.Height + 40.0f)
+			};
 
-		{
+			if ((Chart.Movie.Handle != -1)) {
+				SetDrawBlendMode(DX_BLENDMODE_ALPHA, 225);
+			}
+			Skin.Base->Playing.Image.LaneFrame.Draw(DelayPos);
+			Skin.Base->Playing.Image.Lane.Draw(DelayPos);
+			SetDrawBlendMode(0, 0);
 
-			size_t i = HitNote.Index;
-			const double JudgeUnderExplosionTime = Skin.Base->Playing.Config.JudgeUpperExplosionFrameTime * Skin.Base->Playing.Image.JudgeUnderExplosion.Div.X;
+			Skin.Base->Playing.Image.Note.Draw(DelayPos);
 
-			for (size_t c = 0; c < HitNote.Size(); ++c) {
-				auto&& data = HitNote.Datas[i];
-				if (!data.MoveTimer.IsRunning()) {
-					data.MoveTimer.Start();
-				}
-				data.MoveElapsedTime = data.MoveTimer.GetElapsed().MilliSecond();
-				if (data.JudgeUnderExplosion.IsActive && data.MoveElapsedTime < JudgeUnderExplosionTime) {
-					size_t drawindex = data.MoveElapsedTime / Skin.Base->Playing.Config.JudgeUpperExplosionFrameTime;
-					drawindex += (2 * Skin.Base->Playing.Image.JudgeUnderExplosion.Div.X) * data.JudgeUnderExplosion.Big;
-					if (data.JudgeUnderExplosion.Type == JudgeType::Ok) {
-						drawindex += Skin.Base->Playing.Image.JudgeUnderExplosion.Div.X;
+			if (Chart.NowGoGo) {
+				Skin.Base->Playing.Image.GoGoFire.Draw(DelayPos, (size_t)(NowTime / Skin.Base->Playing.Config.GoGoFireFrameTime) % Skin.Base->Playing.Image.GoGoFire.Div.X);
+			}
+
+			{
+
+				size_t i = HitNote[idx].Index;
+				const double JudgeUnderExplosionTime = Skin.Base->Playing.Config.JudgeUpperExplosionFrameTime * Skin.Base->Playing.Image.JudgeUnderExplosion.Div.X;
+
+				for (size_t c = 0; c < HitNote[idx].Size(); ++c) {
+					auto&& data = HitNote[idx].Datas[i];
+					if (!data.MoveTimer.IsRunning()) {
+						data.MoveTimer.Start();
 					}
-					Skin.Base->Playing.Image.JudgeUnderExplosion.Draw({}, drawindex);
-				}
-				else {
-					data.JudgeUnderExplosion.IsActive = false;
-				}
-
-				++i;
-				if (!(i < HitNote.Size())) {
-					i = 0;
-				}
-			}
-		}
-
-		static auto NoteAlpha = [&](double _one, AlphaType Type) {
-			_one = std::clamp(_one, 0.0, 1.0);
-			int alpha = 255;
-			switch (Type) {
-			case AlphaType::Hidden:
-				alpha = 255 * _one;
-				break;
-			case AlphaType::Sudden:
-				alpha = alpha * (1 - _one);
-				break;
-			}
-			SetDrawBlendMode(DX_BLENDMODE_ALPHA, alpha);
-			};
-
-		const Pos2D<double>& NoteOrigin = {
-	Skin.Base->Playing.Image.Note.Pos.X,
-	Skin.Base->Playing.Image.Note.Pos.Y
-		};
-
-		static auto GetNotePos = [&](NoteData& data)->Pos2D<double> {
-			bool BMScroll = ScrollType::BMSCROLL == Chart.ScrollType;
-			Pos2D<double> _ret;
-			if (ScrollType::Normal == Chart.ScrollType) {
-				double _temp = ((data.AbsTime - NowTime) / (240 / data.BPM));
-				_ret = { _temp,_temp };
-			}
-			else {
-				double _bpm = data.BMFlag || data.BpmSpawnFlag ? data.BPM : Chart.NowBPM;
-				double optime = (((data.BMFlag || data.BpmSpawnFlag ? data.AbsTime : data.BMTime) - NowTime) / (240 / _bpm));
-				_ret = { optime,optime };
-			}
-
-			_ret = {
-				_ret.X *= Skin.Base->Playing.Config.LaneExtendRate * (BMScroll ? 1 : data.Scroll),
-				_ret.Y *= Skin.Base->Playing.Config.LaneExtendRate * (BMScroll ? 0 : data.Scrolli)
-			};
-
-			Pos2D<float> SkinPos = {
-				Skin.Base->Playing.Image.Lane.Size.Width,
-				Skin.Base->Playing.Image.Lane.Size.Height
-			};
-
-			_ret = {
-				_ret.X + NoteOrigin.X,
-				_ret.Y + NoteOrigin.Y
-			};
-
-			return _ret;
-
-			};
-
-		auto&& ProcNotes = Chart.RawNoteDatas;
-		double _addms = ProcNotes[0].AbsTime;
-		for (int i = 0, size = ProcNotes.size(); i < size; ++i) {
-			NoteData& data = ProcNotes[i];
-
-			if (data.AbsTime < NowTime) {
-				data.BMFlag = true;
-				Chart.NowBPM = data.BPM;
-			}
-
-			if (data.BpmChangeFlag) {
-				if (data.BPM * data.Measure > 0) {
-					for (int j = i + 1; j < size; ++j) {
-						auto& jdata = ProcNotes[j];
-						if (jdata.BpmChangeFlag && jdata.BPM * jdata.Measure < 0) {
-							data.BpmChangeFlag = false;
-							for (int k = j; k < size; ++k) {
-								auto& kdata = ProcNotes[k];
-								if (kdata.AbsTime < jdata.AbsTime) {
-									kdata.BpmSpawnFlag = true;
-								}
-								else {
-									kdata.BpmSpawnFlag = false;
-								}
-							}
-							break;
+					data.MoveElapsedTime = data.MoveTimer.GetElapsed().MilliSecond();
+					if (data.JudgeUnderExplosion.IsActive && data.MoveElapsedTime < JudgeUnderExplosionTime) {
+						size_t drawindex = data.MoveElapsedTime / Skin.Base->Playing.Config.JudgeUpperExplosionFrameTime;
+						drawindex += (2 * Skin.Base->Playing.Image.JudgeUnderExplosion.Div.X) * data.JudgeUnderExplosion.Big;
+						if (data.JudgeUnderExplosion.Type == JudgeType::Ok) {
+							drawindex += Skin.Base->Playing.Image.JudgeUnderExplosion.Div.X;
 						}
-						if (jdata.BpmChangeFlag && jdata.BPM * jdata.Measure > 0) {
-							data.BpmChangeFlag = false;
-							for (int k = j; k < size; ++k) {
-								ProcNotes[k].BpmSpawnFlag = false;
-							}
-							break;
-						}
+						Skin.Base->Playing.Image.JudgeUnderExplosion.Draw(DelayPos, drawindex);
+					}
+					else {
+						data.JudgeUnderExplosion.IsActive = false;
+					}
+
+					++i;
+					if (!(i < HitNote[idx].Size())) {
+						i = 0;
 					}
 				}
-				else {
-					data.BpmChangeFlag = false;
-				}
 			}
 
-			if (data.BMFlag || i == 0) { _addms = data.AbsTime; data.BMTime = data.AbsTime; continue; }
-			double _bpm = (Chart.NowBPM / ProcNotes[i - 1].BPM);
-			_addms += ProcNotes[i - 1].RelaTime / _bpm;
-			data.BMTime = _addms;
-		}
+			static auto NoteAlpha = [&](double _one, AlphaType Type) {
+				_one = std::clamp(_one, 0.0, 1.0);
+				int alpha = 255;
+				switch (Type) {
+				case AlphaType::Hidden:
+					alpha = 255 * _one;
+					break;
+				case AlphaType::Sudden:
+					alpha = alpha * (1 - _one);
+					break;
+				}
+				SetDrawBlendMode(DX_BLENDMODE_ALPHA, alpha);
+				};
+
+			const Pos2D<double>& NoteOrigin = {
+		Skin.Base->Playing.Image.Note.Pos.X,
+		Skin.Base->Playing.Image.Note.Pos.Y
+			};
+
+			static auto GetNotePos = [&](NoteData& data)->Pos2D<double> {
+				bool BMScroll = ScrollType::BMSCROLL == Chart.ScrollType;
+				Pos2D<double> _ret;
+				if (ScrollType::Normal == Chart.ScrollType) {
+					double _temp = ((data.AbsTime - NowTime) / (240 / data.BPM));
+					_ret = { _temp,_temp };
+				}
+				else {
+					double _bpm = data.BMFlag || data.BpmSpawnFlag ? data.BPM : Chart.NowBPM;
+					double optime = (((data.BMFlag || data.BpmSpawnFlag ? data.AbsTime : data.BMTime) - NowTime) / (240 / _bpm));
+					_ret = { optime,optime };
+				}
+
+				_ret = {
+					_ret.X *= Skin.Base->Playing.Config.LaneExtendRate * (BMScroll ? 1 : data.Scroll),
+					_ret.Y *= Skin.Base->Playing.Config.LaneExtendRate * (BMScroll ? 0 : data.Scrolli)
+				};
+
+				Pos2D<float> SkinPos = {
+					Skin.Base->Playing.Image.Lane.Size.Width,
+					Skin.Base->Playing.Image.Lane.Size.Height
+				};
+
+				_ret = {
+					_ret.X + NoteOrigin.X,
+					_ret.Y + NoteOrigin.Y + DelayPos.Y
+				};
+
+				return _ret;
+
+				};
+
+			auto&& ProcNotes = Chart.RawNoteDatas;
+			double _addms = ProcNotes[0].AbsTime;
+			for (int i = 0, size = ProcNotes.size(); i < size; ++i) {
+				NoteData& data = ProcNotes[i];
+
+				if (data.AbsTime < NowTime) {
+					data.BMFlag = true;
+					Chart.NowBPM = data.BPM;
+				}
+
+				if (data.BpmChangeFlag) {
+					if (data.BPM * data.Measure > 0) {
+						for (int j = i + 1; j < size; ++j) {
+							auto& jdata = ProcNotes[j];
+							if (jdata.BpmChangeFlag && jdata.BPM * jdata.Measure < 0) {
+								data.BpmChangeFlag = false;
+								for (int k = j; k < size; ++k) {
+									auto& kdata = ProcNotes[k];
+									if (kdata.AbsTime < jdata.AbsTime) {
+										kdata.BpmSpawnFlag = true;
+									}
+									else {
+										kdata.BpmSpawnFlag = false;
+									}
+								}
+								break;
+							}
+							if (jdata.BpmChangeFlag && jdata.BPM * jdata.Measure > 0) {
+								data.BpmChangeFlag = false;
+								for (int k = j; k < size; ++k) {
+									ProcNotes[k].BpmSpawnFlag = false;
+								}
+								break;
+							}
+						}
+					}
+					else {
+						data.BpmChangeFlag = false;
+					}
+				}
+
+				if (data.BMFlag || i == 0) { _addms = data.AbsTime; data.BMTime = data.AbsTime; continue; }
+				double _bpm = (Chart.NowBPM / ProcNotes[i - 1].BPM);
+				_addms += ProcNotes[i - 1].RelaTime / _bpm;
+				data.BMTime = _addms;
+			}
 
 #define InRange(x, y) (x > Skin.SimulationRect.Left && x < Skin.SimulationRect.Right && y > Skin.SimulationRect.Top && y < Skin.SimulationRect.Bottom)
 
-		std::complex<double> n1{};
-		std::complex<double> n2{};
-		std::complex<double> n3{};
-		std::complex<double> n4{};
-		std::complex<double> facing{};
-		Pos2D<double> NotePos{};
+			std::complex<double> n1{};
+			std::complex<double> n2{};
+			std::complex<double> n3{};
+			std::complex<double> n4{};
+			std::complex<double> facing{};
+			Pos2D<double> NotePos{};
 
-		const std::complex<double> n0 = { Skin.Base->Playing.Image.Note.Size.Width / 2, Skin.Base->Playing.Image.Note.Size.Height / 2 };
-		const double n0r = std::abs(n0);
-		const double narr[4] = {
-			std::arg(std::complex<double>{ n0.real() * -1, n0.imag() * -1 }),
-			std::arg(std::complex<double>{ n0.real() * 1, n0.imag() * -1 }),
-			std::arg(std::complex<double>{ n0.real() * 1, n0.imag() * 1 }),
-			std::arg(std::complex<double>{ n0.real() * -1, n0.imag() * 1 })
-		};
+			const std::complex<double> n0 = { Skin.Base->Playing.Image.Note.Size.Width / 2, Skin.Base->Playing.Image.Note.Size.Height / 2 };
+			const double n0r = std::abs(n0);
+			const double narr[4] = {
+				std::arg(std::complex<double>{ n0.real() * -1, n0.imag() * -1 }),
+				std::arg(std::complex<double>{ n0.real() * 1, n0.imag() * -1 }),
+				std::arg(std::complex<double>{ n0.real() * 1, n0.imag() * 1 }),
+				std::arg(std::complex<double>{ n0.real() * -1, n0.imag() * 1 })
+			};
 
-		for (auto&& data : Chart.RawNoteDatas | std::ranges::views::reverse) {
+			for (auto&& data : Chart.RawNoteDatas | std::ranges::views::reverse) {
 
-			double NoteTheta = atan2(data.Scrolli, data.Scroll);
+				double NoteTheta = atan2(data.Scrolli, data.Scroll);
 
-			NotePos = GetNotePos(data);
+				NotePos = GetNotePos(data);
 
-			if (data.BarlineDisplay) {
-				SetDrawBlendMode(0, 0);
-				if (InRange(NotePos.X, NotePos.Y)) {
-					DrawLineAA(
-						NotePos.X,
-						NotePos.Y - 65,
-						NotePos.X,
-						NotePos.Y + 65,
-						GetColor(255, 255, 255)
-					);
-				}
-			}
-
-			if (data.NoteType == '0') {
-				continue;
-			}
-
-			if (data.NoteType >= '1' &&
-				data.NoteType <= '4') {
-				if (InRange(NotePos.X, NotePos.Y)) {
-					int Alpha = 255;
-					double hidden = Config.HiddenLevel;
-					double sudden = Config.SuddenLevel;
-					bool hiddenflag = hidden > 0;
-					bool suddenflag = sudden > 0;
-					if (hiddenflag || suddenflag) {
-						double _abs = std::abs(std::complex<double>{ NotePos.X - NoteOrigin.X, NotePos.Y - NoteOrigin.Y })* (data.AbsTime < NowTime ? -1 : 1);
-						double leveling = (Skin.Base->Playing.Image.Lane.Size.Width / DX_PI);
-						double feedrange = (Skin.Base->Playing.Image.Lane.Size.Width / DX_TWO_PI);
-						if (hiddenflag) {
-							NoteAlpha((_abs - (leveling * hidden)) / feedrange, AlphaType::Hidden);
-						}
-						if (suddenflag) {
-							NoteAlpha(((_abs - (Skin.Base->Playing.Image.Lane.Size.Width)) + (leveling * sudden)) / feedrange, AlphaType::Sudden);
-						}
+				if (data.BarlineDisplay) {
+					SetDrawBlendMode(0, 0);
+					if (InRange(NotePos.X, NotePos.Y)) {
+						DrawLineAA(
+							NotePos.X,
+							NotePos.Y - 65,
+							NotePos.X,
+							NotePos.Y + 65,
+							GetColor(255, 255, 255)
+						);
 					}
-					Skin.Base->Playing.Image.Note.Draw(
-						{
-							(float)(NotePos.X - NoteOrigin.X),
-							(float)(NotePos.Y - NoteOrigin.Y)
-						},
-						data.NoteType - 48
-					);
 				}
-				continue;
+
+				if (data.NoteType == '0') {
+					continue;
+				}
+
+				if (data.NoteType >= '1' &&
+					data.NoteType <= '4') {
+					if (InRange(NotePos.X, NotePos.Y)) {
+						int Alpha = 255;
+						double hidden = Config.HiddenLevel;
+						double sudden = Config.SuddenLevel;
+						bool hiddenflag = hidden > 0;
+						bool suddenflag = sudden > 0;
+						if (hiddenflag || suddenflag) {
+							double _abs = std::abs(std::complex<double>{ NotePos.X - NoteOrigin.X, NotePos.Y - NoteOrigin.Y })* (data.AbsTime < NowTime ? -1 : 1);
+							double leveling = (Skin.Base->Playing.Image.Lane.Size.Width / DX_PI);
+							double feedrange = (Skin.Base->Playing.Image.Lane.Size.Width / DX_TWO_PI);
+							if (hiddenflag) {
+								NoteAlpha((_abs - (leveling * hidden)) / feedrange, AlphaType::Hidden);
+							}
+							if (suddenflag) {
+								NoteAlpha(((_abs - (Skin.Base->Playing.Image.Lane.Size.Width)) + (leveling * sudden)) / feedrange, AlphaType::Sudden);
+							}
+						}
+						Skin.Base->Playing.Image.Note.Draw(
+							{
+								(float)(NotePos.X - NoteOrigin.X),
+								(float)(NotePos.Y - NoteOrigin.Y)
+							},
+							data.NoteType - 48
+						);
+					}
+					continue;
+				}
+				SetDrawBlendMode(0, 0);
+
+				if (data.NoteType >= '5' &&
+					data.NoteType <= '6') {
+					const Pos2D<double>& cnote = NotePos;
+					const Pos2D<double>& dnote = GetNotePos(Chart.RawNoteDatas[data.RollEndIndex]);
+
+					bool DispFlag =
+						InRange(cnote.X, cnote.Y) ||
+						(data.AbsTime < NowTime && data.RollEndTime > NowTime) ||
+						InRange(dnote.X, dnote.Y);
+
+					if (DispFlag) {
+
+						bool BigRollFlag = data.NoteType == '6';
+
+						const std::complex<double>& cdnote = { dnote.X - cnote.X, dnote.Y - cnote.Y };
+
+						double RollTheta = std::arg(cdnote);
+						facing = std::polar(n0.real() - 3, RollTheta);
+
+						n1 = std::polar(n0r, narr[0] + RollTheta);
+						n2 = std::polar(n0r, narr[1] + RollTheta);
+						n3 = std::polar(n0r, narr[2] + RollTheta);
+						n4 = std::polar(n0r, narr[3] + RollTheta);
+
+						DrawModiGraphF(
+							cnote.X + facing.real() + n1.real(),
+							cnote.Y + facing.imag() + n1.imag(),
+							dnote.X - facing.real() + n2.real(),
+							dnote.Y - facing.imag() + n2.imag(),
+							dnote.X - facing.real() + n3.real(),
+							dnote.Y - facing.imag() + n3.imag(),
+							cnote.X + facing.real() + n4.real(),
+							cnote.Y + facing.imag() + n4.imag(),
+							Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 9 : 6],
+							TRUE
+						);
+						DrawModiGraphF(
+							dnote.X + n1.real(),
+							dnote.Y + n1.imag(),
+							dnote.X + n2.real(),
+							dnote.Y + n2.imag(),
+							dnote.X + n3.real(),
+							dnote.Y + n3.imag(),
+							dnote.X + n4.real(),
+							dnote.Y + n4.imag(),
+							Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 10 : 7],
+							TRUE
+						);
+						DrawModiGraphF(
+							cnote.X + n1.real(),
+							cnote.Y + n1.imag(),
+							cnote.X + n2.real(),
+							cnote.Y + n2.imag(),
+							cnote.X + n3.real(),
+							cnote.Y + n3.imag(),
+							cnote.X + n4.real(),
+							cnote.Y + n4.imag(),
+							Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 8 : 5],
+							TRUE
+						);
+
+					}
+				}
+
+				if (data.NoteType == '7' ||
+					data.NoteType == '9') {
+
+					if (data.BalloonFlag == 1) {
+						NotePos = NoteOrigin;
+					}
+					if (data.BalloonFlag == 2) {
+						NotePos = GetNotePos(Chart.RawNoteDatas[data.RollEndIndex]);
+					}
+
+					if (InRange(NotePos.X, NotePos.Y)) {
+
+						bool KusudamaFlag = data.NoteType == '9';
+
+						facing = std::polar(n0.real() * 2, NoteTheta);
+
+						n1 = std::polar(n0r, narr[0] + NoteTheta);
+						n2 = std::polar(n0r, narr[1] + NoteTheta);
+						n3 = std::polar(n0r, narr[2] + NoteTheta);
+						n4 = std::polar(n0r, narr[3] + NoteTheta);
+
+						DrawModiGraphF(
+							NotePos.X + n1.real(),
+							NotePos.Y + n1.imag(),
+							NotePos.X + n2.real(),
+							NotePos.Y + n2.imag(),
+							NotePos.X + n3.real(),
+							NotePos.Y + n3.imag(),
+							NotePos.X + n4.real(),
+							NotePos.Y + n4.imag(),
+							Skin.Base->Playing.Image.Note.Handles[KusudamaFlag ? 13 : 11],
+							TRUE
+						);
+						DrawModiGraphF(
+							NotePos.X + facing.real() + n1.real(),
+							NotePos.Y + facing.imag() + n1.imag(),
+							NotePos.X + facing.real() + n2.real(),
+							NotePos.Y + facing.imag() + n2.imag(),
+							NotePos.X + facing.real() + n3.real(),
+							NotePos.Y + facing.imag() + n3.imag(),
+							NotePos.X + facing.real() + n4.real(),
+							NotePos.Y + facing.imag() + n4.imag(),
+							Skin.Base->Playing.Image.Note.Handles[KusudamaFlag ? 14 : 12],
+							TRUE
+						);
+					}
+				}
+#undef InRange
+			}
+
+			Skin.Base->Playing.Image.Base.Draw(DelayPos);
+			Skin.Base->Playing.Image.NamePlate.Draw(DelayPos);
+			Skin.Base->Playing.Image.MiniTaiko.Draw(DelayPos);
+
+			if (!IsMulti) {
+				Skin.Base->Playing.Font.PlayerName.Draw(
+					Skin.Base->Playing.Config.PlayerNamePos,
+					GetColor(255, 255, 255),
+					GetColor(0, 0, 0),
+					Config.PlayerName
+				);
+			}
+			else {
+				Skin.Base->Playing.Font.PlayerName.Draw({
+					Skin.Base->Playing.Config.PlayerNamePos.X,
+					Skin.Base->Playing.Config.PlayerNamePos.Y + DelayPos.Y },
+					GetColor(255, 255, 255),
+					GetColor(0, 0, 0),
+					Shared.Players[idx].Name
+				);
+			}
+
+			{
+
+				size_t i = HitNote[idx].Index;
+
+				for (size_t c = 0; c < HitNote[idx].Size(); ++c) {
+					auto& data = HitNote[idx].Datas[i];
+					if (!data.MoveTimer.IsRunning()) {
+						data.MoveTimer.Start();
+					}
+
+					if (data.FlyingNote.IsActive && Config.HitNoteDisp && !IsMulti && data.MoveElapsedTime < data.FlyingNote.MoveTime()) {
+
+						float _one = (data.MoveElapsedTime / data.FlyingNote.MoveTime());
+
+						std::complex<float> _pos1 = { 840, -90 };
+						std::complex<float> _pos2 = std::polar(280.0f, (DX_PI_F / 2) + std::arg(_pos1));
+						std::complex<float> _r = { (_pos1.real() / 2) + _pos2.real(), (_pos1.imag() / 2) + _pos2.imag() };
+						float mem0arg = std::arg(_r);
+						_r += { -840, 90 };
+						float mem1arg = std::arg(_r);
+						_r = { (_pos1.real() / 2) + _pos2.real(), (_pos1.imag() / 2) + _pos2.imag() };
+						float allarg = mem1arg - mem0arg;
+						std::complex<float> _c1 = std::polar(std::abs(_r), allarg * _one + mem0arg);
+
+						Pos2D<float> Pos = {
+								_r.real() - _c1.real(),
+								_r.imag() - _c1.imag()
+						};
+
+						Skin.Base->Playing.Image.Note.Draw(Pos, data.FlyingNote.Type - 48);
+					}
+					else {
+						data.FlyingNote.IsActive = false;
+					}
+
+					if (data.JudgeString.IsActive && data.MoveElapsedTime < data.JudgeString.MoveTime()) {
+						double alpha = 255 * (1 - GetEasingRate(data.MoveElapsedTime / data.JudgeString.MoveTime(), ease::Base::In, ease::Line::Cubic));
+						SetDrawBlendMode(DX_BLENDMODE_ALPHA, alpha);
+						Skin.Base->Playing.Image.JudgeString.Draw(DelayPos, (size_t)data.JudgeString.Type);
+						SetDrawBlendMode(0, 0);
+					}
+					else {
+						data.JudgeString.IsActive = false;
+					}
+
+					if (!data.FlyingNote.IsActive && !data.JudgeUnderExplosion.IsActive && !data.JudgeString.IsActive) {
+						data = HitNoteData();
+					}
+
+					++i;
+					if (!(i < HitNote[idx].Size())) {
+						i = 0;
+					}
+				}
+			}
+
+			static auto TaikoAlpha = [&](size_t index) {
+				double alpha = 255 * (1 - GetEasingRate(MiniTaikoFlash[index].GetElapsed().MilliSecond() / MiniTaikoFlashTime, ease::Base::In, ease::Line::Cubic));
+				if (alpha < 0) { MiniTaikoFlash[index].Reset(); }
+				SetDrawBlendMode(DX_BLENDMODE_ALPHA, alpha);
+				};
+
+			if (MiniTaikoFlash[0 + (4 * idx)].IsRunning()) {
+				TaikoAlpha(0+ (4 * idx));
+				Skin.Base->Playing.Image.MiniTaiko_Don.Draw({ Skin.Base->Playing.Image.MiniTaiko_Don.Size.Width * -0.5f, DelayPos.Y }, 0);
+			}
+			if (MiniTaikoFlash[1 + (4 * idx)].IsRunning()) {
+				TaikoAlpha(1 + (4 * idx));
+				Skin.Base->Playing.Image.MiniTaiko_Ka.Draw({ Skin.Base->Playing.Image.MiniTaiko_Ka.Size.Width * -0.5f, DelayPos.Y }, 0);
+			}
+			if (MiniTaikoFlash[2 + (4 * idx)].IsRunning()) {
+				TaikoAlpha(2 + (4 * idx));
+				Skin.Base->Playing.Image.MiniTaiko_Don.Draw({ Skin.Base->Playing.Image.MiniTaiko_Don.Size.Width * 0.5f, DelayPos.Y }, 1);
+			}
+			if (MiniTaikoFlash[3 + (4 * idx)].IsRunning()) {
+				TaikoAlpha(3 + (4 * idx));
+				Skin.Base->Playing.Image.MiniTaiko_Ka.Draw({ Skin.Base->Playing.Image.MiniTaiko_Ka.Size.Width * 0.5f, DelayPos.Y }, 1);
 			}
 			SetDrawBlendMode(0, 0);
 
-			if (data.NoteType >= '5' &&
-				data.NoteType <= '6') {
-				const Pos2D<double>& cnote = NotePos;
-				const Pos2D<double>& dnote = GetNotePos(Chart.RawNoteDatas[data.RollEndIndex]);
+			static auto ComboDraw = [&](uint64_t num) {
+				int digit = std::digit(num);
+				float offset = Skin.Base->Playing.Image.ComboNumber.Size.Width * (digit - 1) / 2;
+				int i = 0;
+				do {
+					Skin.Base->Playing.Image.ComboNumber.Draw({ offset, DelayPos.Y }, num % 10);
+					num /= 10;
+					++i;
+					offset -= Skin.Base->Playing.Image.ComboNumber.Size.Width;
+				} while (i < digit);
+				};
 
-				bool DispFlag =
-					InRange(cnote.X, cnote.Y) ||
-					(data.AbsTime < NowTime && data.RollEndTime > NowTime) ||
-					InRange(dnote.X, dnote.Y);
+			static auto ScoreDraw = [&](uint64_t num) {
+				int digit = std::digit(num);
+				float offset = Skin.Base->Playing.Image.ScoreNumber.Size.Width - (digit - 1) + digit;
+				int i = 0;
+				do {
+					Skin.Base->Playing.Image.ScoreNumber.Draw({ offset, DelayPos.Y }, num % 10);
+					num /= 10;
+					++i;
+					offset -= Skin.Base->Playing.Image.ScoreNumber.Size.Width;
+				} while (i < digit);
+				};
+			static auto RollDraw = [&](uint64_t num) {
+				int digit = std::digit(num);
+				float offset = Skin.Base->Playing.Image.RollNumber.Size.Width - (digit - 1) + digit;
+				int i = 0;
+				do {
+					Skin.Base->Playing.Image.RollNumber.Draw({ offset, DelayPos.Y }, num % 10);
+					num /= 10;
+					++i;
+					offset -= Skin.Base->Playing.Image.RollNumber.Size.Width;
+				} while (i < digit);
+				};
 
-				if (DispFlag) {
-
-					bool BigRollFlag = data.NoteType == '6';
-
-					const std::complex<double>& cdnote = { dnote.X - cnote.X, dnote.Y - cnote.Y };
-
-					double RollTheta = std::arg(cdnote);
-					facing = std::polar(n0.real() - 3, RollTheta);
-
-					n1 = std::polar(n0r, narr[0] + RollTheta);
-					n2 = std::polar(n0r, narr[1] + RollTheta);
-					n3 = std::polar(n0r, narr[2] + RollTheta);
-					n4 = std::polar(n0r, narr[3] + RollTheta);
-
-					DrawModiGraphF(
-						cnote.X + facing.real() + n1.real(),
-						cnote.Y + facing.imag() + n1.imag(),
-						dnote.X - facing.real() + n2.real(),
-						dnote.Y - facing.imag() + n2.imag(),
-						dnote.X - facing.real() + n3.real(),
-						dnote.Y - facing.imag() + n3.imag(),
-						cnote.X + facing.real() + n4.real(),
-						cnote.Y + facing.imag() + n4.imag(),
-						Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 9 : 6],
-						TRUE
-					);
-					DrawModiGraphF(
-						dnote.X + n1.real(),
-						dnote.Y + n1.imag(),
-						dnote.X + n2.real(),
-						dnote.Y + n2.imag(),
-						dnote.X + n3.real(),
-						dnote.Y + n3.imag(),
-						dnote.X + n4.real(),
-						dnote.Y + n4.imag(),
-						Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 10 : 7],
-						TRUE
-					);
-					DrawModiGraphF(
-						cnote.X + n1.real(),
-						cnote.Y + n1.imag(),
-						cnote.X + n2.real(),
-						cnote.Y + n2.imag(),
-						cnote.X + n3.real(),
-						cnote.Y + n3.imag(),
-						cnote.X + n4.real(),
-						cnote.Y + n4.imag(),
-						Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 8 : 5],
-						TRUE
-					);
-
-				}
+			if (Chart.Roll.NowCount > 0) {
+				RollDraw(Chart.Roll.NowCount);
 			}
-
-			if (data.NoteType == '7' ||
-				data.NoteType == '9') {
-
-				if (data.BalloonFlag == 1) {
-					NotePos = NoteOrigin;
-				}
-				if (data.BalloonFlag == 2) {
-					NotePos = GetNotePos(Chart.RawNoteDatas[data.RollEndIndex]);
-				}
-
-				if (InRange(NotePos.X, NotePos.Y)) {
-
-					bool KusudamaFlag = data.NoteType == '9';
-
-					facing = std::polar(n0.real() * 2, NoteTheta);
-
-					n1 = std::polar(n0r, narr[0] + NoteTheta);
-					n2 = std::polar(n0r, narr[1] + NoteTheta);
-					n3 = std::polar(n0r, narr[2] + NoteTheta);
-					n4 = std::polar(n0r, narr[3] + NoteTheta);
-
-					DrawModiGraphF(
-						NotePos.X + n1.real(),
-						NotePos.Y + n1.imag(),
-						NotePos.X + n2.real(),
-						NotePos.Y + n2.imag(),
-						NotePos.X + n3.real(),
-						NotePos.Y + n3.imag(),
-						NotePos.X + n4.real(),
-						NotePos.Y + n4.imag(),
-						Skin.Base->Playing.Image.Note.Handles[KusudamaFlag ? 13 : 11],
-						TRUE
-					);
-					DrawModiGraphF(
-						NotePos.X + facing.real() + n1.real(),
-						NotePos.Y + facing.imag() + n1.imag(),
-						NotePos.X + facing.real() + n2.real(),
-						NotePos.Y + facing.imag() + n2.imag(),
-						NotePos.X + facing.real() + n3.real(),
-						NotePos.Y + facing.imag() + n3.imag(),
-						NotePos.X + facing.real() + n4.real(),
-						NotePos.Y + facing.imag() + n4.imag(),
-						Skin.Base->Playing.Image.Note.Handles[KusudamaFlag ? 14 : 12],
-						TRUE
-					);
-				}
+			if (Chart.Judge[idx].Combo >= 3) {
+				ComboDraw(Chart.Judge[idx].Combo);
 			}
-#undef InRange
-		}
+			ScoreDraw(Chart.Judge[idx].Score);
 
-		Skin.Base->Playing.Image.Base.Draw({});
-		Skin.Base->Playing.Image.NamePlate.Draw({});
-		Skin.Base->Playing.Image.MiniTaiko.Draw({});
+			idx++;
 
-		Skin.Base->Playing.Font.PlayerName.Draw(
-			Skin.Base->Playing.Config.PlayerNamePos,
-			GetColor(255, 255, 255),
-			GetColor(0, 0, 0),
-			Config.PlayerNameStrlen,
-			Config.PlayerName
-			);
-
-		{
-
-			size_t i = HitNote.Index;
-
-			for (size_t c = 0; c < HitNote.Size(); ++c) {
-				auto& data = HitNote.Datas[i];
-				if (!data.MoveTimer.IsRunning()) {
-					data.MoveTimer.Start();
-				}
-
-				if (data.FlyingNote.IsActive && Config.HitNoteDisp && data.MoveElapsedTime < data.FlyingNote.MoveTime()) {
-
-					float _one = (data.MoveElapsedTime / data.FlyingNote.MoveTime());
-
-					std::complex<float> _pos1 = { 840, -90 };
-					std::complex<float> _pos2 = std::polar(280.0f, (DX_PI_F / 2) + std::arg(_pos1));
-					std::complex<float> _r = { (_pos1.real() / 2) + _pos2.real(), (_pos1.imag() / 2) + _pos2.imag() };
-					float mem0arg = std::arg(_r);
-					_r += { -840, 90 };
-					float mem1arg = std::arg(_r);
-					_r = { (_pos1.real() / 2) + _pos2.real(), (_pos1.imag() / 2) + _pos2.imag() };
-					float allarg = mem1arg - mem0arg;
-					std::complex<float> _c1 = std::polar(std::abs(_r), allarg * _one + mem0arg);
-
-					Pos2D<float> Pos = {
-							_r.real() - _c1.real(),
-							_r.imag() - _c1.imag()
-					};
-
-					Skin.Base->Playing.Image.Note.Draw(Pos, data.FlyingNote.Type - 48);
-				}
-				else {
-					data.FlyingNote.IsActive = false;
-				}
-
-				if (data.JudgeString.IsActive && data.MoveElapsedTime < data.JudgeString.MoveTime()) {
-					double alpha = 255 * (1 - GetEasingRate(data.MoveElapsedTime / data.JudgeString.MoveTime(), ease::Base::In, ease::Line::Cubic));
-					SetDrawBlendMode(DX_BLENDMODE_ALPHA, alpha);
-					Skin.Base->Playing.Image.JudgeString.Draw({}, (size_t)data.JudgeString.Type);
-					SetDrawBlendMode(0, 0);
-				}
-				else {
-					data.JudgeString.IsActive = false;
-				}
-
-				if (!data.FlyingNote.IsActive && !data.JudgeUnderExplosion.IsActive && !data.JudgeString.IsActive) {
-					data = HitNoteData();
-				}
-
-				++i;
-				if (!(i < HitNote.Size())) {
-					i = 0;
-				}
-			}
-		}
-
-		static auto TaikoAlpha = [&](size_t index) {
-			double alpha = 255 * (1 - GetEasingRate(MiniTaikoFlash[index].GetElapsed().MilliSecond() / MiniTaikoFlashTime, ease::Base::In, ease::Line::Cubic));
-			if (alpha < 0) { MiniTaikoFlash[index].Reset(); }
-			SetDrawBlendMode(DX_BLENDMODE_ALPHA, alpha);
-			};
-
-		if (MiniTaikoFlash[0].IsRunning()) {
-			TaikoAlpha(0);
-			Skin.Base->Playing.Image.MiniTaiko_Don.Draw({ Skin.Base->Playing.Image.MiniTaiko_Don.Size.Width * -0.5f, 0 }, 0);
-		}
-		if (MiniTaikoFlash[1].IsRunning()) {
-			TaikoAlpha(1);
-			Skin.Base->Playing.Image.MiniTaiko_Ka.Draw({ Skin.Base->Playing.Image.MiniTaiko_Ka.Size.Width * -0.5f, 0 }, 0);
-		}
-		if (MiniTaikoFlash[2].IsRunning()) {
-			TaikoAlpha(2);
-			Skin.Base->Playing.Image.MiniTaiko_Don.Draw({ Skin.Base->Playing.Image.MiniTaiko_Don.Size.Width * 0.5f, 0 }, 1);
-		}
-		if (MiniTaikoFlash[3].IsRunning()) {
-			TaikoAlpha(3);
-			Skin.Base->Playing.Image.MiniTaiko_Ka.Draw({ Skin.Base->Playing.Image.MiniTaiko_Ka.Size.Width * 0.5f, 0 }, 1);
-		}
-		SetDrawBlendMode(0, 0);
-
-		static auto ComboDraw = [&](uint64_t num) {
-			int digit = std::digit(num);
-			float offset = Skin.Base->Playing.Image.ComboNumber.Size.Width * (digit - 1) / 2;
-			int i = 0;
-			do {
-				Skin.Base->Playing.Image.ComboNumber.Draw({ offset, 0 }, num % 10);
-				num /= 10;
-				++i;
-				offset -= Skin.Base->Playing.Image.ComboNumber.Size.Width;
-			} while (i < digit);
-			};
-
-		static auto ScoreDraw = [&](uint64_t num) {
-			int digit = std::digit(num);
-			float offset = Skin.Base->Playing.Image.ScoreNumber.Size.Width - (digit - 1) + digit;
-			int i = 0;
-			do {
-				Skin.Base->Playing.Image.ScoreNumber.Draw({ offset, 0 }, num % 10);
-				num /= 10;
-				++i;
-				offset -= Skin.Base->Playing.Image.ScoreNumber.Size.Width;
-			} while (i < digit);
-			};
-		static auto RollDraw = [&](uint64_t num) {
-			int digit = std::digit(num);
-			float offset = Skin.Base->Playing.Image.RollNumber.Size.Width - (digit - 1) + digit;
-			int i = 0;
-			do {
-				Skin.Base->Playing.Image.RollNumber.Draw({ offset, 0 }, num % 10);
-				num /= 10;
-				++i;
-				offset -= Skin.Base->Playing.Image.RollNumber.Size.Width;
-			} while (i < digit);
-			};
-
-		if (Chart.Roll.NowCount > 0) {
-			RollDraw(Chart.Roll.NowCount);
-		}
-		if (Chart.Judge.Combo >= 3) {
-			ComboDraw(Chart.Judge.Combo);
-		}
-		ScoreDraw(Chart.Judge.Score);
+		} while (idx < Shared.PlayerCount && IsMulti);
 
 		if (Chart.OriginalData.TitleDisplay) {
 			Skin.Base->Playing.Font.Title.Draw(
@@ -2466,6 +2925,16 @@ RollType = '\0'
 			DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nChartPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.c_str());
 		}
 	}
+	void HitAction(HitType type) {
+		if (Shared.PlayerCount >= 2) {
+			Shared.Players[Shared.MyIndex].HitKey = type;
+			Shared.Players[Shared.MyIndex].Judge = Chart.Judge[0];
+			Send();
+			Chart.Judge[0].NoteType = '\0';
+			Chart.Judge[0].HitJudge = JudgeType::None;
+			Shared.Players[Shared.MyIndex].HitKey = HitType::Null;
+		}
+	}
 	void PlayingProc() {
 
 		const double NowTime = ChartNowTime(1000);
@@ -2480,7 +2949,7 @@ RollType = '\0'
 
 		static auto JudgeNote = [&](double nowtime, char type) {
 
-			auto& Judge = Chart.Judge;
+			auto& Judge = Chart.Judge[0];
 			size_t rollcount = 0;
 			size_t ballooncount = 0;
 			NoteData* balloondata = nullptr;
@@ -2509,7 +2978,7 @@ RollType = '\0'
 					nowtime = data.BigNoteTime;
 				}
 
-				const double _HitError = data.AbsTime - nowtime;
+				const double _HitError = (data.AbsTime - nowtime) + Config.JudgeOffset;
 				const bool GoodHit =
 					_HitError > -Config.JudgeGood && _HitError < Config.JudgeGood;
 				const bool OkHit =
@@ -2537,16 +3006,16 @@ RollType = '\0'
 				}
 
 				if (GoodHit) {
-					HitNote.Add(HitNoteData(data.NoteType, JudgeType::Good));
-					Judge.Hit(JudgeType::Good, Chart.AddScore);
+					HitNote[0].Add(HitNoteData(data.NoteType, JudgeType::Good));
+					Judge.Hit(JudgeType::Good, Chart.AddScore, type);
 				}
 				else if (OkHit) {
-					HitNote.Add(HitNoteData(data.NoteType, JudgeType::Ok));
-					Judge.Hit(JudgeType::Ok, Chart.AddScore);
+					HitNote[0].Add(HitNoteData(data.NoteType, JudgeType::Ok));
+					Judge.Hit(JudgeType::Ok, Chart.AddScore, type);
 				}
 				else if (BadHit) {
-					HitNote.Add(HitNoteData('\0', JudgeType::Bad));
-					Judge.Hit(JudgeType::Bad, 0);
+					HitNote[0].Add(HitNoteData('\0', JudgeType::Bad));
+					Judge.Hit(JudgeType::Bad, 0, type);
 				}
 
 				data.HitFlag = true;
@@ -2556,8 +3025,8 @@ RollType = '\0'
 			}
 
 			if (rollcount > 0) {
-				HitNote.Add(HitNoteData(NextImage ? '6' : '5', JudgeType::Roll));
-				Judge.Hit(JudgeType::Roll, 100);
+				HitNote[0].Add(HitNoteData(NextImage ? '6' : '5', JudgeType::Roll));
+				Judge.Hit(JudgeType::Roll, 100, NextImage ? '6' : '5');
 				if (Chart.Roll.ViewEndTimer.IsRunning() && Chart.Roll.IsEnd) {
 					Chart.Roll.IsEnd = false;
 					Chart.Roll.NowCount = 0;
@@ -2570,16 +3039,17 @@ RollType = '\0'
 				--balloondata->BalloonCount;
 				Chart.Roll.NowCount = balloondata->BalloonCount;
 				Chart.Roll.ViewEndTimer.Reset();
-				Judge.Hit(JudgeType::Roll, 100);
+				Judge.Hit(JudgeType::Roll, 100, '\0');
 				if (balloondata->BalloonCount <= 0) {
 					Skin.Base->Playing.SE.Balloon.Play();
-					HitNote.Add(HitNoteData('3', JudgeType::Roll));
+					HitNote[0].Add(HitNoteData('3', JudgeType::Roll));
 					balloondata->NoteType = '0';
 					balloondata->HitFlag = true;
 					balloondata->BalloonFlag = 2;
+					Judge.NoteType = '3';
 				}
 			}
-		};
+			};
 
 		if (Chart.Roll.ViewEndTimer.GetElapsed().Second() > Chart.Roll.ViewEndTime) {
 			Chart.Roll.IsEnd = false;
@@ -2601,7 +3071,7 @@ RollType = '\0'
 			if (data.AbsTime - Config.JudgeBad > NowTime) { continue; }
 			if (data.HitFlag) { continue; }
 
-			const double _HitError = data.AbsTime - NowTime;
+			const double _HitError = (data.AbsTime - NowTime) + Config.JudgeOffset;
 			const bool BadHit = _HitError > -Config.JudgeBad && _HitError < Config.JudgeBad;
 
 			if (data.BigNoteTime != 0 && Config.JudgeGood < NowTime - data.BigNoteTime) {
@@ -2612,7 +3082,7 @@ RollType = '\0'
 				(data.NoteType >= '1' && data.NoteType <= '4') &&
 				data.BigNoteTime == 0 &&
 				_HitError < -Config.JudgeBad) {
-				Chart.Judge.Hit(JudgeType::Bad, 0);
+				Chart.Judge[0].Hit(JudgeType::Bad, 0, '\0');
 				data.HitFlag = true;
 			}
 
@@ -2657,30 +3127,36 @@ RollType = '\0'
 				}
 
 				if (HitFlag && !data.HitFlag && IsHitNote) {
-					HitNote.Add(HitNoteData(data.NoteType, JudgeType::Good));
-					Chart.Judge.Hit(JudgeType::Good, 0);
+					HitNote[0].Add(HitNoteData(data.NoteType, JudgeType::Good));
+					Chart.Judge[0].Hit(JudgeType::Good, 0, data.NoteType);
 					switch (data.NoteType) {
 					case '1':
 						Skin.Base->Playing.SE.Don.Play();
 						MiniTaikoFlash[0 + Chart.AutoPlayLR * 2].Start();
 						Chart.AutoPlayLR = !Chart.AutoPlayLR;
+						HitAction((HitType)(0 + Chart.AutoPlayLR * 2));
 						break;
 					case '2':
 						Skin.Base->Playing.SE.Ka.Play();
 						MiniTaikoFlash[1 + Chart.AutoPlayLR * 2].Start();
 						Chart.AutoPlayLR = !Chart.AutoPlayLR;
+						HitAction((HitType)(1 + Chart.AutoPlayLR * 2));
 						break;
 					case '3':
 						Skin.Base->Playing.SE.Don.Play();
 						Skin.Base->Playing.SE.Don.Play();
 						MiniTaikoFlash[0].Start();
 						MiniTaikoFlash[2].Start();
+						HitAction(HitType::DonLeft);
+						HitAction(HitType::DonRight);
 						break;
 					case '4':
 						Skin.Base->Playing.SE.Ka.Play();
 						Skin.Base->Playing.SE.Ka.Play();
 						MiniTaikoFlash[1].Start();
 						MiniTaikoFlash[3].Start();
+						HitAction(HitType::KaLeft);
+						HitAction(HitType::KaRight);
 						break;
 					}
 					data.NoteType = '\0';
@@ -2696,25 +3172,29 @@ RollType = '\0'
 					Chart.Roll.ViewEndTimer.Reset();
 				}
 				Chart.AutoPlayLR = !Chart.AutoPlayLR;
-				Chart.Judge.Roll++;
+				Chart.Judge[0].Roll++;
 				Chart.Roll.NowCount++;
-				HitNote.Add(HitNoteData(NextImage ? '6' : '5', JudgeType::Roll));
+				HitNote[0].Add(HitNoteData(NextImage ? '6' : '5', JudgeType::Roll));
 				Chart.WaitRollTime.Start();
+				HitAction((HitType)(0 + Chart.AutoPlayLR * 2));
+				Chart.Judge[0].NoteType = NextImage ? '6' : '5';
 			}
 			if (BalloonData != nullptr && !Chart.WaitRollTime.IsRunning()) {
 				Skin.Base->Playing.SE.Don.Play();
 				Chart.AutoPlayLR = !Chart.AutoPlayLR;
-				Chart.Judge.Roll++;
+				Chart.Judge[0].Roll++;
 				--BalloonData->BalloonCount;
 				Chart.Roll.NowCount = BalloonData->BalloonCount;
 				Chart.Roll.ViewEndTimer.Reset();
 				Chart.WaitRollTime.Start();
+				HitAction((HitType)(0 + Chart.AutoPlayLR * 2));
 				if (BalloonData->BalloonCount <= 0) {
 					Skin.Base->Playing.SE.Balloon.Play();
-					HitNote.Add(HitNoteData('3', JudgeType::Roll));
+					HitNote[0].Add(HitNoteData('3', JudgeType::Roll));
 					BalloonData->NoteType = '0';
 					BalloonData->HitFlag = true;
 					BalloonData->BalloonFlag = 2;
+					Chart.Judge[0].NoteType = '3';
 				}
 			}
 			if (Chart.WaitRollTime.GetElapsed().Second() > 1.0 / Config.RollSpeed) {
@@ -2726,32 +3206,67 @@ RollType = '\0'
 				Skin.Base->Playing.SE.Don.Play();
 				MiniTaikoFlash[0].Start();
 				JudgeNote(NowTime, '1');
+				HitAction(HitType::DonLeft);
 				});
 			Input.HitKeyesProcess(Config.KaInputLeft, KeyState::Down, [&] {
 				Skin.Base->Playing.SE.Ka.Play();
 				MiniTaikoFlash[1].Start();
 				JudgeNote(NowTime, '2');
+				HitAction(HitType::KaLeft);
 				});
 			Input.HitKeyesProcess(Config.DonInputRight, KeyState::Down, [&] {
 				Skin.Base->Playing.SE.Don.Play();
 				MiniTaikoFlash[2].Start();
 				JudgeNote(NowTime, '1');
+				HitAction(HitType::DonRight);
 				});
 			Input.HitKeyesProcess(Config.KaInputRight, KeyState::Down, [&] {
 				Skin.Base->Playing.SE.Ka.Play();
 				MiniTaikoFlash[3].Start();
 				JudgeNote(NowTime, '2');
+				HitAction(HitType::KaRight);
 				});
 		}
 
-		Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
-			NowScene = Scene::SongSelect;
-			});
-		Input.HitKeyProcess(VK_TAB, KeyState::Down, [&] {
-			NowScene = Scene::Loading;
-			});
+		if (IsMulti) {
+			if (Shared.PlayerCount >= 2) {
+				if (int i = Shared.GetIndex; Shared.Players[Shared.GetIndex].HitKey != HitType::Null) {
+					if (i <= Shared.MyIndex) {
+						i++;
+					}
+					if (Shared.Players[i].HitKey >= HitType::DonLeft && Shared.Players[i].HitKey <= HitType::KaRight) {
+						MiniTaikoFlash[(int)Shared.Players[i].HitKey + 4 * i].Start();
+						if (Shared.Players[i].Judge.HitJudge != JudgeType::None) {
+							HitNote[i].Add(HitNoteData(Shared.Players[i].Judge.NoteType, Shared.Players[i].Judge.HitJudge));
+						}
+					}
+					Chart.Judge[i] = Shared.Players[i].Judge;
+					Shared.Players[Shared.GetIndex].HitKey = HitType::Null;
+				}
+			}
+		}
+		else {
+
+			Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
+				NowScene = Scene::SongSelect;
+				});
+			Input.HitKeyProcess(VK_TAB, KeyState::Down, [&] {
+				NowScene = Scene::Loading;
+				});
+		}
 	}
 
+	int ResultIndex = 0;
+
+	void ResultEnd() {
+		if (IsMulti) {
+			Chart.Init();
+			Shared.FileData.clear();
+			Shared.WaveData.clear();
+			IsLoading = false;
+		}
+		ResultIndex = 0;
+	}
 	void ResultDraw() {
 
 		Skin.Base->Result.Image.BackGround.Draw({});
@@ -2810,26 +3325,28 @@ RollType = '\0'
 				offset -= Skin.Base->Result.Image.Number.Size.Width;
 			} while (i < digit);
 			};
+		
+		    JudgeData Judge = Chart.Judge[ResultIndex];
 
-			ScoreDraw(Chart.Judge.Score);
-			AccuracyDraw(Chart.Judge.Accuracy);
-			JudgeDraw(Skin.Base->Result.Config.GoodPos, Chart.Judge.Good);
-			JudgeDraw(Skin.Base->Result.Config.OkPos, Chart.Judge.Ok);
-			JudgeDraw(Skin.Base->Result.Config.BadPos, Chart.Judge.Bad);
-			JudgeDraw(Skin.Base->Result.Config.RollPos, Chart.Judge.Roll);
-			JudgeDraw(Skin.Base->Result.Config.MaxComboPos, Chart.Judge.MaxCombo);
+			ScoreDraw(Judge.Score);
+			AccuracyDraw(Judge.Accuracy);
+			JudgeDraw(Skin.Base->Result.Config.GoodPos, Judge.Good);
+			JudgeDraw(Skin.Base->Result.Config.OkPos, Judge.Ok);
+			JudgeDraw(Skin.Base->Result.Config.BadPos, Judge.Bad);
+			JudgeDraw(Skin.Base->Result.Config.RollPos, Judge.Roll);
+			JudgeDraw(Skin.Base->Result.Config.MaxComboPos, Judge.MaxCombo);
 
 			int crownindex = 0;
-			if (Chart.Judge.Accuracy >= 75) {
+			if (Judge.Accuracy >= 75) {
 				crownindex = 1;
 			}
-			if (Chart.Judge.Accuracy >= 90) {
+			if (Judge.Accuracy >= 90) {
 				crownindex = 2;
 			}
-			if (Chart.Judge.Accuracy >= 90 && Chart.Judge.Bad == 0) {
+			if (Judge.Accuracy >= 90 && Judge.Bad == 0) {
 				crownindex = 3;
 			}
-			if (Chart.Judge.Accuracy >= 90 && Chart.Judge.Bad == 0 && Chart.Judge.Ok == 0) {
+			if (Judge.Accuracy >= 90 && Judge.Bad == 0 && Judge.Ok == 0) {
 				crownindex = 4;
 			}
 
@@ -2848,12 +3365,53 @@ RollType = '\0'
 				Chart.OriginalData.SubtitleStrlen.Result,
 				Chart.OriginalData.Subtitle
 			);
+			if (!IsMulti) {
+				Skin.Base->Result.Font.PlayerName.Draw(
+					Skin.Base->Result.Config.PlayerNamePos,
+					GetColor(255, 255, 255),
+					GetColor(0, 0, 0),
+					GetStrlen(Config.PlayerName, Skin.Base->Result.Font.PlayerName.Handle),
+					Config.PlayerName
+				);
+			}
+			else {
+				Skin.Base->Result.Font.PlayerName.Draw(
+					Skin.Base->Result.Config.PlayerNamePos,
+					GetColor(255, 255, 255),
+					GetColor(0, 0, 0),
+					GetStrlen(Shared.Players[ResultIndex].Name, Skin.Base->Result.Font.PlayerName.Handle),
+					Shared.Players[ResultIndex].Name
+				);
+			}
 	}
 	void ResultProc() {
 		Input.HitKeyProcess(VK_RETURN, KeyState::Down, [&] {
-			NowScene = Scene::SongSelect;
-			return;
+			if (!IsMulti) {
+				NowScene = Scene::SongSelect;
+			}
+			else if (Shared.Players[Shared.MyIndex].IsHost) {
+				NowScene = Scene::MultiRoom;
+				Shared.Players[Shared.MyIndex].HitKey = HitType::Back;
+				Send();
+			}
 			});
+
+		if (IsMulti && Shared.PlayerCount >= 2) {
+			Input.HitKeyProcess(VK_LEFT, KeyState::Down, [&] {
+				Skin.Base->SongSelect.SE.Ka.Play();
+				ResultIndex > 0 ? --ResultIndex : 0;
+				});
+			Input.HitKeyProcess(VK_RIGHT, KeyState::Down, [&] {
+				Skin.Base->SongSelect.SE.Ka.Play();
+				ResultIndex < Shared.PlayerCount - 1 ? ++ResultIndex : ResultIndex;
+				});
+
+			if (!Shared.Players[Shared.MyIndex].IsHost) {
+				if (Shared.Players[Shared.GetIndex].HitKey == HitType::Back) {
+					NowScene = Scene::MultiRoom;
+				}
+			}
+		}
 	}
 
 	enum class ConfigGenreData {
@@ -2870,6 +3428,8 @@ RollType = '\0'
 		{
 			"PlayerName",
 			"AutoPlay",
+			"ServerAddress",
+			"ServerPort",
 			"HiddenLevel",
 			"SuddenLevel",
 			"RandomRate",
@@ -2877,6 +3437,7 @@ RollType = '\0'
 			"JudgeOk",
 			"JudgeBad",
 			"SongOffset",
+			"JudgeOffset",
 			"ChartSpeed",
 			"SongSpeed",
 			"BGBrightness",
@@ -2895,6 +3456,7 @@ RollType = '\0'
 			"BufferSize",
 			"FullScreen",
 			"ViewDebug",
+			"MultiBoot"
 		},
         {
 			"KaInputLeft",
@@ -3064,6 +3626,8 @@ RollType = '\0'
 			if (int j = 0; ConfigGenre == ConfigGenreData::Game) {
 				ConfigDataDraw(i, j, Config.PlayerName);
 				ConfigDataDraw(i, j, Config.AutoPlay ? "true" : "false");
+				ConfigDataDraw(i, j, Config.ServerAddress);
+				ConfigDataDraw(i, j, std::to_string(Config.ServerPort));
 				ConfigDataDraw(i, j, std::to_string(Config.HiddenLevel));
 				ConfigDataDraw(i, j, std::to_string(Config.SuddenLevel));
 				ConfigDataDraw(i, j, std::to_string(Config.RandomRate));
@@ -3071,6 +3635,7 @@ RollType = '\0'
 				ConfigDataDraw(i, j, std::to_string(Config.JudgeOk));
 				ConfigDataDraw(i, j, std::to_string(Config.JudgeBad));
 				ConfigDataDraw(i, j, std::to_string(Config.SongOffset));
+				ConfigDataDraw(i, j, std::to_string(Config.JudgeOffset));
 				ConfigDataDraw(i, j, std::to_string(Config.ChartSpeed));
 				ConfigDataDraw(i, j, std::to_string(Config.SongSpeed));
 				ConfigDataDraw(i, j, std::to_string(Config.BGBrightness));
@@ -3089,6 +3654,7 @@ RollType = '\0'
 				ConfigDataDraw(i, j, std::to_string(Config.BufferSize));
 				ConfigDataDraw(i, j, Config.FullScreen ? "true" : "false");
 				ConfigDataDraw(i, j, Config.ViewDebug ? "true" : "false");
+				ConfigDataDraw(i, j, Config.MultiBoot ? "true" : "false");
 			}
 
 			if (int j = 0; ConfigGenre == ConfigGenreData::Key) {
@@ -3209,6 +3775,8 @@ RollType = '\0'
 				if (ConfigGenre == ConfigGenreData::Game) {
 					ConfigDataInput(i, Config.PlayerName, InputData.String);
 					ConfigDataInput(i, Config.AutoPlay, InputData.Bool);
+					ConfigDataInput(i, Config.ServerAddress, InputData.String);
+					ConfigDataInput(i, Config.ServerPort, InputData.Int);
 					ConfigDataInput(i, Config.HiddenLevel, InputData.Double);
 					ConfigDataInput(i, Config.SuddenLevel, InputData.Double);
 					ConfigDataInput(i, Config.RandomRate, InputData.Int);
@@ -3216,6 +3784,7 @@ RollType = '\0'
 					ConfigDataInput(i, Config.JudgeOk, InputData.Double);
 					ConfigDataInput(i, Config.JudgeBad, InputData.Double);
 					ConfigDataInput(i, Config.SongOffset, InputData.Double);
+					ConfigDataInput(i, Config.JudgeOffset, InputData.Double);
 					ConfigDataInput(i, Config.ChartSpeed, InputData.Double);
 					ConfigDataInput(i, Config.SongSpeed, InputData.Double);
 					ConfigDataInput(i, Config.BGBrightness, InputData.Double);
@@ -3234,6 +3803,7 @@ RollType = '\0'
 					ConfigDataInput(i, Config.BufferSize, InputData.Int);
 					ConfigDataInput(i, Config.FullScreen, InputData.Bool);
 					ConfigDataInput(i, Config.ViewDebug, InputData.Bool);
+					ConfigDataInput(i, Config.MultiBoot, InputData.Bool);
 				}
 				if (ConfigGenre == ConfigGenreData::Key) {
 					ConfigDataInput(i, Config.KaInputLeft[ConfigKeySelector], ConfigKeyCode);
@@ -3282,9 +3852,14 @@ RollType = '\0'
 
 	bool Init() {
 
+		if (fs::exists("temp.tja")) {
+			fs::remove("temp.tja");
+		}
+
 		SetOutApplicationLogValidFlag(FALSE);
 		SetUseCharCodeFormat(DX_CHARCODEFORMAT_UTF8);
 
+		SetDoubleStartValidFlag(Config.MultiBoot);
 		ChangeWindowMode(!Config.FullScreen);
 		SetMainWindowText("FreedomApopicStyle");
 		SetWaitVSyncFlag(Config.WaitVSync);
@@ -3329,11 +3904,17 @@ RollType = '\0'
 			case Scene::SongSelect:
 				SongSelectEnd();
 				break;
+			case Scene::MultiRoom:
+				MultiRoomEnd();
+				break;
 			case Scene::ConfigMenu:
 				ConfigMenuEnd();
 				break;
 			case Scene::Playing:
 				PlayingEnd();
+				break;
+			case Scene::Result:
+				ResultEnd();
 				break;
 			}
 
@@ -3349,7 +3930,11 @@ RollType = '\0'
 			case Scene::SongSelect:
 				SongSelectInit();
 				break;
+			case Scene::MultiRoom:
+				MultiRoomInit();
+				break;
 			case Scene::Playing:
+				PlayingInit();
 				break;
 			case Scene::Result:
 				break;
@@ -3365,6 +3950,9 @@ RollType = '\0'
 			break;
 		case Scene::SongSelect:
 			SongSelectDraw();
+			break;
+		case Scene::MultiRoom:
+			MultiRoomDraw();
 			break;
 		case Scene::Loading:
 			LoadingDraw();
@@ -3412,6 +4000,9 @@ RollType = '\0'
 		case Scene::SongSelect:
 			SongSelectProc();
 			break;
+		case Scene::MultiRoom:
+			MultiRoomProc();
+			break;
 		case Scene::Loading:
 			LoadingProc();
 			break;
@@ -3424,6 +4015,10 @@ RollType = '\0'
 		case Scene::ConfigMenu:
 			ConfigMenuProc();
 			break;
+		}
+
+		if (IsMulti) {
+			Recv();
 		}
 	}
 
