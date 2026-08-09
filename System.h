@@ -358,6 +358,7 @@ public:
 		ValLoad(Playing, Config, TitlePos);
 		ValLoad(Playing, Config, SubTitlePos);
 		ValLoad(Playing, Config, PlayerNamePos);
+		ValLoad(Playing, Config, MultiPlayLaneDistance);
 		ValLoad(Playing, Config, LaneExtendRate);
 		ValLoad(Playing, Config, JudgeUpperExplosionFrameTime);
 		ValLoad(Playing, Config, GoGoFireFrameTime);
@@ -572,6 +573,7 @@ public:
 				Pos2D<float> TitlePos;
 				Pos2D<float> SubTitlePos;
 				Pos2D<float> PlayerNamePos;
+				float MultiPlayLaneDistance;
 				double LaneExtendRate;
 				double JudgeUpperExplosionFrameTime;
 				double GoGoFireFrameTime;
@@ -674,9 +676,17 @@ enum class JudgeType {
 	Roll
 };
 
+struct RollData {
+	uint64_t NowCount = 0;
+	bool IsEnd = 0;
+
+	auto operator<=>(const RollData&) const = default;
+};
+
 struct JudgeData {
 
 	JudgeType HitJudge = JudgeType::None;
+	RollData Rolls = RollData();
 	uint64_t Score = 0;
 	uint64_t Good = 0;
 	uint64_t Ok = 0;
@@ -725,6 +735,8 @@ struct JudgeData {
 
 		if (Combo > MaxCombo) { ++MaxCombo; }
 	}
+
+	auto operator<=>(const JudgeData&) const = default;
 };
 
 enum class HitType {
@@ -734,6 +746,8 @@ enum class HitType {
 	KaLeft,
 	DonRight,
 	KaRight,
+	DonBig,
+	KaBig,
 	Enter,
 	Back
 };
@@ -742,35 +756,33 @@ AES128::cbytearray<16> sharedkey = { '0', 'x', '7', '4', '0', 'x', '6', '5', '0'
 
 struct PlayerData {
 
-	JudgeData Judge = JudgeData();
-	HitType HitKey = HitType::Null;
 	std::string Name = "\0";
 	bool IsHost = false;
 	bool Standby = false;
 
 	Packet::bytearray ToBytes() const {
 		Packet::bytearray ret;
-		Packet::StoreBytes(ret, Judge);
-		Packet::StoreBytes(ret, HitKey);
 		Packet::StoreBytes(ret, Name);
 		Packet::StoreBytes(ret, IsHost);
 		Packet::StoreBytes(ret, Standby);
 		return ret;
 	}
 	Packet::byte_view FromBytes(Packet::byte_view view) {
-		Packet::LoadBytes(view, Judge);
-		Packet::LoadBytes(view, HitKey);
 		Packet::LoadBytes(view, Name);
 		Packet::LoadBytes(view, IsHost);
 		Packet::LoadBytes(view, Standby);
 		return view;
 	}
+
+	auto operator<=>(const PlayerData&) const = default;
 };
 
 struct SharedData {
 	std::vector<PlayerData> Players = std::vector<PlayerData>();
 	std::vector<char> FileData = std::vector<char>();
 	std::vector<char> WaveData = std::vector<char>();
+	JudgeData Judge = JudgeData();
+	HitType HitKey = HitType::Null;
 	int MyIndex = 0;
 	int GetIndex = 0;
 	int CourseIndex = 0;
@@ -781,6 +793,8 @@ struct SharedData {
 		Packet::StoreBytes(ret, Players);
 		Packet::StoreBytes(ret, FileData);
 		Packet::StoreBytes(ret, WaveData);
+		Packet::StoreBytes(ret, Judge);
+		Packet::StoreBytes(ret, HitKey);
 		Packet::StoreBytes(ret, MyIndex);
 		Packet::StoreBytes(ret, GetIndex);
 		Packet::StoreBytes(ret, CourseIndex);
@@ -791,12 +805,16 @@ struct SharedData {
 		Packet::LoadBytes(view, Players);
 		Packet::LoadBytes(view, FileData);
 		Packet::LoadBytes(view, WaveData);
+		Packet::LoadBytes(view, Judge);
+		Packet::LoadBytes(view, HitKey);
 		Packet::LoadBytes(view, MyIndex);
 		Packet::LoadBytes(view, GetIndex);
 		Packet::LoadBytes(view, CourseIndex);
 		Packet::LoadBytes(view, PlayerCount);
 		return view;
 	}
+
+	auto operator<=>(const SharedData&) const = default;
 };
 
 class Game {
@@ -1560,6 +1578,9 @@ public:
 	int GrantIndex = -1;
 
 	void MultiDataInit() {
+		if (IsMulti) {
+			Socket.Close();
+		}
 		Shared = SharedData();
 		Socket = TCPSocket();
 		IsMulti = false;
@@ -1569,42 +1590,26 @@ public:
 	bool Connect(std::string address, uint16_t port) {
 		return Socket.Connect(IPAddress::SolveHostName(address)->Port(port));
 	}
-	void Send() {
-		Socket.ASyncEncryptionSend(Packet(Shared));
+	template<typename T>
+	void Send(T& data) {
+		Socket.ASyncEncryptionSend(Packet(data));
 	}
-	void Recv() {
+	template<typename T>
+	void Recv(T& dest) {
 		if (Socket.Available() > 0) {
-			Shared = *Socket.ASyncEncryptionRecv().get()->Get<SharedData>();
+			dest = *Socket.ASyncEncryptionRecv().get()->Get<T>();
 		}
 	}
-	std::vector<char> FileToMem(const fs::path& path, bool istext) {
-		std::vector<char> data;
-		if (fs::exists(path)) {
-			size_t file_size = fs::file_size(path);
-			std::vector<char> buffer(file_size);
-			std::ifstream file(path, std::ios::binary);
-			if (file.read(buffer.data(), file_size)) {
-				if (istext) {
-					buffer.erase(std::remove(buffer.begin(), buffer.end(), '\r'), buffer.end());
-				}
-				data = buffer;
-			}
-			file.close();
-		}
-		return data;
-	}
-	void MemToFile(const std::vector<char>& datas) {
-		std::ofstream ofs("temp.tja");
-		ofs << datas.data();
-	}
-
 	void MultiRoomInit() {
+		Skin.Base->MultiRoom.SE.Don.SetVolume(Config.SEVolume);
+		Skin.Base->MultiRoom.SE.Ka.SetVolume(Config.SEVolume);
 		if (!IsMulti) {
 			if (Connect(Config.ServerAddress, Config.ServerPort)) {
-				IsMulti = true;
+				PlayerData data;
+				data.Name = Config.PlayerName;
+				Shared.Players.push_back(std::move(data));
 				Socket.CryptEngine.Init(sharedkey);
-				Shared.Players.push_back(PlayerData(JudgeData(), HitType::Null, Config.PlayerName, false, false));
-				Send();
+				IsMulti = true;
 			}
 		}
 	}
@@ -1677,10 +1682,11 @@ public:
 	void MultiRoomProc() {
 		if (IsMulti) {
 			if (IsLoading) {
-				if (Shared.Players[Shared.GetIndex].HitKey == HitType::Enter) {
+				if (Shared.HitKey == HitType::Enter) {
 					Skin.Base->MultiRoom.SE.Don.Play();
 					WaitVSync(10);
 					Chart.NowTime.Start();
+					DemoSongPlayBlank.Reset();
 					PrevScene = Scene::MultiRoom;
 					NowScene = Scene::Playing;
 				}
@@ -1691,12 +1697,8 @@ public:
 					}
 					if (DemoSongPlayBlank.GetElapsed().Second() > DemoSongPlayBlankTime() && !DemoSong.IsPlay()) {
 						SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
-						if (Shared.Players[Shared.MyIndex].IsHost) {
-							DemoSong.Load(u8StrToStr(Chart.OriginalData.SongPath));
-						}
-						else {
-							DemoSong.Load(Shared.WaveData.data(), Shared.WaveData.size());
-						}
+						if (Shared.Players[Shared.MyIndex].IsHost) { DemoSong.Load(u8StrToStr(Chart.OriginalData.SongPath)); }
+						else { DemoSong.Load(Shared.WaveData.data(), Shared.WaveData.size()); }
 						SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
 						DemoSong.SetCurrent(Chart.OriginalData.DemoStart);
 						DemoSong.SetVolume(Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
@@ -1705,11 +1707,9 @@ public:
 				}
 			}
 			else {
-
 				if (!Shared.WaveData.empty()) {
 					NowScene = Scene::Loading;
 				}
-
 				Input.HitKeyProcess(VK_TAB, KeyState::Down, [&] {
 					if (Shared.Players[Shared.MyIndex].IsHost && Shared.PlayerCount >= 2) {
 						Skin.Base->MultiRoom.SE.Don.Play();
@@ -1717,7 +1717,6 @@ public:
 						IsSelectMode = true;
 					}
 					});
-
 			}
 
 			static auto DonInputProc = [&] {
@@ -1730,7 +1729,6 @@ public:
 					Shared.Players[GrantIndex].IsHost = true;
 					GrantIndex = -1;
 					IsSelectMode = false;
-					Send();
 					return;
 				}
 				else if (Shared.Players[Shared.MyIndex].IsHost) {
@@ -1739,19 +1737,12 @@ public:
 						NowScene = Scene::SongSelect;
 					}
 					else if (std::ranges::all_of(Shared.Players, &PlayerData::Standby)) {
-						Skin.Base->MultiRoom.SE.Don.Play();
-						Shared.Players[Shared.MyIndex].HitKey = HitType::Enter;
-						Send();
-						WaitVSync(10);
-						Chart.NowTime.Start();
-						PrevScene = Scene::MultiRoom;
-						NowScene = Scene::Playing;
+						Shared.HitKey = HitType::Enter;
 					}
 				}
 				if (!Shared.Players[Shared.MyIndex].Standby && IsLoading) {
 					Skin.Base->MultiRoom.SE.Don.Play();
 					Shared.Players[Shared.MyIndex].Standby = true;
-					Send();
 				}
 				};
 
@@ -1786,7 +1777,6 @@ public:
 		Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
 			if (Shared.Players[Shared.MyIndex].Standby) {
 				Shared.Players[Shared.MyIndex].Standby = false;
-				Send();
 			}
 			else {
 				MultiDataInit();
@@ -1795,6 +1785,7 @@ public:
 			});
 	}
 
+
 	double ScoreRateCalc(double judge, double basis) {
 		const double c = 0.9;
 		const double b = basis;
@@ -1802,7 +1793,21 @@ public:
 		const double d = std::pow(b, std::pow(m, -1 / c));
 		return 1 / std::pow(std::log(judge * (b - d) / b + d) / std::log(b), c);
 	}
-
+	void FileToMem(const fs::path& path, std::vector<char>& dest, bool istext) {
+		if (fs::exists(path)) {
+			size_t file_size = fs::file_size(path);
+			dest.resize(file_size);
+			std::ifstream file(path, std::ios::binary);
+			if (file.read(dest.data(), file_size)) {
+				if (istext) { dest.erase(std::remove(dest.begin(), dest.end(), '\r'), dest.end()); }
+			}
+			file.close();
+		}
+	}
+	void MemToFile(const std::vector<char>& datas) {
+		std::ofstream ofs("temp.tja");
+		ofs << datas.data();
+	}
 	void LoadingDraw() {
 		DrawFormatString(0, 8, GetColor(255, 255, 255), "ChartLoading...");
 	}
@@ -2159,9 +2164,8 @@ RollType = '\0'
 		if (IsMulti) {
 			if (Shared.Players[Shared.MyIndex].IsHost) {
 				Shared.CourseIndex = CourseIndex;
-				Shared.FileData = FileToMem(fs::path(LoadData.ChartPath), true);
-				Shared.WaveData = FileToMem(fs::path(LoadData.SongPath), false);
-				Send();
+				FileToMem(fs::path(LoadData.ChartPath), Shared.FileData, true);
+				FileToMem(fs::path(LoadData.SongPath), Shared.WaveData, false);
 			}
 			NowScene = Scene::MultiRoom;
 			IsLoading = true;
@@ -2285,10 +2289,11 @@ RollType = '\0'
 			Judge.clear();
 			SongData.Delete();
 			NowTime.Reset();
+			WaitRollTime.Reset();
+			RollViewEndTimer.Reset();
 			Movie.Init();
 			ScrollType = ScrollType::Normal;
 			OriginalData = ChartData();
-			Roll = RollData();
 			AutoPlayLR = false;
 			NowGoGo = false;
 			SongBlankTime = 0;
@@ -2313,13 +2318,6 @@ RollType = '\0'
 		double NowBPM = 0;
 		bool NowGoGo = false;
 
-		struct RollData{
-			Timer ViewEndTimer;
-			double ViewEndTime = 0.75;
-			uint64_t NowCount = 0;
-			bool IsEnd = false;
-		} Roll;
-
 		struct MovieData {
 			void Init() {
 				DeleteGraph(Handle);
@@ -2341,6 +2339,9 @@ RollType = '\0'
 
 		bool AutoPlayLR = false;
 		Timer WaitRollTime;
+
+		Timer RollViewEndTimer;
+		double RollViewEndTime = 0.75;
 	};
 
 	PlayData Chart;
@@ -2378,14 +2379,18 @@ RollType = '\0'
 	std::vector<_HitNote> HitNote = std::vector<_HitNote>();
 
 	void PlayingInit() {
-		for (auto&& player : Shared.Players) {
-			player.Standby = 0;
+		if (IsMulti) {
+			for (auto&& player : Shared.Players) {
+				player.Standby = 0;
+			}
+			Shared.FileData.clear();
+			Shared.WaveData.clear();
 		}
 		for (auto&& taiko : MiniTaikoFlash) {
 			taiko.Reset();
 		}
-		Chart.Judge.resize(Shared.PlayerCount <= 1 ? 1 : Shared.PlayerCount);
 		HitNote.resize(Shared.PlayerCount <= 1 ? 1 : Shared.PlayerCount);
+		Chart.Judge.resize(Shared.PlayerCount <= 1 ? 1 : Shared.PlayerCount);
 		Chart.Judge[0].ScoreRateGood = ScoreRateCalc(Config.JudgeGood, 25.0);
 		Chart.Judge[0].ScoreRateOk = ScoreRateCalc(Config.JudgeOk, 75.0);
 	}
@@ -2423,8 +2428,12 @@ RollType = '\0'
 
 			Pos2D<float> DelayPos = {
 				0.0f,
-				idx * (Skin.Base->Playing.Image.Lane.Size.Height + 40.0f)
+				idx * Skin.Base->Playing.Config.MultiPlayLaneDistance
 			};
+
+			if (Shared.PlayerCount == 4) {
+				DelayPos.Y -= Skin.Base->Playing.Config.MultiPlayLaneDistance;
+			}
 
 			if ((Chart.Movie.Handle != -1)) {
 				SetDrawBlendMode(DX_BLENDMODE_ALPHA, 225);
@@ -2470,8 +2479,8 @@ RollType = '\0'
 			}
 
 			static auto NoteAlpha = [&](double _one, AlphaType Type) {
-				_one = std::clamp(_one, 0.0, 1.0);
 				int alpha = 255;
+				_one = std::clamp(_one, 0.0, 1.0);
 				switch (Type) {
 				case AlphaType::Hidden:
 					alpha = 255 * _one;
@@ -2485,7 +2494,7 @@ RollType = '\0'
 
 			const Pos2D<double>& NoteOrigin = {
 		Skin.Base->Playing.Image.Note.Pos.X,
-		Skin.Base->Playing.Image.Note.Pos.Y
+		Skin.Base->Playing.Image.Note.Pos.Y + DelayPos.Y
 			};
 
 			static auto GetNotePos = [&](NoteData& data)->Pos2D<double> {
@@ -2513,7 +2522,7 @@ RollType = '\0'
 
 				_ret = {
 					_ret.X + NoteOrigin.X,
-					_ret.Y + NoteOrigin.Y + DelayPos.Y
+					_ret.Y + NoteOrigin.Y
 				};
 
 				return _ret;
@@ -2611,15 +2620,18 @@ RollType = '\0'
 				if (data.NoteType >= '1' &&
 					data.NoteType <= '4') {
 					if (InRange(NotePos.X, NotePos.Y)) {
-						int Alpha = 255;
 						double hidden = Config.HiddenLevel;
 						double sudden = Config.SuddenLevel;
-						bool hiddenflag = hidden > 0;
-						bool suddenflag = sudden > 0;
-						if (hiddenflag || suddenflag) {
+						bool hiddenflag = hidden > 0.0;
+						bool suddenflag = sudden > 0.0;
+						bool multiflag = (IsMulti && idx >= 1);
+						if (hiddenflag || suddenflag || multiflag) {
 							double _abs = std::abs(std::complex<double>{ NotePos.X - NoteOrigin.X, NotePos.Y - NoteOrigin.Y })* (data.AbsTime < NowTime ? -1 : 1);
 							double leveling = (Skin.Base->Playing.Image.Lane.Size.Width / DX_PI);
 							double feedrange = (Skin.Base->Playing.Image.Lane.Size.Width / DX_TWO_PI);
+							if (multiflag) {
+								NoteAlpha((_abs - (leveling * 0.025)) / feedrange, AlphaType::Hidden);
+							}
 							if (hiddenflag) {
 								NoteAlpha((_abs - (leveling * hidden)) / feedrange, AlphaType::Hidden);
 							}
@@ -2630,7 +2642,7 @@ RollType = '\0'
 						Skin.Base->Playing.Image.Note.Draw(
 							{
 								(float)(NotePos.X - NoteOrigin.X),
-								(float)(NotePos.Y - NoteOrigin.Y)
+								(float)(NotePos.Y - NoteOrigin.Y) + DelayPos.Y
 							},
 							data.NoteType - 48
 						);
@@ -2890,8 +2902,8 @@ RollType = '\0'
 				} while (i < digit);
 				};
 
-			if (Chart.Roll.NowCount > 0) {
-				RollDraw(Chart.Roll.NowCount);
+			if (Chart.Judge[idx].Rolls.NowCount > 0) {
+				RollDraw(Chart.Judge[idx].Rolls.NowCount);
 			}
 			if (Chart.Judge[idx].Combo >= 3) {
 				ComboDraw(Chart.Judge[idx].Combo);
@@ -2902,23 +2914,25 @@ RollType = '\0'
 
 		} while (idx < Shared.PlayerCount && IsMulti);
 
-		if (Chart.OriginalData.TitleDisplay) {
-			Skin.Base->Playing.Font.Title.Draw(
-				Skin.Base->Playing.Config.TitlePos,
-				GetColor(255, 255, 255),
-				GetColor(0, 0, 0),
-				Chart.OriginalData.TitleStrlen.Playing,
-				Chart.OriginalData.Title
-			);
-		}
-		if (Chart.OriginalData.SubtitleDisplay) {
-			Skin.Base->Playing.Font.SubTitle.Draw(
-				Skin.Base->Playing.Config.SubTitlePos,
-				GetColor(255, 255, 255),
-				GetColor(0, 0, 0),
-				Chart.OriginalData.SubtitleStrlen.Playing,
-				Chart.OriginalData.Subtitle
-			);
+		if (Shared.PlayerCount < 4) {
+			if (Chart.OriginalData.TitleDisplay) {
+				Skin.Base->Playing.Font.Title.Draw(
+					Skin.Base->Playing.Config.TitlePos,
+					GetColor(255, 255, 255),
+					GetColor(0, 0, 0),
+					Chart.OriginalData.TitleStrlen.Playing,
+					Chart.OriginalData.Title
+				);
+			}
+			if (Chart.OriginalData.SubtitleDisplay) {
+				Skin.Base->Playing.Font.SubTitle.Draw(
+					Skin.Base->Playing.Config.SubTitlePos,
+					GetColor(255, 255, 255),
+					GetColor(0, 0, 0),
+					Chart.OriginalData.SubtitleStrlen.Playing,
+					Chart.OriginalData.Subtitle
+				);
+			}
 		}
 
 		if (Config.ViewDebug) {
@@ -2927,12 +2941,9 @@ RollType = '\0'
 	}
 	void HitAction(HitType type) {
 		if (Shared.PlayerCount >= 2) {
-			Shared.Players[Shared.MyIndex].HitKey = type;
-			Shared.Players[Shared.MyIndex].Judge = Chart.Judge[0];
-			Send();
-			Chart.Judge[0].NoteType = '\0';
-			Chart.Judge[0].HitJudge = JudgeType::None;
-			Shared.Players[Shared.MyIndex].HitKey = HitType::Null;
+			Shared.HitKey = type;
+			Shared.Judge = Chart.Judge[0];
+			Shared.GetIndex = Shared.MyIndex;
 		}
 	}
 	void PlayingProc() {
@@ -2945,6 +2956,46 @@ RollType = '\0'
 		else if (Chart.SongBlankTime + 5000 < NowTime && !Chart.SongData.IsPlay()) {
 			NowScene = Scene::Result;
 			return;
+		}
+
+		if (IsMulti && Shared.PlayerCount >= 2) {
+			Chart.Judge[0].NoteType = '\0';
+			Chart.Judge[0].HitJudge = JudgeType::None;
+			if (Shared.HitKey != HitType::Null && Shared.GetIndex != Shared.MyIndex) {
+				Shared.GetIndex += (Shared.GetIndex <= Shared.MyIndex);
+				switch (Shared.HitKey) {
+				case HitType::DonLeft:
+				case HitType::DonRight:
+				case HitType::KaLeft:
+				case HitType::KaRight:
+					MiniTaikoFlash[(int)Shared.HitKey + (4 * Shared.GetIndex)].Start();
+					if (Shared.Judge.HitJudge != JudgeType::None) {
+						HitNote[Shared.GetIndex].Add(HitNoteData(Shared.Judge.NoteType, Shared.Judge.HitJudge));
+					}
+					break;
+				case HitType::DonBig:
+				case HitType::KaBig:
+					MiniTaikoFlash[((int)Shared.HitKey - 4) + (4 * Shared.GetIndex)].Start();
+					MiniTaikoFlash[((int)Shared.HitKey - 2) + (4 * Shared.GetIndex)].Start();
+					if (Shared.Judge.HitJudge != JudgeType::None) {
+						HitNote[Shared.GetIndex].Add(HitNoteData(((int)Shared.HitKey + 48) - 1, Shared.Judge.HitJudge));
+					}
+					break;
+				case HitType::Empty:
+					Chart.Judge[Shared.GetIndex].Combo = 0;
+					break;
+				}
+				Chart.Judge[Shared.GetIndex] = Shared.Judge;
+				Shared.HitKey = HitType::Null;
+			}
+		}
+		else {
+			Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
+				NowScene = Scene::SongSelect;
+				});
+			Input.HitKeyProcess(VK_TAB, KeyState::Down, [&] {
+				NowScene = Scene::Loading;
+				});
 		}
 
 		static auto JudgeNote = [&](double nowtime, char type) {
@@ -3027,18 +3078,18 @@ RollType = '\0'
 			if (rollcount > 0) {
 				HitNote[0].Add(HitNoteData(NextImage ? '6' : '5', JudgeType::Roll));
 				Judge.Hit(JudgeType::Roll, 100, NextImage ? '6' : '5');
-				if (Chart.Roll.ViewEndTimer.IsRunning() && Chart.Roll.IsEnd) {
-					Chart.Roll.IsEnd = false;
-					Chart.Roll.NowCount = 0;
-					Chart.Roll.ViewEndTimer.Reset();
+				if (Chart.RollViewEndTimer.IsRunning() && Chart.Judge[0].Rolls.IsEnd) {
+					Chart.Judge[0].Rolls.IsEnd = false;
+					Chart.Judge[0].Rolls.NowCount = 0;
+					Chart.RollViewEndTimer.Reset();
 				}
-				Chart.Roll.NowCount++;
+				Chart.Judge[0].Rolls.NowCount++;
 			}
 
 			if (type == '1' && balloondata != nullptr) {
 				--balloondata->BalloonCount;
-				Chart.Roll.NowCount = balloondata->BalloonCount;
-				Chart.Roll.ViewEndTimer.Reset();
+				Chart.Judge[0].Rolls.NowCount = balloondata->BalloonCount;
+				Chart.RollViewEndTimer.Reset();
 				Judge.Hit(JudgeType::Roll, 100, '\0');
 				if (balloondata->BalloonCount <= 0) {
 					Skin.Base->Playing.SE.Balloon.Play();
@@ -3051,10 +3102,12 @@ RollType = '\0'
 			}
 			};
 
-		if (Chart.Roll.ViewEndTimer.GetElapsed().Second() > Chart.Roll.ViewEndTime) {
-			Chart.Roll.IsEnd = false;
-			Chart.Roll.NowCount = 0;
-			Chart.Roll.ViewEndTimer.Reset();
+		if (Chart.RollViewEndTimer.GetElapsed().Second() > Chart.RollViewEndTime) {
+			for (auto&& judge : Chart.Judge) {
+				judge.Rolls.NowCount = 0;
+				judge.Rolls.IsEnd = false;
+			}
+			Chart.RollViewEndTimer.Reset();
 		}
 
 		for (auto&& data : Chart.RawNoteDatas) {
@@ -3083,6 +3136,7 @@ RollType = '\0'
 				data.BigNoteTime == 0 &&
 				_HitError < -Config.JudgeBad) {
 				Chart.Judge[0].Hit(JudgeType::Bad, 0, '\0');
+				HitAction(HitType::Empty);
 				data.HitFlag = true;
 			}
 
@@ -3092,8 +3146,8 @@ RollType = '\0'
 				if (data.RollEndTime < NowTime) {
 					data.RollFlag = 2;
 					data.HitFlag = true;
-					Chart.Roll.IsEnd = true;
-					Chart.Roll.ViewEndTimer.Start();
+					Chart.Judge[0].Rolls.IsEnd = true;
+					Chart.RollViewEndTimer.Start();
 				}
 			}
 
@@ -3103,7 +3157,7 @@ RollType = '\0'
 				if (data.RollEndTime < NowTime) {
 					data.BalloonFlag = 2;
 					data.HitFlag = true;
-					Chart.Roll.NowCount = 0;
+					Chart.Judge[0].Rolls.NowCount = 0;
 				}
 			}
 		}
@@ -3147,16 +3201,14 @@ RollType = '\0'
 						Skin.Base->Playing.SE.Don.Play();
 						MiniTaikoFlash[0].Start();
 						MiniTaikoFlash[2].Start();
-						HitAction(HitType::DonLeft);
-						HitAction(HitType::DonRight);
+						HitAction(HitType::DonBig);
 						break;
 					case '4':
 						Skin.Base->Playing.SE.Ka.Play();
 						Skin.Base->Playing.SE.Ka.Play();
 						MiniTaikoFlash[1].Start();
 						MiniTaikoFlash[3].Start();
-						HitAction(HitType::KaLeft);
-						HitAction(HitType::KaRight);
+						HitAction(HitType::KaBig);
 						break;
 					}
 					data.NoteType = '\0';
@@ -3166,14 +3218,16 @@ RollType = '\0'
 
 			if (RollCount > 0 && !Chart.WaitRollTime.IsRunning()) {
 				Skin.Base->Playing.SE.Don.Play();
-				if (Chart.Roll.ViewEndTimer.IsRunning() && Chart.Roll.IsEnd) {
-					Chart.Roll.IsEnd = false;
-					Chart.Roll.NowCount = 0;
-					Chart.Roll.ViewEndTimer.Reset();
+				if (Chart.RollViewEndTimer.IsRunning() && Chart.Judge[0].Rolls.IsEnd) {
+					for (auto&& judge : Chart.Judge) {
+						judge.Rolls.NowCount = 0;
+						judge.Rolls.IsEnd = false;
+					}
+					Chart.RollViewEndTimer.Reset();
 				}
 				Chart.AutoPlayLR = !Chart.AutoPlayLR;
 				Chart.Judge[0].Roll++;
-				Chart.Roll.NowCount++;
+				Chart.Judge[0].Rolls.NowCount++;
 				HitNote[0].Add(HitNoteData(NextImage ? '6' : '5', JudgeType::Roll));
 				Chart.WaitRollTime.Start();
 				HitAction((HitType)(0 + Chart.AutoPlayLR * 2));
@@ -3184,8 +3238,8 @@ RollType = '\0'
 				Chart.AutoPlayLR = !Chart.AutoPlayLR;
 				Chart.Judge[0].Roll++;
 				--BalloonData->BalloonCount;
-				Chart.Roll.NowCount = BalloonData->BalloonCount;
-				Chart.Roll.ViewEndTimer.Reset();
+				Chart.Judge[0].Rolls.NowCount = BalloonData->BalloonCount;
+				Chart.RollViewEndTimer.Reset();
 				Chart.WaitRollTime.Start();
 				HitAction((HitType)(0 + Chart.AutoPlayLR * 2));
 				if (BalloonData->BalloonCount <= 0) {
@@ -3227,33 +3281,6 @@ RollType = '\0'
 				HitAction(HitType::KaRight);
 				});
 		}
-
-		if (IsMulti) {
-			if (Shared.PlayerCount >= 2) {
-				if (int i = Shared.GetIndex; Shared.Players[Shared.GetIndex].HitKey != HitType::Null) {
-					if (i <= Shared.MyIndex) {
-						i++;
-					}
-					if (Shared.Players[i].HitKey >= HitType::DonLeft && Shared.Players[i].HitKey <= HitType::KaRight) {
-						MiniTaikoFlash[(int)Shared.Players[i].HitKey + 4 * i].Start();
-						if (Shared.Players[i].Judge.HitJudge != JudgeType::None) {
-							HitNote[i].Add(HitNoteData(Shared.Players[i].Judge.NoteType, Shared.Players[i].Judge.HitJudge));
-						}
-					}
-					Chart.Judge[i] = Shared.Players[i].Judge;
-					Shared.Players[Shared.GetIndex].HitKey = HitType::Null;
-				}
-			}
-		}
-		else {
-
-			Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
-				NowScene = Scene::SongSelect;
-				});
-			Input.HitKeyProcess(VK_TAB, KeyState::Down, [&] {
-				NowScene = Scene::Loading;
-				});
-		}
 	}
 
 	int ResultIndex = 0;
@@ -3263,6 +3290,7 @@ RollType = '\0'
 			Chart.Init();
 			Shared.FileData.clear();
 			Shared.WaveData.clear();
+			Shared.Judge = JudgeData();
 			IsLoading = false;
 		}
 		ResultIndex = 0;
@@ -3391,8 +3419,7 @@ RollType = '\0'
 			}
 			else if (Shared.Players[Shared.MyIndex].IsHost) {
 				NowScene = Scene::MultiRoom;
-				Shared.Players[Shared.MyIndex].HitKey = HitType::Back;
-				Send();
+				Shared.HitKey = HitType::Back;
 			}
 			});
 
@@ -3407,7 +3434,7 @@ RollType = '\0'
 				});
 
 			if (!Shared.Players[Shared.MyIndex].IsHost) {
-				if (Shared.Players[Shared.GetIndex].HitKey == HitType::Back) {
+				if (Shared.HitKey == HitType::Back) {
 					NowScene = Scene::MultiRoom;
 				}
 			}
@@ -3818,6 +3845,9 @@ RollType = '\0'
 				ConfigKeyCode = 0;
 				ConfigInputFlag = 0;
 				DeleteKeyInput(InputData.Handle);
+				if (IsMulti) {
+					Shared.Players[Shared.MyIndex].Name = Config.PlayerName;
+				}
 			}
 		}
 	}
@@ -4016,10 +4046,6 @@ RollType = '\0'
 			ConfigMenuProc();
 			break;
 		}
-
-		if (IsMulti) {
-			Recv();
-		}
 	}
 
 	static inline std::atomic_bool _waitvsyncLog = false;
@@ -4053,6 +4079,9 @@ RollType = '\0'
 		std::thread thd([&] { _LogUpdate(&EndFlag); });
 
 		while (true) {
+
+			auto prev = Shared;
+
 			if (ProcessMessage() == -1 || NowScene == Scene::End) {
 				EndFlag = true;
 			}
@@ -4079,6 +4108,12 @@ RollType = '\0'
 				Proc();
 				ScreenFlip();
 				ClearDrawScreen();
+			}
+			if (Shared != prev) {
+				Send(Shared);
+			}
+			if (IsMulti) {
+				Recv(Shared);
 			}
 		}
 
