@@ -9,6 +9,18 @@
 namespace fs = std::filesystem;
 using namespace libarrier;
 
+fs::path GetExecutablePath() {
+	std::vector<char> buffer(MAX_PATH);
+	while (true) {
+		DWORD len = GetModuleFileName(NULL, buffer.data(), (DWORD)buffer.size());
+		if (len == 0) return L"";
+		if (len < buffer.size()) {
+			return fs::path(buffer.data());
+		}
+		buffer.resize(buffer.size() * 2);
+	}
+}
+
 class _ConfigData {
 public:
 
@@ -18,12 +30,12 @@ public:
 
 	void Load() {
 
-		std::ifstream ifs("config.json");
+		std::ifstream ifs(GetExecutablePath().parent_path() / "config.json");
 
 		if (!ifs.is_open()) {
 			ifs.close();
 			Write();
-			ifs = std::ifstream("config.json");
+			ifs = std::ifstream(GetExecutablePath().parent_path() / "config.json");
 		}
 
 		json data = json::parse(ifs);
@@ -118,7 +130,7 @@ public:
 		KeyNameDonRight = GetKeyName(DonInputRight);
 		KeyNameKaRight = GetKeyName(KaInputRight);
 
-		std::ofstream ofs("config.json");
+		std::ofstream ofs(GetExecutablePath().parent_path() / "config.json");
 		ofs << data.dump(4) << "\n";
 		ofs.close();
 	}
@@ -220,7 +232,7 @@ public:
 			}
 		}
 
-		std::ifstream ifs(FilePath);
+		std::ifstream ifs(fs::absolute(FilePath));
 		json data = json::parse(ifs);
 		ifs.close();
 
