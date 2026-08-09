@@ -770,19 +770,19 @@ struct PlayerData {
 
 	std::string Name = "\0";
 	bool IsHost = false;
-	bool Standby = false;
+	short State = 0;
 
 	Packet::bytearray ToBytes() const {
 		Packet::bytearray ret;
 		Packet::StoreBytes(ret, Name);
 		Packet::StoreBytes(ret, IsHost);
-		Packet::StoreBytes(ret, Standby);
+		Packet::StoreBytes(ret, State);
 		return ret;
 	}
 	Packet::byte_view FromBytes(Packet::byte_view view) {
 		Packet::LoadBytes(view, Name);
 		Packet::LoadBytes(view, IsHost);
-		Packet::LoadBytes(view, Standby);
+		Packet::LoadBytes(view, State);
 		return view;
 	}
 
@@ -1585,19 +1585,25 @@ public:
 	TCPSocket Socket = TCPSocket();
 
 	bool IsMulti = false;
-	bool IsLoading = false;
-	bool IsSelectMode = false;
+	bool IsLoad = false;
+	bool IsSelect = false;
 	int GrantIndex = -1;
 
 	void MultiDataInit() {
-		if (IsMulti) {
-			Socket.Close();
-		}
+		if (IsMulti) { Socket.Close(); }
 		Shared = SharedData();
 		Socket = TCPSocket();
 		IsMulti = false;
-		IsLoading = false;
-		IsSelectMode = false;
+		IsLoad = false;
+		IsSelect = false;
+	}
+	bool CheckState(short i) {
+		for (auto&& p : Shared.Players) {
+			if (p.State != i) {
+				return false;
+			}
+		}
+		return true;
 	}
 	bool Connect(std::string address, uint16_t port) {
 		return Socket.Connect(IPAddress::SolveHostName(address)->Port(port));
@@ -1643,7 +1649,7 @@ public:
 
 		Skin.Base->MultiRoom.Image.TitleBox.Draw({});
 
-		if (IsLoading) {
+		if (IsLoad) {
 			Skin.Base->MultiRoom.Font.Title.Draw(
 				Skin.Base->MultiRoom.Config.TitlePos,
 				GetColor(255, 255, 255),
@@ -1672,8 +1678,8 @@ public:
 
 		for (size_t i = 0; i < Shared.Players.size(); i++) {
 
-			bool g = 1 - (GrantIndex == i) * IsSelectMode;
-			bool s = !Shared.Players[i].Standby;
+			bool g = 1 - (GrantIndex == i) * IsSelect;
+			bool s = !Shared.Players[i].State;
 
 			Skin.Base->MultiRoom.Image.PlayerBox.Draw({ 0, 100.0f * i });
 			Skin.Base->MultiRoom.Font.Player.Draw({
@@ -1693,11 +1699,9 @@ public:
 
 	void MultiRoomProc() {
 		if (IsMulti) {
-			if (IsLoading) {
+			if (IsLoad) {
 				if (Shared.HitKey == HitType::Enter) {
 					Skin.Base->MultiRoom.SE.Don.Play();
-					WaitVSync(10);
-					Chart.NowTime.Start();
 					DemoSongPlayBlank.Reset();
 					PrevScene = Scene::MultiRoom;
 					NowScene = Scene::Playing;
@@ -1726,40 +1730,37 @@ public:
 					if (Shared.Players[Shared.MyIndex].IsHost && Shared.PlayerCount >= 2) {
 						Skin.Base->MultiRoom.SE.Don.Play();
 						GrantIndex = Shared.MyIndex;
-						IsSelectMode = true;
+						IsSelect = true;
 					}
 					});
 			}
 
 			static auto DonInputProc = [&] {
-				if (IsSelectMode) {
+				if (IsSelect) {
 					Skin.Base->MultiRoom.SE.Don.Play();
-					for (auto&& p : Shared.Players) {
-						p.Standby = false;
-						p.IsHost = false;
-					}
+					std::ranges::for_each(Shared.Players, [](PlayerData& data) { data.State = 0; data.IsHost = false; });
 					Shared.Players[GrantIndex].IsHost = true;
 					GrantIndex = -1;
-					IsSelectMode = false;
+					IsSelect = false;
 					return;
 				}
 				else if (Shared.Players[Shared.MyIndex].IsHost) {
-					if (!IsLoading) {
+					if (!IsLoad) {
 						Skin.Base->MultiRoom.SE.Don.Play();
 						NowScene = Scene::SongSelect;
 					}
-					else if (std::ranges::all_of(Shared.Players, &PlayerData::Standby)) {
+					else if (CheckState(1)) {
 						Shared.HitKey = HitType::Enter;
 					}
 				}
-				if (!Shared.Players[Shared.MyIndex].Standby && IsLoading) {
+				if (!Shared.Players[Shared.MyIndex].State && IsLoad) {
 					Skin.Base->MultiRoom.SE.Don.Play();
-					Shared.Players[Shared.MyIndex].Standby = true;
+					Shared.Players[Shared.MyIndex].State = 1;
 				}
 				};
 
 			static auto KaInputProc = [&](bool direction) {
-				if (IsSelectMode) {
+				if (IsSelect) {
 					Skin.Base->MultiRoom.SE.Ka.Play();
 					if (!direction) {
 						GrantIndex <= 0 ? 0 : GrantIndex--;
@@ -1778,7 +1779,7 @@ public:
 			Input.HitKeyProcess(VK_RETURN, KeyState::Down, DonInputProc);
 
 			Input.HitKeyProcess(VK_F1, KeyState::Down, [&] {
-				if (!Shared.Players[Shared.MyIndex].Standby) {
+				if (!Shared.Players[Shared.MyIndex].State) {
 					Skin.Base->MultiRoom.SE.Don.Play();
 					PrevScene = Scene::MultiRoom;
 					NowScene = Scene::ConfigMenu;
@@ -1787,8 +1788,8 @@ public:
 		}
 
 		Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
-			if (Shared.Players[Shared.MyIndex].Standby) {
-				Shared.Players[Shared.MyIndex].Standby = false;
+			if (Shared.Players[Shared.MyIndex].State) {
+				Shared.Players[Shared.MyIndex].State = 0;
 			}
 			else {
 				MultiDataInit();
@@ -2148,7 +2149,6 @@ RollType = '\0'
 		if (Chart.AddScore == 0) {
 			Chart.AddScore = 1000000 / (double)NoteCount;
 		}
-
 		if (!IsMulti || Shared.Players[Shared.MyIndex].IsHost) {
 			SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
 			Chart.SongData.Load(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath));
@@ -2179,8 +2179,8 @@ RollType = '\0'
 				FileToMem(fs::path(LoadData.ChartPath), Shared.FileData, true);
 				FileToMem(fs::path(LoadData.SongPath), Shared.WaveData, false);
 			}
+			IsLoad = true;
 			NowScene = Scene::MultiRoom;
-			IsLoading = true;
 			return;
 		}
 
@@ -2392,15 +2392,16 @@ RollType = '\0'
 
 	void PlayingInit() {
 		if (IsMulti) {
-			for (auto&& player : Shared.Players) {
-				player.Standby = 0;
-			}
 			Shared.FileData.clear();
 			Shared.WaveData.clear();
+			WaitVSync(10);
+			Chart.NowTime.Start();
 		}
+
 		for (auto&& taiko : MiniTaikoFlash) {
 			taiko.Reset();
 		}
+
 		HitNote.resize(Shared.PlayerCount <= 1 ? 1 : Shared.PlayerCount);
 		Chart.Judge.resize(Shared.PlayerCount <= 1 ? 1 : Shared.PlayerCount);
 		Chart.Judge[0].ScoreRateGood = ScoreRateCalc(Config.JudgeGood, 25.0);
@@ -2946,7 +2947,6 @@ RollType = '\0'
 				);
 			}
 		}
-
 		if (Config.ViewDebug) {
 			DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nChartPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.c_str());
 		}
@@ -2966,8 +2966,13 @@ RollType = '\0'
 			Chart.SongData.Play();
 		}
 		else if (Chart.SongBlankTime + 5000 < NowTime && !Chart.SongData.IsPlay()) {
-			NowScene = Scene::Result;
-			return;
+			if (!IsMulti || CheckState(2)) {
+				NowScene = Scene::Result;
+				return;
+			}
+			else if (IsMulti) {
+				Shared.Players[Shared.MyIndex].State = 2;
+			}
 		}
 
 		if (IsMulti && Shared.PlayerCount >= 2) {
@@ -3299,12 +3304,10 @@ RollType = '\0'
 
 	void ResultEnd() {
 		if (IsMulti) {
-			Chart.Init();
-			Shared.FileData.clear();
-			Shared.WaveData.clear();
+			std::ranges::for_each(Shared.Players, [](PlayerData& data) { data.State = 0; });
 			Shared.Judge = JudgeData();
-			IsLoading = false;
 		}
+		IsLoad = false;
 		ResultIndex = 0;
 	}
 	void ResultDraw() {
