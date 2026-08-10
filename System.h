@@ -314,12 +314,14 @@ public:
 
 #pragma region SongSelect
 
+		ValLoad(SongSelect, Config, BoxDistance);
 		ValLoad(SongSelect, Config, SongBoxListPos);
 		ValLoad(SongSelect, Config, BoxTitlePos);
 		ValLoad(SongSelect, Config, BoxSubTitlePos);
 		ValLoad(SongSelect, Config, CoursePos);
 		ValLoad(SongSelect, Config, LevelPos);
-		ValLoad(SongSelect, Config, BoxDistance);
+		ValLoad(SongSelect, Config, HighScorePos);
+		ValLoad(SongSelect, Config, CourseBoxDistance);
 
 		DataLoad(SongSelect, Image, BackGround);
 		DataLoad(SongSelect, Image, Box);
@@ -333,6 +335,7 @@ public:
 		DataLoad(SongSelect, Font, BoxSubTitle);
 		DataLoad(SongSelect, Font, Course);
 		DataLoad(SongSelect, Font, Level);
+		DataLoad(SongSelect, Font, HighScore);
 
 		DataLoad(SongSelect, SE, Don);
 		DataLoad(SongSelect, SE, Ka);
@@ -527,6 +530,8 @@ public:
 				Pos2D<float> BoxSubTitlePos;
 				Pos2D<float> CoursePos;
 				Pos2D<float> LevelPos;
+				Pos2D<float> HighScorePos;
+				float CourseBoxDistance;
 			} Config;
 			struct _Image {
 				GraphData BackGround;
@@ -542,6 +547,7 @@ public:
 				FontData BoxSubTitle;
 				FontData Course;
 				FontData Level;
+				FontData HighScore;
 			} Font;
 			struct _SE {
 				SoundData Don;
@@ -1273,8 +1279,13 @@ public:
 	int BoxDataIndex = 0;
 	Timer DemoSongPlayBlank;
 	double DemoSongPlayBlankTime() const {
-		return 2.0;
+		return 0.25;
 	}
+
+	struct ScoreData {
+		uint64_t Score = 0;
+		int Crown = 0;
+	} Score = ScoreData();
 
 	SoundData DemoSong = SoundData();
 
@@ -1454,30 +1465,39 @@ public:
 			);
 
 			for (size_t i = 0; i < (size_t)CourseType::Count; ++i) {
-				
+
 				unsigned int c = 100 * (CourseIndex == i);
+				float y = Skin.Base->SongSelect.Config.CourseBoxDistance * i;
 				SetDrawAddColor(c, c, c);
-				Skin.Base->SongSelect.Image.CourseBox.Draw({ 0, 80.0f * i });
+				Skin.Base->SongSelect.Image.CourseBox.Draw({ 0, y });
 				SetDrawAddColor(0, 0, 0);
 
 				if (!BoxDatas[BoxDataIndex]->GetChart()->Courses[i].IsPlayable) {
 					continue;
 				}
 
-				Skin.Base->SongSelect.Font.Course.Draw({ 
+				Skin.Base->SongSelect.Font.Course.Draw({
 					Skin.Base->SongSelect.Config.CoursePos.X,
-					Skin.Base->SongSelect.Config.CoursePos.Y + (80.0f * i)},
+					Skin.Base->SongSelect.Config.CoursePos.Y + y },
 					GetColor(255, 255, 255),
 					GetColor(0, 0, 0),
 					magic_enum::enum_name((CourseType)i).data()
-				);
+					);
 				Skin.Base->SongSelect.Font.Level.Draw({
 					Skin.Base->SongSelect.Config.LevelPos.X,
-					Skin.Base->SongSelect.Config.LevelPos.Y + (80.0f * i) },
+					Skin.Base->SongSelect.Config.LevelPos.Y + y },
 					GetColor(255, 255, 255),
 					GetColor(0, 0, 0),
 					u8StrToStr(u8"★×") + std::to_string(BoxDatas[BoxDataIndex]->GetChart()->Courses[i].Level)
 					);
+				Skin.Base->SongSelect.Font.HighScore.Draw({
+					Skin.Base->SongSelect.Config.HighScorePos.X,
+					Skin.Base->SongSelect.Config.HighScorePos.Y + y },
+					GetColor(255, 255, 255),
+					GetColor(0, 0, 0),
+					std::to_string(Score.Score)
+					);
+				Skin.Base->SongSelect.Image.Crown.Draw({ 0, y }, Score.Crown);
 			}
 		}
 	}
@@ -1499,6 +1519,7 @@ public:
 			}
 			else {
 				if (!IsCourseSelect) {
+					Score = ScoreDataLoad(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->ChartPath));
 					IsCourseSelect = true;
 				}
 				else if (BoxDatas[BoxDataIndex]->GetChart()->Courses[CourseIndex].IsPlayable) {
@@ -1513,7 +1534,7 @@ public:
 			if (!direction) {
 				if (!IsCourseSelect) {
 					BoxDataIndex = BoxDataIndex == 0 ? BoxDatas.size() - 1 : BoxDataIndex - 1;
-					DemoSongPlayBlank.Stop();
+					DemoSongPlayBlank.Reset();
 					DemoSong.Delete();
 				}
 				else {
@@ -1523,7 +1544,7 @@ public:
 			else {
 				if (!IsCourseSelect) {
 					BoxDataIndex = BoxDataIndex == BoxDatas.size() - 1 ? 0 : BoxDataIndex + 1;
-					DemoSongPlayBlank.Stop();
+					DemoSongPlayBlank.Reset();
 					DemoSong.Delete();
 				}
 				else {
@@ -1540,7 +1561,7 @@ public:
 				SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
 				DemoSong.Load(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath));
 				SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
-				DemoSong.SetCurrent(BoxDatas[BoxDataIndex]->GetChart()->DemoStart);
+				DemoSong.SetCurrent(BoxDatas[BoxDataIndex]->GetChart()->DemoStart * 1000.0);
 				DemoSong.SetVolume(BoxDatas[BoxDataIndex]->GetChart()->SongVolume * (Config.SongVolume / 100));
 				DemoSong.Play(FALSE);
 			}
@@ -1633,6 +1654,7 @@ public:
 	}
 	void MultiRoomEnd() {
 		DemoSong.Delete();
+		DemoSongPlayBlank.Reset();
 	}
 	void MultiRoomDraw() {
 
@@ -1701,10 +1723,16 @@ public:
 		if (IsMulti) {
 			if (IsLoad) {
 				if (Shared.HitKey == HitType::Enter) {
-					Skin.Base->MultiRoom.SE.Don.Play();
-					DemoSongPlayBlank.Reset();
-					PrevScene = Scene::MultiRoom;
-					NowScene = Scene::Playing;
+					Shared.FileData.clear();
+					Shared.WaveData.clear();
+					if (CheckState(2)) {
+						Skin.Base->MultiRoom.SE.Don.Play();
+						WaitVSync(10);
+						Chart.NowTime.Start();
+						NowScene = Scene::Playing;
+						return;
+					}
+					Shared.Players[Shared.MyIndex].State = 2;
 				}
 				else {
 					if (!DemoSongPlayBlank.IsRunning()) {
@@ -1716,7 +1744,7 @@ public:
 						if (Shared.Players[Shared.MyIndex].IsHost) { DemoSong.Load(u8StrToStr(Chart.OriginalData.SongPath)); }
 						else { DemoSong.Load(Shared.WaveData.data(), Shared.WaveData.size()); }
 						SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
-						DemoSong.SetCurrent(Chart.OriginalData.DemoStart);
+						DemoSong.SetCurrent(Chart.OriginalData.DemoStart * 1000.0);
 						DemoSong.SetVolume(Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
 						DemoSong.Play(FALSE);
 					}
@@ -1817,8 +1845,8 @@ public:
 			file.close();
 		}
 	}
-	void MemToFile(const std::vector<char>& datas) {
-		std::ofstream ofs("temp.tja");
+	void MemToFile(const fs::path& path, const std::vector<char>& datas) {
+		std::ofstream ofs(path);
 		ofs << datas.data();
 	}
 	void LoadingDraw() {
@@ -1833,8 +1861,8 @@ public:
 		}
 		else {
 			CourseIndex = Shared.CourseIndex;
-			MemToFile(Shared.FileData);
-			LoadData.Load(u8"temp.tja");
+			MemToFile("temp.tja", Shared.FileData);
+			LoadData.Load("temp.tja");
 		}
 
 		std::string line;
@@ -2391,13 +2419,6 @@ RollType = '\0'
 	std::vector<_HitNote> HitNote = std::vector<_HitNote>();
 
 	void PlayingInit() {
-		if (IsMulti) {
-			Shared.FileData.clear();
-			Shared.WaveData.clear();
-			WaitVSync(10);
-			Chart.NowTime.Start();
-		}
-
 		for (auto&& taiko : MiniTaikoFlash) {
 			taiko.Reset();
 		}
@@ -2966,44 +2987,44 @@ RollType = '\0'
 			Chart.SongData.Play();
 		}
 		else if (Chart.SongBlankTime + 5000 < NowTime && !Chart.SongData.IsPlay()) {
-			if (!IsMulti || CheckState(2)) {
+			if (!IsMulti || CheckState(3)) {
 				NowScene = Scene::Result;
 				return;
 			}
-			else if (IsMulti) {
-				Shared.Players[Shared.MyIndex].State = 2;
-			}
+			Shared.Players[Shared.MyIndex].State = 3;
 		}
 
-		if (IsMulti && Shared.PlayerCount >= 2) {
-			Chart.Judge[0].NoteType = '\0';
-			Chart.Judge[0].HitJudge = JudgeType::None;
-			if (Shared.HitKey != HitType::Null && Shared.GetIndex != Shared.MyIndex) {
-				Shared.GetIndex += (Shared.GetIndex <= Shared.MyIndex);
-				switch (Shared.HitKey) {
-				case HitType::DonLeft:
-				case HitType::DonRight:
-				case HitType::KaLeft:
-				case HitType::KaRight:
-					MiniTaikoFlash[(int)Shared.HitKey + (4 * Shared.GetIndex)].Start();
-					if (Shared.Judge.HitJudge != JudgeType::None) {
-						HitNote[Shared.GetIndex].Add(HitNoteData(Shared.Judge.NoteType, Shared.Judge.HitJudge));
+		if (IsMulti) {
+			if (Shared.PlayerCount >= 2) {
+				Chart.Judge[0].NoteType = '\0';
+				Chart.Judge[0].HitJudge = JudgeType::None;
+				if (Shared.HitKey != HitType::Null && Shared.GetIndex != Shared.MyIndex) {
+					Shared.GetIndex += (Shared.GetIndex <= Shared.MyIndex);
+					switch (Shared.HitKey) {
+					case HitType::DonLeft:
+					case HitType::DonRight:
+					case HitType::KaLeft:
+					case HitType::KaRight:
+						MiniTaikoFlash[(int)Shared.HitKey + (4 * Shared.GetIndex)].Start();
+						if (Shared.Judge.HitJudge != JudgeType::None) {
+							HitNote[Shared.GetIndex].Add(HitNoteData(Shared.Judge.NoteType, Shared.Judge.HitJudge));
+						}
+						break;
+					case HitType::DonBig:
+					case HitType::KaBig:
+						MiniTaikoFlash[((int)Shared.HitKey - 4) + (4 * Shared.GetIndex)].Start();
+						MiniTaikoFlash[((int)Shared.HitKey - 2) + (4 * Shared.GetIndex)].Start();
+						if (Shared.Judge.HitJudge != JudgeType::None) {
+							HitNote[Shared.GetIndex].Add(HitNoteData(((int)Shared.HitKey + 48) - 1, Shared.Judge.HitJudge));
+						}
+						break;
+					case HitType::Empty:
+						Chart.Judge[Shared.GetIndex].Combo = 0;
+						break;
 					}
-					break;
-				case HitType::DonBig:
-				case HitType::KaBig:
-					MiniTaikoFlash[((int)Shared.HitKey - 4) + (4 * Shared.GetIndex)].Start();
-					MiniTaikoFlash[((int)Shared.HitKey - 2) + (4 * Shared.GetIndex)].Start();
-					if (Shared.Judge.HitJudge != JudgeType::None) {
-						HitNote[Shared.GetIndex].Add(HitNoteData(((int)Shared.HitKey + 48) - 1, Shared.Judge.HitJudge));
-					}
-					break;
-				case HitType::Empty:
-					Chart.Judge[Shared.GetIndex].Combo = 0;
-					break;
+					Chart.Judge[Shared.GetIndex] = Shared.Judge;
+					Shared.HitKey = HitType::Null;
 				}
-				Chart.Judge[Shared.GetIndex] = Shared.Judge;
-				Shared.HitKey = HitType::Null;
 			}
 		}
 		else {
@@ -3301,14 +3322,66 @@ RollType = '\0'
 	}
 
 	int ResultIndex = 0;
+	int CrownIndex = 0;
 
+	void ScoreDataSave() {
+
+		json data;
+		JudgeData Judge = Chart.Judge[0];
+		fs::path filepath = GetExecutablePath().parent_path() / "scoredata.json";
+		std::string ChartPath = u8StrToStr(Chart.OriginalData.ChartPath);
+		std::string CourseName = magic_enum::enum_name((CourseType)CourseIndex).data();
+
+		if (!fs::exists(filepath)) {
+			data = json::object();
+		}
+		else {
+			std::ifstream ifs(filepath, std::ios::binary);
+			std::vector<uint8_t> bson_vec((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+			data = json::from_bson(bson_vec);
+			ifs.close();
+		}
+
+		data[ChartPath][CourseName]["Score"] = Judge.Score;
+		data[ChartPath][CourseName]["Crown"] = CrownIndex;
+
+		std::vector<uint8_t> v_bson = json::to_bson(data);
+		std::ofstream ofs(filepath, std::ios::binary);
+		ofs.write(reinterpret_cast<const char*>(v_bson.data()), v_bson.size());
+	}
+	ScoreData ScoreDataLoad(const std::string& chartpath) {
+
+		ScoreData Score;
+		fs::path filepath = GetExecutablePath().parent_path() / "scoredata.json";
+		std::ifstream ifs(filepath, std::ios::binary);
+		std::string CourseName = magic_enum::enum_name((CourseType)CourseIndex).data();
+
+		if (!ifs.is_open()) {
+			ifs.close();
+			return Score;
+		}
+
+		std::vector<uint8_t> bson_vec((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+		json data = json::from_bson(bson_vec);
+
+		if (data.contains(chartpath) && data[chartpath].contains(CourseName)) {
+			Score.Score = data[chartpath][CourseName]["Score"];
+			Score.Crown = data[chartpath][CourseName]["Crown"];
+		}
+		return Score;
+	}
 	void ResultEnd() {
 		if (IsMulti) {
 			std::ranges::for_each(Shared.Players, [](PlayerData& data) { data.State = 0; });
 			Shared.Judge = JudgeData();
+			IsLoad = false;
+			ResultIndex = 0;
+			return;
 		}
-		IsLoad = false;
-		ResultIndex = 0;
+		else if (Chart.Judge[0].Score > ScoreDataLoad(u8StrToStr(Chart.OriginalData.ChartPath)).Score) {
+			ScoreDataSave();
+		}
+		CrownIndex = 0;
 	}
 	void ResultDraw() {
 
@@ -3379,21 +3452,20 @@ RollType = '\0'
 			JudgeDraw(Skin.Base->Result.Config.RollPos, Judge.Roll);
 			JudgeDraw(Skin.Base->Result.Config.MaxComboPos, Judge.MaxCombo);
 
-			int crownindex = 0;
 			if (Judge.Accuracy >= 75) {
-				crownindex = 1;
+				CrownIndex = 1;
 			}
 			if (Judge.Accuracy >= 90) {
-				crownindex = 2;
+				CrownIndex = 2;
 			}
 			if (Judge.Accuracy >= 90 && Judge.Bad == 0) {
-				crownindex = 3;
+				CrownIndex = 3;
 			}
 			if (Judge.Accuracy >= 90 && Judge.Bad == 0 && Judge.Ok == 0) {
-				crownindex = 4;
+				CrownIndex = 4;
 			}
 
-			Skin.Base->Result.Image.Crown.Draw({}, crownindex);
+			Skin.Base->Result.Image.Crown.Draw({}, CrownIndex);
 			Skin.Base->Result.Font.Title.Draw(
 				Skin.Base->Result.Config.TitlePos,
 				GetColor(255, 255, 255),
