@@ -841,6 +841,11 @@ struct SharedData {
 		return view;
 	}
 
+	void Clear() {
+		if (!FileData.empty()) { FileData.clear(); }
+		if (!WaveData.empty()) { WaveData.clear(); }
+	}
+
 	auto operator<=>(const SharedData&) const = default;
 };
 
@@ -1970,12 +1975,12 @@ public:
 		if (IsMulti) {
 			if (IsLoad) {
 				if (Shared.HitKey == HitType::Enter) {
-					if (!Shared.FileData.empty()) { Shared.FileData.clear(); }
-					if (!Shared.WaveData.empty()) { Shared.WaveData.clear(); }
+					Shared.Clear();
 					if (CheckState(2)) {
 						if (!Shared.Players[Shared.MyIndex].IsHost) {
 							Skin.Base->MultiRoom.SE.Don.Play();
 						}
+						SetSongSpeed();
 						WaitVSync(10);
 						Chart.NowTime.Start();
 						NowScene = Scene::Playing;
@@ -2028,8 +2033,6 @@ public:
 					}
 					else if (CheckState(1)) {
 						Skin.Base->MultiRoom.SE.Don.Play();
-						if (!Shared.FileData.empty()) { Shared.FileData.clear(); }
-						if (!Shared.WaveData.empty()) { Shared.WaveData.clear(); }
 						Shared.HitKey = HitType::Enter;
 					}
 				}
@@ -2098,6 +2101,17 @@ public:
 	void MemToFile(const fs::path& path, const std::vector<char>& datas) {
 		std::ofstream ofs(path);
 		ofs << datas.data();
+	}
+	void SetSongSpeed() {
+		double SongSpeed = !IsMulti ? Config.SongSpeed : Shared.SongSpeed;
+		if (!Chart.OriginalData.MoviePath.empty()) {
+			Chart.Movie.Load(u8StrToStr(Chart.OriginalData.MoviePath), SongSpeed, 
+				(Chart.OriginalData.MovieOffset < 0 ? Chart.OriginalData.MovieOffset * -1000 : Chart.SongBlankTime));
+		}
+		Chart.SongData.SetVolume(Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
+		int freq = Chart.SongData.Frequency * SongSpeed;
+		Chart.SongData.SetFrequency(freq);
+		Chart.SongSpeed = (double)freq / Chart.SongData.Frequency;
 	}
 	void LoadingDraw() {
 		DrawFormatString(0, 8, GetColor(255, 255, 255), "ChartLoading...");
@@ -2439,16 +2453,7 @@ RollType = '\0'
 			SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
 		}
 
-		double SongSpeed = !IsMulti ? Config.SongSpeed : Shared.SongSpeed;
-
-		if (!LoadData.MoviePath.empty()) {
-			Chart.Movie.Load(u8StrToStr(LoadData.MoviePath), SongSpeed, (LoadData.MovieOffset < 0 ? LoadData.MovieOffset * -1000 : Chart.SongBlankTime));
-		}
-
-		Chart.SongData.SetVolume(Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
-		int freq = Chart.SongData.Frequency * SongSpeed;
-		Chart.SongData.SetFrequency(freq);
-		Chart.SongSpeed = (double)freq / Chart.SongData.Frequency;
+		SetSongSpeed();
 
 		Skin.Base->Playing.SE.Don.SetVolume(Chart.OriginalData.SeVolume * (Config.SEVolume / 100));
 		Skin.Base->Playing.SE.Ka.SetVolume(Chart.OriginalData.SeVolume * (Config.SEVolume / 100));
