@@ -1858,7 +1858,7 @@ public:
 	int GrantIndex = -1;
 
 	void MultiDataInit() {
-		if (IsMulti) { Socket.Close(); }
+		if (Socket.IsValid()) { Socket.Close(); }
 		Shared = SharedData();
 		Socket = TCPSocket();
 		IsMulti = false;
@@ -2070,14 +2070,12 @@ public:
 		Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
 			if (Shared.Players[Shared.MyIndex].State) {
 				Shared.Players[Shared.MyIndex].State = 0;
+				return;
 			}
-			else {
-				MultiDataInit();
-				NowScene = Scene::ModeSelect;
-			}
+			MultiDataInit();
+			NowScene = Scene::ModeSelect;
 			});
 	}
-
 
 	double ScoreRateCalc(double judge, double basis) {
 		const double c = 0.9;
@@ -2425,6 +2423,7 @@ RollType = '\0'
 			}
 		}
 
+		Chart.AllNoteCount = NoteCount;
 		Chart.AddScore = LoadData.Courses[CourseIndex].AddScore;
 		if (Chart.AddScore == 0) {
 			Chart.AddScore = 1000000 / (double)NoteCount;
@@ -2597,9 +2596,10 @@ RollType = '\0'
 			OriginalData = ChartData();
 			AutoPlayLR = false;
 			NowGoGo = false;
+			AddScore = 0;
+			AllNoteCount = 0;
 			SongBlankTime = 0;
 			SongSpeed = 1.0;
-			AddScore = 0;
 			NowBPM = 0;
 		}
 
@@ -2609,6 +2609,7 @@ RollType = '\0'
 		ChartData OriginalData;
 
 		uint64_t AddScore = 0;
+		uint64_t AllNoteCount = 0;
 
 		SoundData SongData;
 		double SongBlankTime = 0;
@@ -2741,6 +2742,22 @@ RollType = '\0'
 			Skin.Base->Playing.Image.LaneFrame.Draw(DelayPos);
 			Skin.Base->Playing.Image.Lane.Draw(DelayPos);
 			SetDrawBlendMode(0, 0);
+
+			Skin.Base->Playing.Image.ProgressBar.Draw(DelayPos, 0);
+			if (Chart.Judge[idx].HitNote > 0) {	
+
+				double Ratio = ((double)Chart.Judge[idx].Good + (double)Chart.Judge[idx].Ok * 0.5) / Chart.AllNoteCount;
+				float Width = Skin.Base->Playing.Image.ProgressBar.Size.Width * Ratio;
+				float MaxWidth = Skin.Base->Playing.Image.ProgressBar.Size.Width;
+
+				Skin.Base->Playing.Image.ProgressBar.RectDraw(
+					DelayPos,
+					{ 0, Skin.Base->Playing.Image.ProgressBar.Size.Height },
+					{ Width < MaxWidth ? Width : MaxWidth,
+					Skin.Base->Playing.Image.ProgressBar.Size.Height },
+					1
+				);
+			}
 
 			Skin.Base->Playing.Image.Note.Draw(DelayPos);
 
@@ -3293,7 +3310,9 @@ RollType = '\0'
 				}
 			}
 		}
+
 		else {
+
 			Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
 				NowScene = Scene::SongSelect;
 				});
