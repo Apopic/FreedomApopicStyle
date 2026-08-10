@@ -321,12 +321,14 @@ public:
 		ValLoad(SongSelect, Config, CoursePos);
 		ValLoad(SongSelect, Config, LevelPos);
 		ValLoad(SongSelect, Config, HighScorePos);
+		ValLoad(SongSelect, Config, KeyWordPos);
 		ValLoad(SongSelect, Config, CourseBoxDistance);
 
 		DataLoad(SongSelect, Image, BackGround);
 		DataLoad(SongSelect, Image, Box);
 		DataLoad(SongSelect, Image, TitleBox);
 		DataLoad(SongSelect, Image, CourseBox);
+		DataLoad(SongSelect, Image, SearchBox);
 		DataLoad(SongSelect, Image, Crown);
 
 		DataLoad(SongSelect, Font, Title);
@@ -336,6 +338,7 @@ public:
 		DataLoad(SongSelect, Font, Course);
 		DataLoad(SongSelect, Font, Level);
 		DataLoad(SongSelect, Font, HighScore);
+		DataLoad(SongSelect, Font, KeyWord);
 
 		DataLoad(SongSelect, SE, Don);
 		DataLoad(SongSelect, SE, Ka);
@@ -531,6 +534,7 @@ public:
 				Pos2D<float> CoursePos;
 				Pos2D<float> LevelPos;
 				Pos2D<float> HighScorePos;
+				Pos2D<float> KeyWordPos;
 				float CourseBoxDistance;
 			} Config;
 			struct _Image {
@@ -538,6 +542,7 @@ public:
 				GraphData Box;
 				GraphData TitleBox;
 				GraphData CourseBox;
+				GraphData SearchBox;
 				GraphData Crown;
 			} Image;
 			struct _Font {
@@ -548,6 +553,7 @@ public:
 				FontData Course;
 				FontData Level;
 				FontData HighScore;
+				FontData KeyWord;
 			} Font;
 			struct _SE {
 				SoundData Don;
@@ -1340,12 +1346,93 @@ public:
 		BoxDatasUpdate();
 		BoxDataIndex = std::clamp<size_t>(BoxDataIndex, 0, BoxDatas.size() - 1);
 	}
-	void BoxDatasUpdate() {
+	void BoxDatasUpdate(bool is_search = false, const std::string& keyword = "") {
+
+		static auto TolowerFind = [](std::string str, std::string findstr) {
+			return (bool)(ToLower(str).find(ToLower(findstr)) != std::string::npos);
+			};
+
 		BoxDatas.clear();
 		BoxDatas.reserve(TempBoxDatas.capacity());
 		auto recusiveproc = [&](const std::vector<std::unique_ptr<BoxData>>& datas, auto f) -> void {
 			for (size_t i = 0; i < datas.size(); ++i) {
 				if (datas[i]->IsGenre()) {
+					if (is_search && !keyword.empty()) {
+						for (auto& data : datas[i]->GetGenre()->Datas) {
+							if (data->IsGenre()) { continue; }
+
+							bool is_find = false;
+							Exsubstr(keyword, "l=", [&](const std::string& strdata) {
+								if (!strdata.empty()) {
+									if (is_find) { return; }
+									if (!IsDigit(strdata)) { return; }
+									if (std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
+										{ return course.Level == std::stoull(strdata); })) {
+										BoxDatas.push_back(data.get());
+										is_find = true;
+									}
+								}
+								});
+							Exsubstr(keyword, "c=", [&](const std::string& strdata) {
+								if (!strdata.empty()) {
+									if (is_find) { return; }
+									if (!IsDigit(strdata)) { return; }
+									if (stoi(strdata) >= (int)CourseType::Count) { return; }
+									if (data->GetChart()->Courses[stoi(strdata)].IsPlayable) {
+										BoxDatas.push_back(data.get());
+										is_find = true;
+									}
+								}
+								});
+							Exsubstr(keyword, "g=", [&](const std::string& strdata) {
+								if (!strdata.empty()) {
+									if (is_find) { return; }
+									if (TolowerFind(datas[i]->GetGenre()->Name, strdata)) {
+										BoxDatas.push_back(data.get());
+										is_find = true;
+									}
+								}
+								});
+							Exsubstr(keyword, "b=", [&](const std::string& strdata) {
+								if (!strdata.empty()) {
+									if (is_find) { return; }
+									if (!IsDigit(strdata)) { return; }
+									if ((int)data->GetChart()->BPM == (int)std::stod(strdata)) {
+										BoxDatas.push_back(data.get());
+										is_find = true;
+									}
+								}
+								});
+							Exsubstr(keyword, "b<=", [&](const std::string& strdata) {
+								if (!strdata.empty()) {
+									if (is_find) { return; }
+									if (!IsDigit(strdata)) { return; }
+									if (data->GetChart()->BPM <= std::stod(strdata)) {
+										BoxDatas.push_back(data.get());
+										is_find = true;
+									}
+								}
+								});
+							Exsubstr(keyword, "b>=", [&](const std::string& strdata) {
+								if (!strdata.empty()) {
+									if (is_find) { return; }
+									if (!IsDigit(strdata)) { return; }
+									if (data->GetChart()->BPM >= std::stod(strdata)) {
+										BoxDatas.push_back(data.get());
+										is_find = true;
+									}
+								}
+								});
+							
+							if (is_find) { continue; }
+							if (!TolowerFind(data->GetChart()->Title, keyword)
+								&& !TolowerFind(data->GetChart()->Subtitle, keyword)) {
+								continue;
+							}
+							BoxDatas.push_back(data.get());
+						}
+						continue;
+					}
 					BoxDatas.push_back(datas[i].get());
 					if (datas[i]->GetGenre()->IsOpen) {
 						f(datas[i]->GetGenre()->Datas, f);
@@ -1354,9 +1441,70 @@ public:
 			}
 			for (size_t i = 0; i < datas.size(); ++i) {
 				if (datas[i]->IsGenre()) { continue; }
+				if (bool is_find = false; is_search && !keyword.empty()) {
+
+					Exsubstr(keyword, "l=", [&](const std::string& strdata) {
+						if (!strdata.empty()) {
+							if (is_find) { return; }
+							if (!IsDigit(strdata)) { return; }
+							if (std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
+								{ return course.Level == std::stoull(strdata); })) {
+								BoxDatas.push_back(datas[i].get());
+								is_find = true;
+							}
+						}
+						});
+					Exsubstr(keyword, "c=", [&](const std::string& strdata) {
+						if (!strdata.empty()) {
+							if (is_find) { return; }
+							if (!IsDigit(strdata)) { return; }
+							if (stoi(strdata) >= (int)CourseType::Count) { return; }
+							if (datas[i]->GetChart()->Courses[stoi(strdata)].IsPlayable) {
+								BoxDatas.push_back(datas[i].get());
+								is_find = true;
+							}
+						}
+						});
+					Exsubstr(keyword, "b=", [&](const std::string& strdata) {
+						if (!strdata.empty()) {
+							if (is_find) { return; }
+							if (!IsDigit(strdata)) { return; }
+							if ((int)datas[i]->GetChart()->BPM == (int)std::stod(strdata)) {
+								BoxDatas.push_back(datas[i].get());
+								is_find = true;
+							}
+						}
+						});
+					Exsubstr(keyword, "b<=", [&](const std::string& strdata) {
+						if (!strdata.empty()) {
+							if (is_find) { return; }
+							if (!IsDigit(strdata)) { return; }
+							if (datas[i]->GetChart()->BPM <= std::stod(strdata)) {
+								BoxDatas.push_back(datas[i].get());
+								is_find = true;
+							}
+						}
+						});
+					Exsubstr(keyword, "b>=", [&](const std::string& strdata) {
+						if (!strdata.empty()) {
+							if (is_find) { return; }
+							if (!IsDigit(strdata)) { return; }
+							if (datas[i]->GetChart()->BPM >= std::stod(strdata)) {
+								BoxDatas.push_back(datas[i].get());
+								is_find = true;
+							}
+						}
+						});
+
+					if (is_find) { continue; }
+					if (!TolowerFind(datas[i]->GetChart()->Title, keyword) 
+						&& !TolowerFind(datas[i]->GetChart()->Subtitle, keyword)) {
+						continue;
+					}
+				}
 				BoxDatas.push_back(datas[i].get());
 			}
-			if (BoxDatas.empty()) {
+			if (is_search && BoxDatas.empty()) {
 				BoxDatasUpdate();
 			}
 			};
@@ -1401,13 +1549,18 @@ public:
 		Skin.Base->SongSelect.Image.BackGround.Draw({});
 
 		if (!IsCourseSelect) {
+
+			if (InputData.Handle != 0) {
+				SetDrawBlendMode(DX_BLENDMODE_ALPHA, 50);
+			}
+
 			for (int i = (BoxDataIndex - 6); i < (BoxDataIndex + 6); ++i) {
 				if (i < 0 || i >= BoxDatas.size()) {
 					continue;
 				}
 
 				Pos2D<float> pos = {
-					Skin.Base->SongSelect.Config.BoxDistance.X,
+					0,
 					(i - BoxDataIndex) * Skin.Base->SongSelect.Config.BoxDistance.Y
 				};
 				pos = {
@@ -1421,7 +1574,7 @@ public:
 					(BoxDatas[i]->GenreColor.G + c),
 					(BoxDatas[i]->GenreColor.B + c)
 				);
-				Skin.Base->SongSelect.Image.Box.Draw(pos);
+				Skin.Base->SongSelect.Image.Box.Draw({ 0, pos.Y });
 				SetDrawAddColor(0, 0, 0);
 
 				if (BoxDatas[i]->IsGenre()) {
@@ -1450,6 +1603,19 @@ public:
 						BoxDatas[i]->GetChart()->Title
 					);
 				}
+			}
+			SetDrawBlendMode(0, 0);
+
+			if (InputData.Handle != 0) {
+
+				Skin.Base->SongSelect.Image.SearchBox.Draw({});
+				SetKeyInputDrawArea(
+					Skin.Base->SongSelect.Image.SearchBox.Pos.X - Skin.Base->SongSelect.Image.SearchBox.Size.Width / 2,
+					Skin.Base->SongSelect.Image.SearchBox.Pos.Y - Skin.Base->SongSelect.Image.SearchBox.Size.Height / 2,
+					Skin.Base->SongSelect.Image.SearchBox.Pos.X + Skin.Base->SongSelect.Image.SearchBox.Size.Width / 2,
+					Skin.Base->SongSelect.Image.SearchBox.Pos.Y + Skin.Base->SongSelect.Image.SearchBox.Size.Height / 2,
+					InputData.Handle);
+				DrawKeyInputString(Skin.Base->SongSelect.Config.KeyWordPos.X, Skin.Base->SongSelect.Config.KeyWordPos.Y, InputData.Handle);			
 			}
 		}
 		else {
@@ -1575,34 +1741,85 @@ public:
 			DemoSongPlayBlank.Stop();
 			DemoSong.Delete();
 			};
+		static auto SongSearchProc = [&]() {
 
-		Input.HitKeyesProcess(Config.KaInputLeft, KeyState::Down, [&] { KaInputProc(false); });
-		Input.HitKeyesProcess(Config.KaInputRight, KeyState::Down, [&] { KaInputProc(true); });
-		Input.HitKeyesProcess({ VK_UP, VK_LEFT }, KeyState::Down, [&] { KaInputProc(false); });
-		Input.HitKeyesProcess({ VK_DOWN, VK_RIGHT }, KeyState::Down, [&] { KaInputProc(true); });
+			Skin.Base->SongSelect.SE.Don.Play();
+			if (InputData.Handle == 0) {
+				InputData.Handle = MakeKeyInput(CHAR_MAX, false, false, false);
+				SetActiveKeyInput(InputData.Handle);
+				SetKeyInputStringFont(Skin.Base->SongSelect.Font.KeyWord.Handle);
+				return;
+			}
 
-		Input.HitKeyesProcess(Config.DonInputLeft, KeyState::Down, DonInputProc);
-		Input.HitKeyesProcess(Config.DonInputRight, KeyState::Down, DonInputProc);
-		Input.HitKeyProcess(VK_RETURN, KeyState::Down, DonInputProc);
+			InputData.Load();
+			BoxDatasUpdate(true, ToLower(InputData.Buffer));
 
-		Input.HitKeyProcess(VK_TAB, KeyState::Down, RandomInputProc);
-		Input.HitKeyProcess(VK_F1, KeyState::Down, [&] {
-			Skin.Base->SongSelect.SE.Don.Play();
-			NowScene = Scene::ConfigMenu;
-			PrevScene = Scene::SongSelect;
-			});
-		Input.HitKeyProcess(VK_F2, KeyState::Down, [&] { 
-			Skin.Base->SongSelect.SE.Don.Play();
-			EnumChart(Config.SongDirectories); 
-			});
-		Input.HitKeyProcess(VK_F3, KeyState::Down, [&] { 
-			Skin.Base->SongSelect.SE.Don.Play();
-			Config.Load();
-			});
-		Input.HitKeyProcess(VK_F4, KeyState::Down, [&] { 
-			Skin.Base->SongSelect.SE.Don.Play();
-			Skin.Load(Config.SkinName);
-			});
+			if (BoxDatas.empty()) {
+				BoxDatasUpdate();
+			}
+
+			DeleteKeyInput(InputData.Handle);
+			InputData.Handle = 0;
+			BoxDataIndex = 0;
+			DemoSongPlayBlank.Reset();
+			DemoSong.Delete();
+
+			};
+
+		if (InputData.Handle == 0) {
+
+			Input.HitKeyesProcess(Config.KaInputLeft, KeyState::Down, [&] { KaInputProc(false); });
+			Input.HitKeyesProcess(Config.KaInputRight, KeyState::Down, [&] { KaInputProc(true); });
+			Input.HitKeyesProcess({ VK_UP, VK_LEFT }, KeyState::Down, [&] { KaInputProc(false); });
+			Input.HitKeyesProcess({ VK_DOWN, VK_RIGHT }, KeyState::Down, [&] { KaInputProc(true); });
+
+			Input.HitKeyesProcess(Config.DonInputLeft, KeyState::Down, DonInputProc);
+			Input.HitKeyesProcess(Config.DonInputRight, KeyState::Down, DonInputProc);
+			Input.HitKeyProcess(VK_RETURN, KeyState::Down, DonInputProc);
+
+			if (!IsCourseSelect) {
+
+				Input.HitKeyProcess(VK_TAB, KeyState::Down, RandomInputProc);
+				Input.HitKeyProcess(VK_SPACE, KeyState::Down, SongSearchProc);
+
+				Input.HitKeyProcess(VK_F1, KeyState::Down, [&] {
+					Skin.Base->SongSelect.SE.Don.Play();
+					NowScene = Scene::ConfigMenu;
+					PrevScene = Scene::SongSelect;
+					});
+				Input.HitKeyProcess(VK_F2, KeyState::Down, [&] {
+					Skin.Base->SongSelect.SE.Don.Play();
+					EnumChart(Config.SongDirectories);
+					});
+				Input.HitKeyProcess(VK_F3, KeyState::Down, [&] {
+					Skin.Base->SongSelect.SE.Don.Play();
+					Config.Load();
+					});
+				Input.HitKeyProcess(VK_F4, KeyState::Down, [&] {
+					Skin.Base->SongSelect.SE.Don.Play();
+					Skin.Load(Config.SkinName);
+					});
+
+				const int MouseWheel = Input.GetMouseWheel();
+
+				if (MouseWheel != 0) {
+					Skin.Base->SongSelect.SE.Ka.Play();
+					const int& _mousewheel = (std::abs(MouseWheel) % BoxDatas.size()) * (std::signbit(MouseWheel) ? -1 : 1) * -1;
+					if (std::signbit(_mousewheel)) {
+						BoxDataIndex = BoxDataIndex + _mousewheel <= -1 ? BoxDatas.size() + _mousewheel : BoxDataIndex + _mousewheel;
+					}
+					else {
+						BoxDataIndex = BoxDataIndex + _mousewheel >= BoxDatas.size() ? (BoxDataIndex + _mousewheel) - BoxDatas.size() : BoxDataIndex + _mousewheel;
+					}
+					DemoSongPlayBlank.Reset();
+					DemoSong.Delete();
+				}
+			}
+
+			return;
+		}
+
+		Input.HitKeyProcess(VK_RETURN, KeyState::Down, SongSearchProc);
 	}
 
 	SharedData Shared = SharedData();
@@ -3738,7 +3955,6 @@ RollType = '\0'
 			}
 
 			if (CheckKeyInput(InputData.Handle) == 0) {
-				SetKeyInputStringFont(Skin.Base->ConfigMenu.Font.String.Handle);
 				DrawKeyInputString(640, 340, InputData.Handle);
 			}
 
@@ -3881,6 +4097,7 @@ RollType = '\0'
 					ConfigInputFlag = 1;
 					InputData.Handle = MakeKeyInput(255, false, true, false);
 					SetActiveKeyInput(InputData.Handle);
+					SetKeyInputStringFont(Skin.Base->ConfigMenu.Font.String.Handle);
 				}
 				if (ConfigGenre == ConfigGenreData::Key) {
 					ConfigInputFlag = 1;
@@ -3938,6 +4155,7 @@ RollType = '\0'
 				ConfigKeyCode = 0;
 				ConfigInputFlag = 0;
 				DeleteKeyInput(InputData.Handle);
+				InputData.Handle = 0;
 
 				if (IsMulti) {
 
