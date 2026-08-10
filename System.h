@@ -2681,16 +2681,17 @@ RollType = '\0'
 	std::vector<std::string> Names = std::vector<std::string>();
 
 	void PlayingInit() {
-		for (auto&& taiko : MiniTaikoFlash) {
-			taiko.Reset();
-		}
+
 		if (IsMulti) {
 			if (!Names.empty()) { Names.clear(); }
 			for (auto&& player : Shared.Players) {
 				Names.push_back(player.Name);
 			}
-			Names.erase(Names.begin() + Shared.MyIndex);
-			Names.insert(Names.begin(), Shared.Players[Shared.MyIndex].Name);
+			std::ranges::rotate(Names, Names.begin() + Shared.MyIndex);
+		}
+
+		for (auto&& taiko : MiniTaikoFlash) {
+			taiko.Reset();
 		}
 	}
 	void PlayingEnd() {
