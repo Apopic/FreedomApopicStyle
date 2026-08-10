@@ -1360,67 +1360,80 @@ public:
 					if (is_search && !keyword.empty()) {
 						for (auto& data : datas[i]->GetGenre()->Datas) {
 							if (data->IsGenre()) { continue; }
-
 							bool is_find = false;
 							Exsubstr(keyword, "l=", [&](const std::string& strdata) {
-								if (!strdata.empty()) {
-									if (is_find) { return; }
-									if (!IsDigit(strdata)) { return; }
-									if (std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
-										{ return course.Level == std::stoull(strdata); })) {
-										BoxDatas.push_back(data.get());
-										is_find = true;
-									}
+								if (strdata.empty()) { return; }
+								if (is_find) { return; }
+								if (!IsDigit(strdata)) { return; }
+								if (std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
+									{ return course.Level == std::stoull(strdata); })) {
+									BoxDatas.push_back(data.get());
+									is_find = true;
+								}
+								});
+							Exsubstr(keyword, "l<=", [&](const std::string& strdata) {
+								if (strdata.empty()) { return; }
+								if (is_find) { return; }
+								if (!IsDigit(strdata)) { return; }
+								if (std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
+									{ return course.Level <= std::stoull(strdata); })) {
+									BoxDatas.push_back(data.get());
+									is_find = true;
+								}
+								});
+							Exsubstr(keyword, "l>=", [&](const std::string& strdata) {
+								if (strdata.empty()) { return; }
+								if (is_find) { return; }
+								if (!IsDigit(strdata)) { return; }
+								if (std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
+									{ return course.Level >= std::stoull(strdata); })) {
+									BoxDatas.push_back(data.get());
+									is_find = true;
 								}
 								});
 							Exsubstr(keyword, "c=", [&](const std::string& strdata) {
-								if (!strdata.empty()) {
-									if (is_find) { return; }
-									if (!IsDigit(strdata)) { return; }
-									if (stoi(strdata) >= (int)CourseType::Count) { return; }
-									if (data->GetChart()->Courses[stoi(strdata)].IsPlayable) {
-										BoxDatas.push_back(data.get());
-										is_find = true;
-									}
+								if (strdata.empty()) { return; }
+								if (is_find) { return; }
+								if (!IsDigit(strdata)) { return; }
+								if (stoi(strdata) >= (int)CourseType::Count) { return; }
+								if (data->GetChart()->Courses[stoi(strdata)].IsPlayable) {
+									BoxDatas.push_back(data.get());
+									is_find = true;
 								}
 								});
 							Exsubstr(keyword, "g=", [&](const std::string& strdata) {
-								if (!strdata.empty()) {
-									if (is_find) { return; }
-									if (TolowerFind(datas[i]->GetGenre()->Name, strdata)) {
-										BoxDatas.push_back(data.get());
-										is_find = true;
-									}
+								if (strdata.empty()) { return; }
+								if (is_find) { return; }
+								if (TolowerFind(datas[i]->GetGenre()->Name, strdata)) {
+									BoxDatas.push_back(data.get());
+									is_find = true;
 								}
 								});
 							Exsubstr(keyword, "b=", [&](const std::string& strdata) {
-								if (!strdata.empty()) {
-									if (is_find) { return; }
-									if (!IsDigit(strdata)) { return; }
-									if ((int)data->GetChart()->BPM == (int)std::stod(strdata)) {
-										BoxDatas.push_back(data.get());
-										is_find = true;
-									}
+								if (strdata.empty()) { return; }
+								if (is_find) { return; }
+								if (!IsDigit(strdata)) { return; }
+								if ((int)data->GetChart()->BPM == (int)std::stod(strdata)) {
+									BoxDatas.push_back(data.get());
+									is_find = true;
 								}
 								});
 							Exsubstr(keyword, "b<=", [&](const std::string& strdata) {
-								if (!strdata.empty()) {
-									if (is_find) { return; }
-									if (!IsDigit(strdata)) { return; }
-									if (data->GetChart()->BPM <= std::stod(strdata)) {
-										BoxDatas.push_back(data.get());
-										is_find = true;
-									}
+								if (strdata.empty()) { return; }
+								if (is_find) { return; }
+								if (!IsDigit(strdata)) { return; }
+								if (data->GetChart()->BPM <= std::stod(strdata)) {
+									BoxDatas.push_back(data.get());
+									is_find = true;
 								}
 								});
 							Exsubstr(keyword, "b>=", [&](const std::string& strdata) {
-								if (!strdata.empty()) {
-									if (is_find) { return; }
-									if (!IsDigit(strdata)) { return; }
-									if (data->GetChart()->BPM >= std::stod(strdata)) {
-										BoxDatas.push_back(data.get());
-										is_find = true;
-									}
+								if (strdata.empty()) { return; }
+								if (is_find) { return; }
+								if (!IsDigit(strdata)) { return; }
+								if (data->GetChart()->BPM >= std::stod(strdata)) {
+									BoxDatas.push_back(data.get());
+									is_find = true;
 								}
 								});
 							
@@ -1442,57 +1455,71 @@ public:
 			for (size_t i = 0; i < datas.size(); ++i) {
 				if (datas[i]->IsGenre()) { continue; }
 				if (bool is_find = false; is_search && !keyword.empty()) {
-
 					Exsubstr(keyword, "l=", [&](const std::string& strdata) {
-						if (!strdata.empty()) {
-							if (is_find) { return; }
-							if (!IsDigit(strdata)) { return; }
-							if (std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
-								{ return course.Level == std::stoull(strdata); })) {
-								BoxDatas.push_back(datas[i].get());
-								is_find = true;
-							}
+						if (strdata.empty()) { return; }
+						if (is_find) { return; }
+						if (!IsDigit(strdata)) { return; }
+						if (std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
+							{ return course.Level == std::stoull(strdata); })) {
+							BoxDatas.push_back(datas[i].get());
+							is_find = true;
+						}
+						});
+					Exsubstr(keyword, "l<=", [&](const std::string& strdata) {
+						if (strdata.empty()) { return; }
+						if (is_find) { return; }
+						if (!IsDigit(strdata)) { return; }
+						if (std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
+							{ return course.Level <= std::stoull(strdata); })) {
+							BoxDatas.push_back(datas[i].get());
+							is_find = true;
+						}
+						});
+					Exsubstr(keyword, "l>=", [&](const std::string& strdata) {
+						if (strdata.empty()) { return; }
+						if (is_find) { return; }
+						if (!IsDigit(strdata)) { return; }
+						if (std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
+							{ return course.Level >= std::stoull(strdata); })) {
+							BoxDatas.push_back(datas[i].get());
+							is_find = true;
 						}
 						});
 					Exsubstr(keyword, "c=", [&](const std::string& strdata) {
-						if (!strdata.empty()) {
-							if (is_find) { return; }
-							if (!IsDigit(strdata)) { return; }
-							if (stoi(strdata) >= (int)CourseType::Count) { return; }
-							if (datas[i]->GetChart()->Courses[stoi(strdata)].IsPlayable) {
-								BoxDatas.push_back(datas[i].get());
-								is_find = true;
-							}
+						if (strdata.empty()) { return; }
+						if (is_find) { return; }
+						if (!IsDigit(strdata)) { return; }
+						if (stoi(strdata) >= (int)CourseType::Count) { return; }
+						if (datas[i]->GetChart()->Courses[stoi(strdata)].IsPlayable) {
+							BoxDatas.push_back(datas[i].get());
+							is_find = true;
 						}
 						});
 					Exsubstr(keyword, "b=", [&](const std::string& strdata) {
-						if (!strdata.empty()) {
-							if (is_find) { return; }
-							if (!IsDigit(strdata)) { return; }
-							if ((int)datas[i]->GetChart()->BPM == (int)std::stod(strdata)) {
-								BoxDatas.push_back(datas[i].get());
-								is_find = true;
-							}
+						if (strdata.empty()) { return; }
+						if (is_find) { return; }
+						if (!IsDigit(strdata)) { return; }
+						if ((int)datas[i]->GetChart()->BPM == (int)std::stod(strdata)) {
+							BoxDatas.push_back(datas[i].get());
+							is_find = true;
 						}
 						});
 					Exsubstr(keyword, "b<=", [&](const std::string& strdata) {
-						if (!strdata.empty()) {
-							if (is_find) { return; }
-							if (!IsDigit(strdata)) { return; }
-							if (datas[i]->GetChart()->BPM <= std::stod(strdata)) {
-								BoxDatas.push_back(datas[i].get());
-								is_find = true;
-							}
+						if (strdata.empty()) { return; }
+						if (is_find) { return; }
+						if (!IsDigit(strdata)) { return; }
+						if (datas[i]->GetChart()->BPM <= std::stod(strdata)) {
+							BoxDatas.push_back(datas[i].get());
+							is_find = true;
 						}
 						});
 					Exsubstr(keyword, "b>=", [&](const std::string& strdata) {
-						if (!strdata.empty()) {
-							if (is_find) { return; }
-							if (!IsDigit(strdata)) { return; }
-							if (datas[i]->GetChart()->BPM >= std::stod(strdata)) {
-								BoxDatas.push_back(datas[i].get());
-								is_find = true;
-							}
+						if (strdata.empty()) { return; }
+						if (is_find) { return; }
+						if (!IsDigit(strdata)) { return; }
+						if (datas[i]->GetChart()->BPM >= std::stod(strdata)) {
+							BoxDatas.push_back(datas[i].get());
+							is_find = true;
 						}
 						});
 
@@ -1943,9 +1970,15 @@ public:
 		if (IsMulti) {
 			if (IsLoad) {
 				if (Shared.HitKey == HitType::Enter) {
+					if (!Shared.FileData.empty()) { Shared.FileData.clear(); }
+					if (!Shared.WaveData.empty()) { Shared.WaveData.clear(); }
 					if (CheckState(2)) {
-						Skin.Base->MultiRoom.SE.Don.Play();
-						NowScene = Scene::Loading;
+						if (!Shared.Players[Shared.MyIndex].IsHost) {
+							Skin.Base->MultiRoom.SE.Don.Play();
+						}
+						WaitVSync(10);
+						Chart.NowTime.Start();
+						NowScene = Scene::Playing;
 						return;
 					}
 					Shared.Players[Shared.MyIndex].State = 2;
@@ -1994,6 +2027,9 @@ public:
 						NowScene = Scene::SongSelect;
 					}
 					else if (CheckState(1)) {
+						Skin.Base->MultiRoom.SE.Don.Play();
+						if (!Shared.FileData.empty()) { Shared.FileData.clear(); }
+						if (!Shared.WaveData.empty()) { Shared.WaveData.clear(); }
 						Shared.HitKey = HitType::Enter;
 					}
 				}
@@ -2435,8 +2471,6 @@ RollType = '\0'
 				NowScene = Scene::MultiRoom;
 				return;
 			}
-			Shared.FileData.clear();
-			Shared.WaveData.clear();
 		}
 
 		WaitVSync(10);
@@ -2644,10 +2678,19 @@ RollType = '\0'
 	};
 
 	std::vector<_HitNote> HitNote = std::vector<_HitNote>();
+	std::vector<std::string> Names = std::vector<std::string>();
 
 	void PlayingInit() {
 		for (auto&& taiko : MiniTaikoFlash) {
 			taiko.Reset();
+		}
+		if (IsMulti) {
+			if (!Names.empty()) { Names.clear(); }
+			for (auto&& player : Shared.Players) {
+				Names.push_back(player.Name);
+			}
+			Names.erase(Names.begin() + Shared.MyIndex);
+			Names.insert(Names.begin(), Shared.Players[Shared.MyIndex].Name);
 		}
 	}
 	void PlayingEnd() {
@@ -3039,7 +3082,7 @@ RollType = '\0'
 					Skin.Base->Playing.Config.PlayerNamePos.Y + DelayPos.Y },
 					GetColor(255, 255, 255),
 					GetColor(0, 0, 0),
-					Shared.Players[idx].Name
+					Names[idx]
 				);
 			}
 
@@ -3717,7 +3760,7 @@ RollType = '\0'
 					GetColor(255, 255, 255),
 					GetColor(0, 0, 0),
 					GetStrlen(Shared.Players[ResultIndex].Name, Skin.Base->Result.Font.PlayerName.Handle),
-					Shared.Players[ResultIndex].Name
+					Names[ResultIndex]
 				);
 			}
 	}
