@@ -805,6 +805,7 @@ struct SharedData {
 	int GetIndex = 0;
 	int CourseIndex = 0;
 	int PlayerCount = 0;
+	double SongSpeed = 1.0;
 
 	Packet::bytearray ToBytes() const {
 		Packet::bytearray ret;
@@ -817,6 +818,7 @@ struct SharedData {
 		Packet::StoreBytes(ret, GetIndex);
 		Packet::StoreBytes(ret, CourseIndex);
 		Packet::StoreBytes(ret, PlayerCount);
+		Packet::StoreBytes(ret, SongSpeed);
 		return ret;
 	}
 	Packet::byte_view FromBytes(Packet::byte_view view) {
@@ -829,6 +831,7 @@ struct SharedData {
 		Packet::LoadBytes(view, GetIndex);
 		Packet::LoadBytes(view, CourseIndex);
 		Packet::LoadBytes(view, PlayerCount);
+		Packet::LoadBytes(view, SongSpeed);
 		return view;
 	}
 
@@ -1723,13 +1726,9 @@ public:
 		if (IsMulti) {
 			if (IsLoad) {
 				if (Shared.HitKey == HitType::Enter) {
-					Shared.FileData.clear();
-					Shared.WaveData.clear();
 					if (CheckState(2)) {
 						Skin.Base->MultiRoom.SE.Don.Play();
-						WaitVSync(10);
-						Chart.NowTime.Start();
-						NowScene = Scene::Playing;
+						NowScene = Scene::Loading;
 						return;
 					}
 					Shared.Players[Shared.MyIndex].State = 2;
@@ -1861,8 +1860,8 @@ public:
 		}
 		else {
 			CourseIndex = Shared.CourseIndex;
-			MemToFile("temp.tja", Shared.FileData);
-			LoadData.Load("temp.tja");
+			MemToFile(u8"temp.tja", Shared.FileData);
+			LoadData.Load(u8"temp.tja");
 		}
 
 		std::string line;
@@ -1873,8 +1872,8 @@ public:
 		}
 		ifs.close();
 
-		if (fs::exists("temp.tja")) {
-			fs::remove("temp.tja");
+		if (fs::exists(u8"temp.tja")) {
+			fs::remove(u8"temp.tja");
 		}
 
 		Chart.Init();
@@ -2188,12 +2187,14 @@ RollType = '\0'
 			SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
 		}
 
+		double SongSpeed = !IsMulti ? Config.SongSpeed : Shared.SongSpeed;
+
 		if (!LoadData.MoviePath.empty()) {
-			Chart.Movie.Load(u8StrToStr(LoadData.MoviePath), Config.SongSpeed, (LoadData.MovieOffset < 0 ? LoadData.MovieOffset * -1000 : Chart.SongBlankTime));
+			Chart.Movie.Load(u8StrToStr(LoadData.MoviePath), SongSpeed, (LoadData.MovieOffset < 0 ? LoadData.MovieOffset * -1000 : Chart.SongBlankTime));
 		}
 
 		Chart.SongData.SetVolume(Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
-		int freq = Chart.SongData.Frequency * Config.SongSpeed;
+		int freq = Chart.SongData.Frequency * SongSpeed;
 		Chart.SongData.SetFrequency(freq);
 		Chart.SongSpeed = (double)freq / Chart.SongData.Frequency;
 
@@ -2201,15 +2202,24 @@ RollType = '\0'
 		Skin.Base->Playing.SE.Ka.SetVolume(Chart.OriginalData.SeVolume * (Config.SEVolume / 100));
 		Skin.Base->Playing.SE.Balloon.SetVolume(Chart.OriginalData.SeVolume * (Config.SEVolume / 100));
 
+		HitNote.resize(Shared.PlayerCount <= 1 ? 1 : Shared.PlayerCount);
+		Chart.Judge.resize(Shared.PlayerCount <= 1 ? 1 : Shared.PlayerCount);
+		Chart.Judge[0].ScoreRateGood = ScoreRateCalc(Config.JudgeGood, 25.0);
+		Chart.Judge[0].ScoreRateOk = ScoreRateCalc(Config.JudgeOk, 75.0);
+
 		if (IsMulti) {
-			if (Shared.Players[Shared.MyIndex].IsHost) {
-				Shared.CourseIndex = CourseIndex;
-				FileToMem(fs::path(LoadData.ChartPath), Shared.FileData, true);
-				FileToMem(fs::path(LoadData.SongPath), Shared.WaveData, false);
+			if (!IsLoad) {
+				if (Shared.Players[Shared.MyIndex].IsHost) {
+					Shared.CourseIndex = CourseIndex;
+					FileToMem(fs::path(LoadData.ChartPath), Shared.FileData, true);
+					FileToMem(fs::path(LoadData.SongPath), Shared.WaveData, false);
+				}
+				IsLoad = true;
+				NowScene = Scene::MultiRoom;
+				return;
 			}
-			IsLoad = true;
-			NowScene = Scene::MultiRoom;
-			return;
+			Shared.FileData.clear();
+			Shared.WaveData.clear();
 		}
 
 		WaitVSync(10);
@@ -2422,11 +2432,6 @@ RollType = '\0'
 		for (auto&& taiko : MiniTaikoFlash) {
 			taiko.Reset();
 		}
-
-		HitNote.resize(Shared.PlayerCount <= 1 ? 1 : Shared.PlayerCount);
-		Chart.Judge.resize(Shared.PlayerCount <= 1 ? 1 : Shared.PlayerCount);
-		Chart.Judge[0].ScoreRateGood = ScoreRateCalc(Config.JudgeGood, 25.0);
-		Chart.Judge[0].ScoreRateOk = ScoreRateCalc(Config.JudgeOk, 75.0);
 	}
 	void PlayingEnd() {
 		Chart.SongData.Delete();
@@ -3928,12 +3933,19 @@ RollType = '\0'
 			}
 
 			if (ConfigInputFlag == 2) {
+
 				Config.Write();
 				ConfigKeyCode = 0;
 				ConfigInputFlag = 0;
 				DeleteKeyInput(InputData.Handle);
+
 				if (IsMulti) {
+
 					Shared.Players[Shared.MyIndex].Name = Config.PlayerName;
+
+					if (Shared.Players[Shared.MyIndex].IsHost) {
+						Shared.SongSpeed = Config.SongSpeed;
+					}
 				}
 			}
 		}
