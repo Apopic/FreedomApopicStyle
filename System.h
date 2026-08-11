@@ -385,6 +385,9 @@ public:
 		DataLoad(Playing, Image, BackGround);
 		DataLoad(Playing, Image, LaneFrame);
 		DataLoad(Playing, Image, Lane);
+		DataLoad(Playing, Image, NormalLane);
+		DataLoad(Playing, Image, ExpertLane);
+		DataLoad(Playing, Image, MasterLane);
 		DataLoad(Playing, Image, Base);
 		DataLoad(Playing, Image, NamePlate);
 		DataLoad(Playing, Image, MiniTaiko);
@@ -607,6 +610,9 @@ public:
 				GraphData BackGround;
 				GraphData LaneFrame;
 				GraphData Lane;
+				GraphData NormalLane;
+				GraphData ExpertLane;
+				GraphData MasterLane;
 				GraphData Base;
 				GraphData NamePlate;
 				GraphData MiniTaiko;
@@ -692,12 +698,62 @@ public:
 	} *Base = nullptr;
 } Skin;
 
+enum class BranchType {
+	Null,
+	Normal,
+	Expert,
+	Master,
+	NotDisplay,
+};
+
+enum class IfBranchType {
+	Null,
+	Perfect,
+	Roll,
+	Score,
+};
+
+enum class ABranchType {
+	Null,
+	Normal_Expert,
+	Normal_Master,
+	Expert_Normal,
+	Expert_Master,
+	Master_Normal,
+	Master_Expert,
+};
+
 enum class JudgeType {
 	None = -1,
 	Good,
 	Ok,
 	Bad,
 	Roll
+};
+
+struct BranchJudge {
+	BranchType NowBranchFlag = BranchType::Null;
+	ABranchType NowBranchAnimation = ABranchType::Null;
+	bool LevelHold = false;
+	uint64_t Score = 0;
+	uint64_t Good = 0;
+	uint64_t Ok = 0;
+	uint64_t Bad = 0;
+	uint64_t Roll = 0;
+	uint64_t HitNote = 0;
+	double Accuracy = 0.0;
+
+	void Init() {
+		Score = 0;
+		Good = 0;
+		Ok = 0;
+		Bad = 0;
+		HitNote = 0;
+		Roll = 0;
+		Accuracy = 0.0;
+	}
+
+	auto operator<=>(const BranchJudge&) const = default;
 };
 
 struct RollData {
@@ -710,6 +766,7 @@ struct RollData {
 struct JudgeData {
 
 	JudgeType HitJudge = JudgeType::None;
+	BranchJudge Branch = BranchJudge();
 	RollData Rolls = RollData();
 	uint64_t Score = 0;
 	uint64_t Good = 0;
@@ -732,27 +789,39 @@ struct JudgeData {
 		if (HitNote != 0) {
 			Accuracy = ((Good / (double)HitNote) + ((Ok / (double)HitNote) * 0.5)) * 100;
 		}
+		if (Branch.HitNote != 0) {
+			Branch.Accuracy = ((Branch.Good / (double)Branch.HitNote) + ((Branch.Ok / (double)Branch.HitNote) * 0.5)) * 100;
+		}
 
 		switch (type) {
 		case JudgeType::Good:
 			++Good;
+			++Branch.Good;
 			++Combo;
 			Score += addscore * ScoreRateGood;
+			Branch.Score += addscore * ScoreRateGood;
 			++HitNote;
+			++Branch.HitNote;
 			break;
 		case JudgeType::Ok:
 			++Ok;
+			++Branch.Ok;
 			++Combo;
 			Score += addscore / 2 * ScoreRateOk;
+			Branch.Score += addscore / 2 * ScoreRateOk;
 			++HitNote;
+			++Branch.HitNote;
 			break;
 		case JudgeType::Bad:
 			++Bad;
+			++Branch.Bad;
 			Combo = 0;
 			++HitNote;
+			++Branch.HitNote;
 			break;
 		case JudgeType::Roll:
 			++Roll;
+			++Branch.Roll;
 			Score += 100;
 			break;
 		}
@@ -775,8 +844,6 @@ enum class HitType {
 	Enter,
 	Back
 };
-
-AES128::cbytearray<16> sharedkey = { '0', 'x', '7', '4', '0', 'x', '6', '5', '0', 'x', '7', '3', '0', 'x', '7', '4', };
 
 struct PlayerData {
 
@@ -1299,7 +1366,7 @@ public:
 	struct ScoreData {
 		uint64_t Score = 0;
 		int Crown = 0;
-	} Score = ScoreData();
+	};
 
 	SoundData DemoSong = SoundData();
 
@@ -1441,7 +1508,7 @@ public:
 									is_find = true;
 								}
 								});
-							
+
 							if (is_find) { continue; }
 							if (!TolowerFind(data->GetChart()->Title, keyword)
 								&& !TolowerFind(data->GetChart()->Subtitle, keyword)) {
@@ -1529,7 +1596,7 @@ public:
 						});
 
 					if (is_find) { continue; }
-					if (!TolowerFind(datas[i]->GetChart()->Title, keyword) 
+					if (!TolowerFind(datas[i]->GetChart()->Title, keyword)
 						&& !TolowerFind(datas[i]->GetChart()->Subtitle, keyword)) {
 						continue;
 					}
@@ -1647,7 +1714,7 @@ public:
 					Skin.Base->SongSelect.Image.SearchBox.Pos.X + Skin.Base->SongSelect.Image.SearchBox.Size.Width / 2,
 					Skin.Base->SongSelect.Image.SearchBox.Pos.Y + Skin.Base->SongSelect.Image.SearchBox.Size.Height / 2,
 					InputData.Handle);
-				DrawKeyInputString(Skin.Base->SongSelect.Config.KeyWordPos.X, Skin.Base->SongSelect.Config.KeyWordPos.Y, InputData.Handle);			
+				DrawKeyInputString(Skin.Base->SongSelect.Config.KeyWordPos.X, Skin.Base->SongSelect.Config.KeyWordPos.Y, InputData.Handle);
 			}
 		}
 		else {
@@ -1691,6 +1758,9 @@ public:
 					GetColor(0, 0, 0),
 					u8StrToStr(u8"★×") + std::to_string(BoxDatas[BoxDataIndex]->GetChart()->Courses[i].Level)
 					);
+
+				ScoreData Score = ScoreDataLoad(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->ChartPath), i);
+
 				Skin.Base->SongSelect.Font.HighScore.Draw({
 					Skin.Base->SongSelect.Config.HighScorePos.X,
 					Skin.Base->SongSelect.Config.HighScorePos.Y + y },
@@ -1710,7 +1780,7 @@ public:
 			else if (!IsMulti) {
 				NowScene = Scene::ModeSelect;
 			}
-		});
+			});
 		static auto DonInputProc = [&] {
 			Skin.Base->SongSelect.SE.Don.Play();
 			if (BoxDatas[BoxDataIndex]->IsGenre()) {
@@ -1720,7 +1790,6 @@ public:
 			}
 			else {
 				if (!IsCourseSelect) {
-					Score = ScoreDataLoad(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->ChartPath));
 					IsCourseSelect = true;
 				}
 				else if (BoxDatas[BoxDataIndex]->GetChart()->Courses[CourseIndex].IsPlayable) {
@@ -2105,7 +2174,7 @@ public:
 	void SetSongSpeed() {
 		double SongSpeed = !IsMulti ? Config.SongSpeed : Shared.SongSpeed;
 		if (!Chart.OriginalData.MoviePath.empty()) {
-			Chart.Movie.Load(u8StrToStr(Chart.OriginalData.MoviePath), SongSpeed, 
+			Chart.Movie.Load(u8StrToStr(Chart.OriginalData.MoviePath), SongSpeed,
 				(Chart.OriginalData.MovieOffset < 0 ? Chart.OriginalData.MovieOffset * -1000 : Chart.SongBlankTime));
 		}
 		Chart.SongData.SetVolume(Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
@@ -2144,6 +2213,7 @@ public:
 		Chart.Init();
 
 		NoteData MainData;
+		NoteData MemData;
 		Chart.OriginalData = LoadData;
 		Chart.NowBPM = LoadData.BPM;
 		MainData.BPM = LoadData.BPM;
@@ -2177,6 +2247,7 @@ public:
 
 		size_t BarlineCounter[2]{};
 		size_t BarlineNoteCount = 0;
+		size_t BranchCount = 0;
 
 		bool StartFlag = false;
 		bool NextFlag = false;
@@ -2184,11 +2255,17 @@ public:
 		bool BarlineLoading = false;
 		bool AddBarline = false;
 		bool NowRollFlag = false;
+
+		bool NowBranchStartFlag = false;
+		bool BranchStartFindFlag = false;
+
 		size_t RollStartIndex = 0;
 		char RollType = '\0';
 
 		size_t BalloonIndex = 0;
 		size_t NoteCount = 0;
+
+		double BranchAddTime = 0;
 
 		for (size_t i = 0; i < Lines.size(); ++i) {
 			try {
@@ -2216,6 +2293,81 @@ public:
 						});
 					Exsubstr(Lines[i], "#HBSCROLL", [&](const std::string& data) {
 						Chart.ScrollType = ScrollType::HBSCROLL;
+						});
+				}
+				Exsubstr(Lines[i], "#BRANCHSTART", [&](const std::string& data) {
+					MainData.Section = true;
+					});
+				Exsubstr(Lines[i], "#LEVELHOLD", [&](const std::string& data) {
+					MainData.LevelHold = true;
+					});
+				Exsubstr(Lines[i], "#BRANCHSTART", [&](const std::string& data) {
+					auto sp = split(data, ',');
+					BranchData item;
+					switch (sp[0][0]) {
+					case 'p':
+						item.Type = IfBranchType::Perfect;
+						item.ExpertBranch = std::stod(sp[1]);
+						item.MasterBranch = std::stod(sp[2]);
+						break;
+					case 'r':
+						item.Type = IfBranchType::Roll;
+						item.ExpertBranch = std::stod(sp[1]);
+						item.MasterBranch = std::stod(sp[2]);
+						break;
+					case 's':
+						item.Type = IfBranchType::Score;
+						item.ExpertBranch = std::stod(sp[1]);
+						item.MasterBranch = std::stod(sp[2]);
+						break;
+					}
+					BranchCount = 0;
+					item.AbsTime = Chart.RawNoteDatas.back().AbsTime - 150;
+					item.StartMs = MainData.AbsTime;
+					item.Start = true;
+					Chart.BranchDatas.push_back(item);
+					NowBranchStartFlag = true;
+					BranchStartFindFlag = true;
+					BranchAddTime = 0;
+					});
+				if (NowBranchStartFlag) {
+					Exsubstr(Lines[i], "#N", [&](const std::string& data) {
+						if (BranchCount == 0) { MemData = MainData; }
+						MainData = MemData;
+						if (BranchCount != 0) { Chart.RawNoteDatas.back().RelaTime += -BranchAddTime; }
+						if (BranchCount == 0) { MainData.BranchStart = true; }
+						MainData.IsBranch = BranchType::Normal;
+						BranchAddTime = 0;
+						++BranchCount;
+						});
+					if (Lines[i].find("#END") == std::string::npos) {
+						Exsubstr(Lines[i], "#E", [&](const std::string& data) {
+							if (BranchCount == 0) { MemData = MainData; }
+							MainData = MemData;
+							if (BranchCount != 0) { Chart.RawNoteDatas.back().RelaTime += -BranchAddTime; }
+							if (BranchCount == 0) { MainData.BranchStart = true; }
+							MainData.IsBranch = BranchType::Expert;
+							BranchAddTime = 0;
+							++BranchCount;
+							});
+					}
+					if (Lines[i].find("#MEASURE") == std::string::npos) {
+						Exsubstr(Lines[i], "#M", [&](const std::string& data) {
+							if (BranchCount == 0) { MemData = MainData; }
+							MainData = MemData;
+							if (BranchCount != 0) { Chart.RawNoteDatas.back().RelaTime += -BranchAddTime; }
+							if (BranchCount == 0) { MainData.BranchStart = true; }
+							MainData.IsBranch = BranchType::Master;
+							BranchAddTime = 0;
+							++BranchCount;
+							});
+					}
+					Exsubstr(Lines[i], "#BRANCHEND", [&](const std::string& data) {
+						if (BranchCount == 0) { MainData.BranchStart = true; }
+						MainData.IsBranch = BranchType::Null;
+						NowBranchStartFlag = false;
+						BranchAddTime = 0;
+						BranchCount = 0;
 						});
 				}
 				Exsubstr(Lines[i], "#SCROLL", [&](const std::string& data) {
@@ -2370,10 +2522,13 @@ RollType = '\0'
 						!MainData.GoGoStart &&
 						!MainData.GoGoEnd &&
 						!MainData.BpmChangeFlag &&
-						!MainData.BarlineDisplay;
+						!MainData.BarlineDisplay &&
+						!MainData.BranchStart &&
+						!MainData.Section &&
+						!MainData.LevelHold;
 
 					if (MainData.NoteType >= '1' && MainData.NoteType <= '4') {
-						NoteCount++;
+						NoteCount += MainData.IsBranch == BranchType::Null || MainData.IsBranch == BranchType::Normal;
 					}
 					if (MainData.NoteType == '0') {
 						MainData.HitFlag = true;
@@ -2423,9 +2578,16 @@ RollType = '\0'
 					MainData.GoGoStart = false;
 					MainData.GoGoEnd = false;
 					MainData.BpmChangeFlag = false;
+					MainData.Section = false;
+					MainData.LevelHold = false;
+					MainData.BranchStart = false;
 
 					MainData.AbsTime += divtime;
 					MainData.PosTime += MainData.RelaTime * (std::signbit(MainData.BPM) || std::signbit(MainData.Measure) ? -1 : 1);
+
+					if (NowBranchStartFlag) {
+						BranchAddTime += MainData.RelaTime * (std::signbit(MainData.BPM) || std::signbit(MainData.Measure) ? -1 : 1);
+					}
 
 					if (EndFlag) {
 						BarlineLoading = false;
@@ -2442,6 +2604,8 @@ RollType = '\0'
 		if (Chart.AddScore == 0) {
 			Chart.AddScore = 1000000 / (double)NoteCount;
 		}
+		Chart.NowBranchFlag = BranchStartFindFlag ? BranchType::Normal : BranchType::Null;
+
 		if (!IsMulti || Shared.Players[Shared.MyIndex].IsHost) {
 			SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
 			Chart.SongData.Load(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath));
@@ -2507,6 +2671,11 @@ RollType = '\0'
 
 		double BPM = 0;
 		double Measure = 1;
+
+		BranchType IsBranch = BranchType::Null;
+		bool BranchStart = false;
+		bool Section = false;
+		bool LevelHold = false;
 
 		double Scroll = 1;
 		double Scrolli = 0;
@@ -2587,22 +2756,38 @@ RollType = '\0'
 		} JudgeUpperExplosion;
 	};
 
+	struct BranchData {
+		double AbsTime = 0;
+		double StartMs = 0;
+		bool Start = false;
+		bool BranchFlag = false;
+		IfBranchType Type = IfBranchType::Null;
+		double ExpertBranch = 0;
+		double MasterBranch = 0;
+	};
+
 	struct PlayData {
 
 		void Init() {
-			RawNoteDatas.clear();
+			BranchDatas.clear();
 			Judge.clear();
+			RawNoteDatas.clear();
 			SongData.Delete();
+			BranchAnimationTimer.Reset();
 			NowTime.Reset();
-			WaitRollTime.Reset();
 			RollViewEndTimer.Reset();
+			WaitRollTime.Reset();
 			Movie.Init();
 			ScrollType = ScrollType::Normal;
+			NowBranchFlag = BranchType::Null;
+			NowBranchAnimation = ABranchType::Null;
 			OriginalData = ChartData();
 			AutoPlayLR = false;
+			LevelHold = false;
 			NowGoGo = false;
 			AddScore = 0;
 			AllNoteCount = 0;
+			BranchAnimationTime = 0.15;
 			SongBlankTime = 0;
 			SongSpeed = 1.0;
 			NowBPM = 0;
@@ -2611,10 +2796,17 @@ RollType = '\0'
 		std::vector<NoteData> RawNoteDatas = std::vector<NoteData>();
 		std::vector<JudgeData> Judge = std::vector<JudgeData>();
 
+		std::vector<BranchData> BranchDatas = std::vector<BranchData>();
 		ChartData OriginalData;
 
 		uint64_t AddScore = 0;
 		uint64_t AllNoteCount = 0;
+
+		Timer BranchAnimationTimer;
+		double BranchAnimationTime = 0.15;
+		BranchType NowBranchFlag = BranchType::Null;
+		ABranchType NowBranchAnimation = ABranchType::Null;
+		bool LevelHold = false;
 
 		SoundData SongData;
 		double SongBlankTime = 0;
@@ -2641,7 +2833,7 @@ RollType = '\0'
 				SeekMovieToGraph(Handle, time);
 			}
 			int Handle = -1;
-			Size2D<float> Size;		
+			Size2D<float> Size;
 		} Movie;
 
 		bool AutoPlayLR = false;
@@ -2686,6 +2878,16 @@ RollType = '\0'
 	std::vector<_HitNote> HitNote = std::vector<_HitNote>();
 	std::vector<std::string> Names = std::vector<std::string>();
 
+	void SetDrawBranchArea(Pos2D<float> DelayPos) const {
+		if (Chart.NowBranchFlag != BranchType::NotDisplay) {
+			SetDrawArea(
+				Skin.Base->Playing.Image.Lane.Pos.X - Skin.Base->Playing.Image.Lane.Size.Width / 2,
+				Skin.Base->Playing.Image.Lane.Pos.Y - Skin.Base->Playing.Image.Lane.Size.Height / 2 + DelayPos.Y,
+				Skin.Base->Playing.Image.Lane.Pos.X + Skin.Base->Playing.Image.Lane.Size.Width / 2,
+				Skin.Base->Playing.Image.Lane.Pos.Y + Skin.Base->Playing.Image.Lane.Size.Height / 2 + DelayPos.Y
+			);
+		}
+	}
 	void PlayingInit() {
 
 		if (IsMulti) {
@@ -2748,8 +2950,67 @@ RollType = '\0'
 			Skin.Base->Playing.Image.Lane.Draw(DelayPos);
 			SetDrawBlendMode(0, 0);
 
+
+			if ((Chart.Movie.Handle != -1)) {
+				SetDrawBlendMode(DX_BLENDMODE_ALPHA, 225);
+			}
+
+			SetDrawBranchArea(DelayPos);
+
+			switch (Chart.NowBranchFlag) {
+			case BranchType::Normal:
+				Skin.Base->Playing.Image.NormalLane.Draw(DelayPos);
+				break;
+			case BranchType::Expert:
+				Skin.Base->Playing.Image.ExpertLane.Draw(DelayPos);
+				break;
+			case BranchType::Master:
+				Skin.Base->Playing.Image.MasterLane.Draw(DelayPos);
+				break;
+			}
+
+			double NoteBranchMotion = 0.0;
+
+			if (Chart.NowBranchAnimation != ABranchType::Null) {
+				double _one = Chart.BranchAnimationTimer.GetElapsed().Second() / Chart.BranchAnimationTime;
+				float _motiony = Skin.Base->Playing.Image.Lane.Size.Height * GetEasingRate(_one, ease::Base::Out, ease::Line::Sine);
+				NoteBranchMotion = _motiony;
+				if (_one > 1.0) {
+					Chart.NowBranchAnimation = ABranchType::Null;
+					Chart.BranchAnimationTimer.Reset();
+				}
+				switch (Chart.NowBranchAnimation) {
+				case ABranchType::Normal_Expert:
+					Skin.Base->Playing.Image.NormalLane.Draw({ 0, _motiony + DelayPos.Y });
+					Skin.Base->Playing.Image.ExpertLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
+					break;
+				case ABranchType::Normal_Master:
+					Skin.Base->Playing.Image.NormalLane.Draw({ 0, _motiony + DelayPos.Y });
+					Skin.Base->Playing.Image.MasterLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
+					break;
+				case ABranchType::Expert_Normal:
+					Skin.Base->Playing.Image.ExpertLane.Draw({ 0, _motiony + DelayPos.Y });
+					Skin.Base->Playing.Image.NormalLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
+					break;
+				case ABranchType::Expert_Master:
+					Skin.Base->Playing.Image.ExpertLane.Draw({ 0, _motiony + DelayPos.Y });
+					Skin.Base->Playing.Image.MasterLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
+					break;
+				case ABranchType::Master_Normal:
+					Skin.Base->Playing.Image.MasterLane.Draw({ 0, _motiony + DelayPos.Y });
+					Skin.Base->Playing.Image.NormalLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
+					break;
+				case ABranchType::Master_Expert:
+					Skin.Base->Playing.Image.MasterLane.Draw({ 0, _motiony + DelayPos.Y });
+					Skin.Base->Playing.Image.ExpertLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
+					break;
+				}
+			}
+			SetDrawAreaFull();
+			SetDrawBlendMode(0, 0);
+
 			Skin.Base->Playing.Image.ProgressBar.Draw(DelayPos, 0);
-			if (Chart.Judge[idx].HitNote > 0) {	
+			if (Chart.Judge[idx].HitNote > 0) {
 
 				double Ratio = ((double)Chart.Judge[idx].Good + (double)Chart.Judge[idx].Ok * 0.5) / Chart.AllNoteCount;
 				float Width = Skin.Base->Playing.Image.ProgressBar.Size.Width * Ratio;
@@ -2916,12 +3177,44 @@ RollType = '\0'
 				std::arg(std::complex<double>{ n0.real() * -1, n0.imag() * 1 })
 			};
 
+			SetDrawBranchArea(DelayPos);
+
 			for (auto&& data : Chart.RawNoteDatas | std::ranges::views::reverse) {
 
 				double NoteTheta = atan2(data.Scrolli, data.Scroll);
 
 				NotePos = GetNotePos(data);
 
+				bool NoteBranch = data.IsBranch == Chart.NowBranchFlag || data.IsBranch == BranchType::Null;
+
+				switch (Chart.NowBranchAnimation) {
+				case ABranchType::Normal_Expert:
+					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; NotePos.Y += NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; NotePos.Y -= Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					break;
+				case ABranchType::Normal_Master:
+					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; NotePos.Y += NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Master) { NoteBranch = true; NotePos.Y -= Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					break;
+				case ABranchType::Expert_Normal:
+					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; NotePos.Y -= NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; NotePos.Y += Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					break;
+				case ABranchType::Expert_Master:
+					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; NotePos.Y += NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Master) { NoteBranch = true; NotePos.Y -= Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					break;
+				case ABranchType::Master_Normal:
+					if (data.IsBranch == BranchType::Master) { NoteBranch = true; NotePos.Y -= NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; NotePos.Y += Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					break;
+				case ABranchType::Master_Expert:
+					if (data.IsBranch == BranchType::Master) { NoteBranch = true; NotePos.Y -= NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; NotePos.Y += Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					break;
+				}
+
+				if (!NoteBranch) { continue; }
 				if (data.BarlineDisplay) {
 					SetDrawBlendMode(0, 0);
 					if (InRange(NotePos.X, NotePos.Y)) {
@@ -2930,7 +3223,7 @@ RollType = '\0'
 							NotePos.Y - 65,
 							NotePos.X,
 							NotePos.Y + 65,
-							GetColor(255, 255, 255)
+							GetColor(255, 255, 255 * !data.BranchStart)
 						);
 					}
 				}
@@ -3086,6 +3379,7 @@ RollType = '\0'
 				}
 #undef InRange
 			}
+			SetDrawAreaFull();
 
 			Skin.Base->Playing.Image.Base.Draw(DelayPos);
 			Skin.Base->Playing.Image.NamePlate.Draw(DelayPos);
@@ -3106,7 +3400,7 @@ RollType = '\0'
 					GetColor(255, 255, 255),
 					GetColor(0, 0, 0),
 					Names[idx]
-				);
+					);
 			}
 
 			{
@@ -3172,7 +3466,7 @@ RollType = '\0'
 				};
 
 			if (MiniTaikoFlash[0 + (4 * idx)].IsRunning()) {
-				TaikoAlpha(0+ (4 * idx));
+				TaikoAlpha(0 + (4 * idx));
 				Skin.Base->Playing.Image.MiniTaiko_Don.Draw({ Skin.Base->Playing.Image.MiniTaiko_Don.Size.Width * -0.5f, DelayPos.Y }, 0);
 			}
 			if (MiniTaikoFlash[1 + (4 * idx)].IsRunning()) {
@@ -3267,6 +3561,28 @@ RollType = '\0'
 			Shared.GetIndex = Shared.MyIndex;
 		}
 	}
+	void BranchChange(BranchData branchdata, IfBranchType ifbranchtype, double judge) {
+		if (branchdata.Type == ifbranchtype) {
+			if (branchdata.ExpertBranch > judge) {
+				Chart.NowBranchAnimation =
+					(Chart.NowBranchFlag == BranchType::Expert ? ABranchType::Expert_Normal :
+						(Chart.NowBranchFlag == BranchType::Master ? ABranchType::Master_Normal : ABranchType::Null));
+				Chart.NowBranchFlag = BranchType::Normal;
+			}
+			else if (branchdata.ExpertBranch <= judge && branchdata.MasterBranch > judge) {
+				Chart.NowBranchAnimation =
+					(Chart.NowBranchFlag == BranchType::Normal ? ABranchType::Normal_Expert :
+						(Chart.NowBranchFlag == BranchType::Master ? ABranchType::Master_Expert : ABranchType::Null));
+				Chart.NowBranchFlag = BranchType::Expert;
+			}
+			else if (branchdata.MasterBranch <= judge) {
+				Chart.NowBranchAnimation =
+					(Chart.NowBranchFlag == BranchType::Normal ? ABranchType::Normal_Master :
+						(Chart.NowBranchFlag == BranchType::Expert ? ABranchType::Expert_Master : ABranchType::Null));
+				Chart.NowBranchFlag = BranchType::Master;
+			}
+		}
+	}
 	void PlayingProc() {
 
 		const double NowTime = ChartNowTime(1000);
@@ -3280,6 +3596,29 @@ RollType = '\0'
 				return;
 			}
 			Shared.Players[Shared.MyIndex].State = 3;
+		}
+
+		if (Chart.NowBranchFlag != BranchType::Null && !Chart.LevelHold) {
+			for (size_t i = 0, size = Chart.BranchDatas.size(); i < size; ++i) {
+				if (Chart.BranchDatas[i].AbsTime < NowTime && Chart.BranchDatas[i].Start) {
+					for (size_t j = 0, nsize = Chart.RawNoteDatas.size(); j < nsize; ++j) {
+						if (Chart.RawNoteDatas[j].AbsTime >= Chart.BranchDatas[i].StartMs) { continue; }
+						if (Chart.RawNoteDatas[j].IsBranch != Chart.NowBranchFlag && Chart.RawNoteDatas[j].IsBranch != BranchType::Null) {
+							Chart.RawNoteDatas[j].HitFlag = true;
+							Chart.RawNoteDatas[j].IsBranch = BranchType::NotDisplay;
+						}
+						else if (Chart.RawNoteDatas[j].IsBranch == Chart.NowBranchFlag) {
+							Chart.RawNoteDatas[j].IsBranch = BranchType::Null;
+						}
+					}
+					BranchChange(Chart.BranchDatas[i], IfBranchType::Perfect, Chart.Judge[0].Branch.Accuracy);
+					BranchChange(Chart.BranchDatas[i], IfBranchType::Roll, (double)Chart.Judge[0].Branch.Roll);
+					BranchChange(Chart.BranchDatas[i], IfBranchType::Score, (double)Chart.Judge[0].Branch.Score);
+					Chart.BranchDatas[i].BranchFlag = false;
+					Chart.BranchDatas[i].Start = false;
+					Chart.BranchAnimationTimer.Start();
+				}
+			}
 		}
 
 		if (IsMulti) {
@@ -3337,6 +3676,11 @@ RollType = '\0'
 
 			for (auto&& data : Chart.RawNoteDatas) {
 
+				bool NoteBranch = data.IsBranch == Chart.NowBranchFlag || data.IsBranch == BranchType::Null;
+
+				if (!NoteBranch) {
+					continue;
+				}
 				if (data.HitFlag) {
 					continue;
 				}
@@ -3400,6 +3744,11 @@ RollType = '\0'
 				data.HitFlag = true;
 				data.NoteType = '\0';
 
+				if (data.Section) {
+					data.Section = false;
+					Chart.Judge[0].Branch.Init();
+				}
+
 				return;
 			}
 
@@ -3440,8 +3789,13 @@ RollType = '\0'
 
 		for (auto&& data : Chart.RawNoteDatas) {
 
+			bool NoteBranch = data.IsBranch == Chart.NowBranchFlag || data.IsBranch == BranchType::Null;
 			bool HitFlag = data.AbsTime < NowTime;
 
+			if (!NoteBranch) { continue; }
+			if (data.LevelHold && HitFlag) {
+				Chart.LevelHold = true;
+			}
 			if (data.GoGoStart && HitFlag) {
 				Chart.NowGoGo = true;
 			}
@@ -3496,8 +3850,13 @@ RollType = '\0'
 			bool NextImage = false;
 			for (auto&& data : Chart.RawNoteDatas) {
 
+				bool NoteBranch = data.IsBranch == Chart.NowBranchFlag || data.IsBranch == BranchType::Null;
 				bool HitFlag = data.AbsTime < NowTime;
 				bool IsHitNote = (data.NoteType >= '1' && data.NoteType <= '4');
+
+				if (!NoteBranch) {
+					continue;
+				}
 
 				if (data.RollFlag == 1) {
 					++RollCount;
@@ -3541,6 +3900,11 @@ RollType = '\0'
 					}
 					data.NoteType = '\0';
 					data.HitFlag = true;
+
+					if (data.Section) {
+						data.Section = false;
+						Chart.Judge[0].Branch.Init();
+					}
 				}
 			}
 
@@ -3555,6 +3919,7 @@ RollType = '\0'
 				}
 				Chart.AutoPlayLR = !Chart.AutoPlayLR;
 				Chart.Judge[0].Roll++;
+				Chart.Judge[0].Branch.Roll++;
 				Chart.Judge[0].Rolls.NowCount++;
 				HitNote[0].Add(HitNoteData(NextImage ? '6' : '5', JudgeType::Roll));
 				Chart.WaitRollTime.Start();
@@ -3565,6 +3930,7 @@ RollType = '\0'
 				Skin.Base->Playing.SE.Don.Play();
 				Chart.AutoPlayLR = !Chart.AutoPlayLR;
 				Chart.Judge[0].Roll++;
+				Chart.Judge[0].Branch.Roll++;
 				--BalloonData->BalloonCount;
 				Chart.Judge[0].Rolls.NowCount = BalloonData->BalloonCount;
 				Chart.RollViewEndTimer.Reset();
@@ -3639,12 +4005,12 @@ RollType = '\0'
 		std::ofstream ofs(filepath, std::ios::binary);
 		ofs.write(reinterpret_cast<const char*>(v_bson.data()), v_bson.size());
 	}
-	ScoreData ScoreDataLoad(const std::string& chartpath) {
+	ScoreData ScoreDataLoad(const std::string& chartpath, int courseindex) {
 
 		ScoreData Score;
 		fs::path filepath = GetExecutablePath().parent_path() / "scoredata.json";
 		std::ifstream ifs(filepath, std::ios::binary);
-		std::string CourseName = magic_enum::enum_name((CourseType)CourseIndex).data();
+		std::string CourseName = magic_enum::enum_name((CourseType)courseindex).data();
 
 		if (!ifs.is_open()) {
 			ifs.close();
@@ -3668,7 +4034,7 @@ RollType = '\0'
 			ResultIndex = 0;
 			return;
 		}
-		else if (Chart.Judge[0].Score > ScoreDataLoad(u8StrToStr(Chart.OriginalData.ChartPath)).Score) {
+		else if (Chart.Judge[0].Score > ScoreDataLoad(u8StrToStr(Chart.OriginalData.ChartPath), CourseIndex).Score) {
 			ScoreDataSave();
 		}
 		CrownIndex = 0;
@@ -3731,63 +4097,63 @@ RollType = '\0'
 				offset -= Skin.Base->Result.Image.Number.Size.Width;
 			} while (i < digit);
 			};
-		
-		    JudgeData Judge = Chart.Judge[ResultIndex];
 
-			ScoreDraw(Judge.Score);
-			AccuracyDraw(Judge.Accuracy);
-			JudgeDraw(Skin.Base->Result.Config.GoodPos, Judge.Good);
-			JudgeDraw(Skin.Base->Result.Config.OkPos, Judge.Ok);
-			JudgeDraw(Skin.Base->Result.Config.BadPos, Judge.Bad);
-			JudgeDraw(Skin.Base->Result.Config.RollPos, Judge.Roll);
-			JudgeDraw(Skin.Base->Result.Config.MaxComboPos, Judge.MaxCombo);
+		JudgeData Judge = Chart.Judge[ResultIndex];
 
-			if (Judge.Accuracy >= 75) {
-				CrownIndex = 1;
-			}
-			if (Judge.Accuracy >= 90) {
-				CrownIndex = 2;
-			}
-			if (Judge.Accuracy >= 90 && Judge.Bad == 0) {
-				CrownIndex = 3;
-			}
-			if (Judge.Accuracy >= 90 && Judge.Bad == 0 && Judge.Ok == 0) {
-				CrownIndex = 4;
-			}
+		ScoreDraw(Judge.Score);
+		AccuracyDraw(Judge.Accuracy);
+		JudgeDraw(Skin.Base->Result.Config.GoodPos, Judge.Good);
+		JudgeDraw(Skin.Base->Result.Config.OkPos, Judge.Ok);
+		JudgeDraw(Skin.Base->Result.Config.BadPos, Judge.Bad);
+		JudgeDraw(Skin.Base->Result.Config.RollPos, Judge.Roll);
+		JudgeDraw(Skin.Base->Result.Config.MaxComboPos, Judge.MaxCombo);
 
-			Skin.Base->Result.Image.Crown.Draw({}, CrownIndex);
-			Skin.Base->Result.Font.Title.Draw(
-				Skin.Base->Result.Config.TitlePos,
+		if (Judge.Accuracy >= 75) {
+			CrownIndex = 1;
+		}
+		if (Judge.Accuracy >= 90) {
+			CrownIndex = 2;
+		}
+		if (Judge.Accuracy >= 90 && Judge.Bad == 0) {
+			CrownIndex = 3;
+		}
+		if (Judge.Accuracy >= 90 && Judge.Bad == 0 && Judge.Ok == 0) {
+			CrownIndex = 4;
+		}
+
+		Skin.Base->Result.Image.Crown.Draw({}, CrownIndex);
+		Skin.Base->Result.Font.Title.Draw(
+			Skin.Base->Result.Config.TitlePos,
+			GetColor(255, 255, 255),
+			GetColor(0, 0, 0),
+			Chart.OriginalData.TitleStrlen.Result,
+			Chart.OriginalData.Title
+		);
+		Skin.Base->Result.Font.SubTitle.Draw(
+			Skin.Base->Result.Config.SubTitlePos,
+			GetColor(255, 255, 255),
+			GetColor(0, 0, 0),
+			Chart.OriginalData.SubtitleStrlen.Result,
+			Chart.OriginalData.Subtitle
+		);
+		if (!IsMulti) {
+			Skin.Base->Result.Font.PlayerName.Draw(
+				Skin.Base->Result.Config.PlayerNamePos,
 				GetColor(255, 255, 255),
 				GetColor(0, 0, 0),
-				Chart.OriginalData.TitleStrlen.Result,
-				Chart.OriginalData.Title
+				GetStrlen(Config.PlayerName, Skin.Base->Result.Font.PlayerName.Handle),
+				Config.PlayerName
 			);
-			Skin.Base->Result.Font.SubTitle.Draw(
-				Skin.Base->Result.Config.SubTitlePos,
+		}
+		else {
+			Skin.Base->Result.Font.PlayerName.Draw(
+				Skin.Base->Result.Config.PlayerNamePos,
 				GetColor(255, 255, 255),
 				GetColor(0, 0, 0),
-				Chart.OriginalData.SubtitleStrlen.Result,
-				Chart.OriginalData.Subtitle
+				GetStrlen(Shared.Players[ResultIndex].Name, Skin.Base->Result.Font.PlayerName.Handle),
+				Names[ResultIndex]
 			);
-			if (!IsMulti) {
-				Skin.Base->Result.Font.PlayerName.Draw(
-					Skin.Base->Result.Config.PlayerNamePos,
-					GetColor(255, 255, 255),
-					GetColor(0, 0, 0),
-					GetStrlen(Config.PlayerName, Skin.Base->Result.Font.PlayerName.Handle),
-					Config.PlayerName
-				);
-			}
-			else {
-				Skin.Base->Result.Font.PlayerName.Draw(
-					Skin.Base->Result.Config.PlayerNamePos,
-					GetColor(255, 255, 255),
-					GetColor(0, 0, 0),
-					GetStrlen(Shared.Players[ResultIndex].Name, Skin.Base->Result.Font.PlayerName.Handle),
-					Names[ResultIndex]
-				);
-			}
+		}
 	}
 	void ResultProc() {
 		Input.HitKeyProcess(VK_RETURN, KeyState::Down, [&] {
@@ -3825,7 +4191,7 @@ RollType = '\0'
 	} ConfigGenre = ConfigGenreData::Genre;
 
 	std::vector<std::vector<std::string>> ConfigMenuString{
-		{ 
+		{
 			"GameConfig",
 			"KeyConfig"
 		},
@@ -3862,7 +4228,7 @@ RollType = '\0'
 			"ViewDebug",
 			"MultiBoot"
 		},
-        {
+		{
 			"KaInputLeft",
 			"DonInputLeft",
 			"DonInputRight",
@@ -3918,13 +4284,13 @@ RollType = '\0'
 		return { 0, ConfigGenre == ConfigGenreData::Game ? (i - ConfigSelector) * Skin.Base->ConfigMenu.Config.BoxDistance : i * Skin.Base->ConfigMenu.Config.BoxDistance };
 	};
 
-	void ConfigDataDraw(int i,int& j, std::string data) {
+	void ConfigDataDraw(int i, int& j, std::string data) {
 		if (i == j) {
 			Skin.Base->ConfigMenu.Font.String.Draw(
 				{ Skin.Base->ConfigMenu.Config.ValPos.X,
 				Skin.Base->ConfigMenu.Config.ValPos.Y + GetConfigPos(i).Y },
-				GetColor(255,255,255),
-				GetColor(0,0,0),
+				GetColor(255, 255, 255),
+				GetColor(0, 0, 0),
 				data
 			);
 		}
@@ -4096,7 +4462,7 @@ RollType = '\0'
 					ConfigGenre = ConfigGenreData::Genre;
 				}
 				ConfigSelector = 0;
-			});
+				});
 
 			Input.HitKeyProcess(VK_UP, KeyState::Down, [&] {
 				Skin.Base->Title.SE.Ka.Play();
@@ -4382,7 +4748,7 @@ RollType = '\0'
 			ConfigMenuDraw();
 			break;
 		}
-		
+
 		if (Fade.Timer.IsRunning()) {
 			Fade.Draw();
 		}
