@@ -1,5 +1,7 @@
 ﻿#pragma once
 #include "Library/Include.h"
+#include "cppunzip.hpp"
+#include <shobjidl.h>
 #include <filesystem>
 #include <fstream>
 #include <complex>
@@ -8,6 +10,7 @@
 
 namespace fs = std::filesystem;
 using namespace libarrier;
+using namespace cppunzip;
 
 fs::path GetExecutablePath() {
 	std::vector<char> buffer(MAX_PATH);
@@ -870,8 +873,8 @@ struct PlayerData {
 
 struct SharedData {
 	std::vector<PlayerData> Players = std::vector<PlayerData>();
-	std::vector<char> FileData = std::vector<char>();
-	std::vector<char> WaveData = std::vector<char>();
+	std::vector<uint8_t> FileData = std::vector<uint8_t>();
+	std::vector<uint8_t>  WaveData = std::vector<uint8_t>();
 	JudgeData Judge = JudgeData();
 	HitType HitKey = HitType::Null;
 	int MyIndex = 0;
@@ -1202,7 +1205,9 @@ public:
 						if (course != CourseType::Null) {
 							return;
 						}
-						course = (CourseType)std::stoi(str);
+						if (IsDigit(str)) {
+							course = (CourseType)std::stoi(str);
+						}
 					}
 					});
 				Exsubstr(Lines[i], "LEVEL:", [&](const std::string& data) {
@@ -1377,7 +1382,6 @@ public:
 		TempBoxDatas.clear();
 		TempBoxDatas.reserve(dir.capacity());
 		size_t LoadCount = 0;
-
 		auto recusiveproc = [&](std::vector<std::unique_ptr<BoxData>>& data, const fs::path& dirpath, const fs::path& genrepath, auto& f, const GenreData& genredata = {}) -> void {
 			fs::path _genrepath = "";
 			auto fpit = fs::directory_iterator(dirpath);
@@ -1609,7 +1613,96 @@ public:
 			};
 		recusiveproc(TempBoxDatas, recusiveproc);
 	}
+	std::vector<uint8_t> FileToMem(const fs::path& path) {
+		if (fs::exists(path)) {
+			size_t size = fs::file_size(path);
+			std::ifstream ifs(path, std::ios::binary);
+			std::vector<std::uint8_t> buffer(size);
+			if (ifs.read(reinterpret_cast<char*>(buffer.data()), size)) {
+				ifs.close();
+				return buffer;
+			}
+		}
+	}
+	void MemToFile(const fs::path& path, const std::vector<uint8_t>& datas) {
+		std::ofstream ofs(path, std::ios::binary);
+		ofs.write(reinterpret_cast<const char*>(datas.data()), datas.size());
+	}
+	void FileImport() {
 
+		if (GetDragFileNum() <= 0) {
+			return;
+		}
+
+		std::vector<std::string> DropFiles;
+		char path[MAX_PATH];
+		while (GetDragFilePath(path) == 0) {
+			DropFiles.push_back(path);
+		}
+		DragFileInfoClear();
+
+		fs::path ImportFolderPath;
+		HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+		if (FAILED(hr)) { return; }
+
+		IFileOpenDialog* pFileOpen = nullptr;
+		hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_ALL, IID_PPV_ARGS(&pFileOpen));
+
+		if (SUCCEEDED(hr)) {
+			DWORD dwOptions;
+			if (SUCCEEDED(pFileOpen->GetOptions(&dwOptions))) {
+				pFileOpen->SetOptions(dwOptions | FOS_PICKFOLDERS);
+			}
+
+			IShellItem* pItem = nullptr;
+			if (SUCCEEDED(SHCreateItemFromParsingName(GetExecutablePath().parent_path().wstring().c_str(), NULL, IID_PPV_ARGS(&pItem)))) {
+				pFileOpen->SetFolder(pItem);
+				pItem->Release();
+			}
+
+			if (SUCCEEDED(pFileOpen->Show(NULL))) {
+				IShellItem* pItem = nullptr;
+				if (SUCCEEDED(pFileOpen->GetResult(&pItem))) {
+					PWSTR pszPath = nullptr;
+					if (SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszPath))) {
+						ImportFolderPath = pszPath;
+						CoTaskMemFree(pszPath);
+					}
+					pItem->Release();
+				}
+			}
+			pFileOpen->Release();
+		}
+		CoUninitialize();
+
+		for (auto&& file : DropFiles) {
+
+			fs::path path(u8StrToWStr(file));
+
+			if (path.extension() != ".zip") {
+				fs::copy(path, ImportFolderPath / path.filename(), fs::copy_options::overwrite_existing);
+				continue;
+			}
+
+			std::ifstream ifs(path, std::ios::binary);
+			IStreamFile istream(ifs);
+			UnZipper unzip(istream);
+
+			for (auto&& entry : unzip.listFiles()) {
+				fs::path filename = u8StrToWStr(entry.fileName());
+				if (!entry.isDir()) {
+					std::vector<uint8_t> content = entry.readContent();
+					MemToFile(ImportFolderPath / filename, content);
+				}
+				else if (!fs::exists(filename)) {
+					fs::create_directories(ImportFolderPath / filename);
+				}
+			}
+		}
+
+		EnumChart(Config.SongDirectories);
+
+	}
 	void SongDownload(const std::string& link, const fs::path& path) {
 		if (!link.empty() && !fs::exists(path)) {
 			if (MessageBox(NULL, TEXT("音声ファイルがありません。ダウンロードしますか？"), "", MB_YESNO) == IDYES) {
@@ -1630,6 +1723,7 @@ public:
 	}
 
 	void SongSelectInit() {
+		SetDragFileValidFlag(TRUE);
 		Skin.Base->SongSelect.SE.Don.SetVolume((Config.SEVolume));
 		Skin.Base->SongSelect.SE.Ka.SetVolume((Config.SEVolume));
 		if (BoxDatas.empty()) {
@@ -1639,6 +1733,7 @@ public:
 		}
 	}
 	void SongSelectEnd() {
+		SetDragFileValidFlag(FALSE);
 		DemoSongPlayBlank.Reset();
 		DemoSong.Delete();
 		IsCourseSelect = false;
@@ -1915,6 +2010,8 @@ public:
 					DemoSongPlayBlank.Reset();
 					DemoSong.Delete();
 				}
+
+				FileImport();
 			}
 
 			return;
@@ -2155,21 +2252,6 @@ public:
 		const double m = 10;
 		const double d = std::pow(b, std::pow(m, -1 / c));
 		return 1 / std::pow(std::log(judge * (b - d) / b + d) / std::log(b), c);
-	}
-	void FileToMem(const fs::path& path, std::vector<char>& dest, bool istext) {
-		if (fs::exists(path)) {
-			size_t file_size = fs::file_size(path);
-			dest.resize(file_size);
-			std::ifstream file(path, std::ios::binary);
-			if (file.read(dest.data(), file_size)) {
-				if (istext) { dest.erase(std::remove(dest.begin(), dest.end(), '\r'), dest.end()); }
-			}
-			file.close();
-		}
-	}
-	void MemToFile(const fs::path& path, const std::vector<char>& datas) {
-		std::ofstream ofs(path);
-		ofs << datas.data();
 	}
 	void SetSongSpeed() {
 		double SongSpeed = !IsMulti ? Config.SongSpeed : Shared.SongSpeed;
@@ -2632,8 +2714,8 @@ RollType = '\0'
 			if (!IsLoad) {
 				if (Shared.Players[Shared.MyIndex].IsHost) {
 					Shared.CourseIndex = CourseIndex;
-					FileToMem(fs::path(LoadData.ChartPath), Shared.FileData, true);
-					FileToMem(fs::path(LoadData.SongPath), Shared.WaveData, false);
+					Shared.FileData = FileToMem(fs::path(LoadData.ChartPath));
+					Shared.WaveData = FileToMem(fs::path(LoadData.SongPath));
 				}
 				IsLoad = true;
 				NowScene = Scene::MultiRoom;
@@ -3551,7 +3633,7 @@ RollType = '\0'
 			}
 		}
 		if (Config.ViewDebug) {
-			DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nChartPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.c_str());
+			DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.c_str());
 		}
 	}
 	void HitAction(HitType type) {
