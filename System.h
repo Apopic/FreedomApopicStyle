@@ -1,6 +1,5 @@
 ﻿#pragma once
 #include "Library/Include.h"
-#include "cppunzip.hpp"
 #include <shobjidl.h>
 #include <filesystem>
 #include <fstream>
@@ -1096,19 +1095,9 @@ public:
 		CourseData Courses[(size_t)CourseType::Count];
 
 		bool Load(const fs::path& path) {
-			std::ifstream ifs(path);
-			if (!ifs.is_open()) {
-				return false;
-			}
 
+			TextfileReader text(path);
 			ChartPath = path.u8string();
-
-			std::string line;
-			std::vector<std::string> Lines;
-
-			while (std::getline(ifs, line)) {
-				Lines.push_back(line);
-			}
 
 			size_t index = 0;
 			uint64_t level = 0;
@@ -1116,10 +1105,10 @@ public:
 			std::vector<uint64_t> balloon;
 			CourseType course = CourseType::Null;
 
-			for (size_t i = 0; i < Lines.size(); i++) {
-				Exsubstr(Lines[i], "TITLE:", [&](std::string data) {
+			for (size_t i = 0; i < text.lines().size(); ++i) {
+				Exsubstr(text[i], "TITLE:", [&](std::string_view data) {
 					if (data.find("--") == 0) {
-						data = data.replace(data.find("--"), 2, "");
+						data.remove_prefix(2);
 						TitleDisplay = false;
 					}
 					Title = data;
@@ -1127,9 +1116,9 @@ public:
 					TitleStrlen.Playing = GetStrlen(data, Skin.Base->Playing.Font.Title.Handle);
 					TitleStrlen.Result = GetStrlen(data, Skin.Base->Result.Font.Title.Handle);
 					});
-				Exsubstr(Lines[i], "SUBTITLE:", [&](std::string data) {
+				Exsubstr(text[i], "SUBTITLE:", [&](std::string_view data) {
 					if (data.find("--") == 0) {
-						data = data.replace(data.find("--"), 2, "");
+						data.remove_prefix(2);
 						SubtitleDisplay = false;
 					}
 					Subtitle = data;
@@ -1137,100 +1126,83 @@ public:
 					SubtitleStrlen.Playing = GetStrlen(data, Skin.Base->Playing.Font.SubTitle.Handle);
 					SubtitleStrlen.Result = GetStrlen(data, Skin.Base->Result.Font.SubTitle.Handle);
 					});
-				Exsubstr(Lines[i], "BPM:", [&](const std::string& data) {
-					if (!data.empty()) {
-						BPM = std::stod(data);
+				Exsubstr(text[i], "BPM:", [&](std::string_view data) {
+					if (data.empty()) { return; }
+					BPM = svtov<double>(data);
+					});
+				Exsubstr(text[i], "OFFSET:", [&](std::string_view data) {
+					if (data.empty()) { return; }
+					SongOffset = svtov<double>(data);
+					});
+				Exsubstr(text[i], "MOVIEOFFSET:", [&](std::string_view data) {
+					if (data.empty()) { return; }
+					MovieOffset = svtov<double>(data);
+					});
+				Exsubstr(text[i], "DEMOSTART:", [&](std::string_view data) {
+					if (!data.empty()) { return; }
+					DemoStart = svtov<double>(data);
+					});
+				Exsubstr(text[i], "SONGVOL:", [&](std::string_view data) {
+					if (!data.empty()) { return; }
+					SongVolume = svtov<float>(data);
+					});
+				Exsubstr(text[i], "SEVOL:", [&](std::string_view data) {
+					if (!data.empty()) { return; }
+					SeVolume = svtov<float>(data);
+					});
+				Exsubstr(text[i], "WAVE:", [&](std::string_view data) {
+					if (data.empty()) { return; }
+					SongPath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
+					});
+				Exsubstr(text[i], "BGMOVIE:", [&](std::string_view data) {
+					if (data.empty()) { return; }
+					MoviePath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
+					});
+				Exsubstr(text[i], "SONGLINK:", [&](std::string_view data) {
+					if (data.empty()) { return; }
+					SongLink = data;
+					});
+				Exsubstr(text[i], "COURSE:", [&](std::string_view data) {
+					if (data.empty()) { return; }
+					index = i;
+					course = CourseType::Null;
+					std::string str = ToLower(data);
+					if (str == "easy") {
+						course = CourseType::Easy;
+					}
+					else if (str == "normal") {
+						course = CourseType::Normal;
+					}
+					else if (str == "hard") {
+						course = CourseType::Hard;
+					}
+					else if (str == "oni") {
+						course = CourseType::Oni;
+					}
+					else if (str == "edit") {
+						course = CourseType::Edit;
+					}
+					if (course != CourseType::Null) {
+						return;
+					}
+					course = (CourseType)svtov<int>(data);
+					});
+				Exsubstr(text[i], "LEVEL:", [&](std::string_view data) {
+					if (data.empty()) { return; }
+					level = svtov<uint64_t>(data);
+					});
+				Exsubstr(text[i], "SCOREINIT:", [&](std::string_view data) {
+					if (data.empty()) { return; }
+					addscore = svtov<uint64_t>(data);
+					});
+				Exsubstr(text[i], "BALLOON:", [&](std::string_view data) {
+					if (data.empty()) { return; }
+					auto datas = split(data, ',');
+					for (auto&& d : datas) {
+						balloon.push_back(svtov<uint64_t>(strtrim(d)));
 					}
 					});
-				Exsubstr(Lines[i], "OFFSET:", [&](const std::string& data) {
-					if (!data.empty()) {
-						SongOffset = std::stod(data);
-					}
-					});
-				Exsubstr(Lines[i], "MOVIEOFFSET:", [&](const std::string& data) {
-					if (!data.empty()) {
-						MovieOffset = stod(data);
-					}
-					});
-				Exsubstr(Lines[i], "DEMOSTART:", [&](const std::string& data) {
-					if (!data.empty()) {
-						DemoStart = std::stod(data);
-					}
-					});
-				Exsubstr(Lines[i], "SONGVOL:", [&](const std::string& data) {
-					if (!data.empty()) {
-						SongVolume = std::stof(data);
-					}
-					});
-				Exsubstr(Lines[i], "SEVOL:", [&](const std::string& data) {
-					if (!data.empty()) {
-						SeVolume = std::stof(data);
-					}
-					});
-				Exsubstr(Lines[i], "WAVE:", [&](const std::string& data) {
-					if (!data.empty()) {
-						SongPath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
-					}
-					});
-				Exsubstr(Lines[i], "BGMOVIE:", [&](const std::string& data) {
-					if (!data.empty()) {
-						MoviePath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
-					}
-					});
-				Exsubstr(Lines[i], "SONGLINK:", [&](const std::string& data) {
-					if (!data.empty()) {
-						SongLink = data;
-					}
-					});
-				Exsubstr(Lines[i], "COURSE:", [&](const std::string& data) {
-					if (!data.empty()) {
-						index = i;
-						course = CourseType::Null;
-						std::string str = ToLower(data);
-						if (str == "easy") {
-							course = CourseType::Easy;
-						}
-						else if (str == "normal") {
-							course = CourseType::Normal;
-						}
-						else if (str == "hard") {
-							course = CourseType::Hard;
-						}
-						else if (str == "oni") {
-							course = CourseType::Oni;
-						}
-						else if (str == "edit") {
-							course = CourseType::Edit;
-						}
-						if (course != CourseType::Null) {
-							return;
-						}
-						if (IsDigit(str)) {
-							course = (CourseType)std::stoi(str);
-						}
-					}
-					});
-				Exsubstr(Lines[i], "LEVEL:", [&](const std::string& data) {
-					if (!data.empty()) {
-						level = std::stoull(data);
-					}
-					});
-				Exsubstr(Lines[i], "SCOREINIT:", [&](const std::string& data) {
-					if (!data.empty()) {
-						addscore = stoull(data);
-					}
-					});
-				Exsubstr(Lines[i], "BALLOON:", [&](const std::string& data) {
-					if (!data.empty()) {
-						auto datas = split(data, ',');
-						for (const auto& d : datas) {
-							std::string s = strtrim(d);
-							if (s.empty()) continue;
-							balloon.push_back(std::stoull(s));
-						}
-					}
-					});
-				Exsubstr(Lines[i], "#START", [&](const std::string& data) {
+				Exsubstr(text[i], "#START", [&](std::string_view data) {
 					if (course == CourseType::Null) {
 						course = CourseType::Oni;
 					}
@@ -1264,41 +1236,31 @@ public:
 		void Load(const fs::path& path) {
 
 			FilePath = path.string();
-			std::ifstream ifs(path);
+			TextfileReader text(path);
 
-			if (!ifs.is_open()) {
-				return;
-			}
-
-			std::string line;
-			std::vector<std::string> Lines;
-
-			while (std::getline(ifs, line)) {
-				Lines.push_back(line);
-			}
-
-			auto ColorCodeParse = [&](std::string data) -> Color3<int> {
-				data.replace(0, 1, "0x");
-				int color = stoi(data, nullptr, 16);
+			auto ColorCodeParse = [&](std::string_view data) -> Color3<int> {
+				std::string str(data);
+				str.replace(0, 1, "0x");
+				int color = std::stoi(str, nullptr, 16);
 				int r = 0, g = 0, b = 0;
 				GetColor2(color, &r, &g, &b);
 				return { (r - 128) * 2, (g - 128) * 2, (b - 128) * 2 };
 				};
 
-			for (size_t i = 0; i < Lines.size(); ++i) {
-				Exsubstr(Lines[i], "GenreName=", [&](const std::string& data) {
+			for (size_t i = 0; i < text.lines().size(); ++i) {
+				Exsubstr(text[i], "GenreName=", [&](std::string_view data) {
 					Name = data;
 					});
-				Exsubstr(Lines[i], "GenreCaption=", [&](const std::string& data) {
+				Exsubstr(text[i], "GenreCaption=", [&](std::string_view data) {
 					Caption = data;
 					});
-				Exsubstr(Lines[i], "GenreColor=", [&](const std::string& data) {
+				Exsubstr(text[i], "GenreColor=", [&](std::string_view data) {
 					GenreColor = ColorCodeParse(data);
 					});
-				Exsubstr(Lines[i], "FontColor=", [&](const std::string& data) {
+				Exsubstr(text[i], "FontColor=", [&](std::string_view data) {
 					FontColor = ColorCodeParse(data);
 					});
-				Exsubstr(Lines[i], "FontEdgeColor=", [&](const std::string& data) {
+				Exsubstr(text[i], "FontEdgeColor=", [&](std::string_view data) {
 					FontEdgeColor = ColorCodeParse(data);
 					});
 			}
@@ -1422,9 +1384,9 @@ public:
 		BoxDatasUpdate();
 		BoxDataIndex = std::clamp<size_t>(BoxDataIndex, 0, BoxDatas.size() - 1);
 	}
-	void BoxDatasUpdate(bool is_search = false, const std::string& keyword = "") {
+	void BoxDatasUpdate(std::string_view keyword = "") {
 
-		static auto TolowerFind = [](std::string str, std::string findstr) {
+		static auto TolowerFind = [](std::string_view str, std::string_view findstr) {
 			return (bool)(ToLower(str).find(ToLower(findstr)) != std::string::npos);
 			};
 
@@ -1433,51 +1395,47 @@ public:
 		auto recusiveproc = [&](const std::vector<std::unique_ptr<BoxData>>& datas, auto f) -> void {
 			for (size_t i = 0; i < datas.size(); ++i) {
 				if (datas[i]->IsGenre()) {
-					if (is_search && !keyword.empty()) {
+					if (!keyword.empty()) {
 						for (auto& data : datas[i]->GetGenre()->Datas) {
 							if (data->IsGenre()) { continue; }
 							bool is_find = false;
-							Exsubstr(keyword, "l=", [&](const std::string& strdata) {
+							Exsubstr(keyword, "l=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (!IsDigit(strdata)) { return; }
 								if (std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
-									{ return course.Level == std::stoull(strdata); })) {
+									{ return course.Level == svtov<uint64_t>(strdata); })) {
 									BoxDatas.push_back(data.get());
 									is_find = true;
 								}
 								});
-							Exsubstr(keyword, "l<=", [&](const std::string& strdata) {
+							Exsubstr(keyword, "l<=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (!IsDigit(strdata)) { return; }
 								if (std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
-									{ return course.Level <= std::stoull(strdata); })) {
+									{ return course.Level <= svtov<uint64_t>(strdata); })) {
 									BoxDatas.push_back(data.get());
 									is_find = true;
 								}
 								});
-							Exsubstr(keyword, "l>=", [&](const std::string& strdata) {
+							Exsubstr(keyword, "l>=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (!IsDigit(strdata)) { return; }
 								if (std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
-									{ return course.Level >= std::stoull(strdata); })) {
+									{ return course.Level >= svtov<uint64_t>(strdata); })) {
 									BoxDatas.push_back(data.get());
 									is_find = true;
 								}
 								});
-							Exsubstr(keyword, "c=", [&](const std::string& strdata) {
+							Exsubstr(keyword, "c=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (!IsDigit(strdata)) { return; }
-								if (stoi(strdata) >= (int)CourseType::Count) { return; }
-								if (data->GetChart()->Courses[stoi(strdata)].IsPlayable) {
+								if (svtov<int>(strdata) >= (int)CourseType::Count) { return; }
+								if (data->GetChart()->Courses[svtov<int>(strdata)].IsPlayable) {
 									BoxDatas.push_back(data.get());
 									is_find = true;
 								}
 								});
-							Exsubstr(keyword, "g=", [&](const std::string& strdata) {
+							Exsubstr(keyword, "g=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
 								if (TolowerFind(datas[i]->GetGenre()->Name, strdata)) {
@@ -1485,34 +1443,30 @@ public:
 									is_find = true;
 								}
 								});
-							Exsubstr(keyword, "b=", [&](const std::string& strdata) {
+							Exsubstr(keyword, "b=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (!IsDigit(strdata)) { return; }
-								if ((int)data->GetChart()->BPM == (int)std::stod(strdata)) {
+								if ((int)data->GetChart()->BPM == svtov<double>(strdata)) {
 									BoxDatas.push_back(data.get());
 									is_find = true;
 								}
 								});
-							Exsubstr(keyword, "b<=", [&](const std::string& strdata) {
+							Exsubstr(keyword, "b<=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (!IsDigit(strdata)) { return; }
-								if (data->GetChart()->BPM <= std::stod(strdata)) {
+								if (data->GetChart()->BPM <= svtov<double>(strdata)) {
 									BoxDatas.push_back(data.get());
 									is_find = true;
 								}
 								});
-							Exsubstr(keyword, "b>=", [&](const std::string& strdata) {
+							Exsubstr(keyword, "b>=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (!IsDigit(strdata)) { return; }
-								if (data->GetChart()->BPM >= std::stod(strdata)) {
+								if (data->GetChart()->BPM >= svtov<double>(strdata)) {
 									BoxDatas.push_back(data.get());
 									is_find = true;
 								}
 								});
-
 							if (is_find) { continue; }
 							if (!TolowerFind(data->GetChart()->Title, keyword)
 								&& !TolowerFind(data->GetChart()->Subtitle, keyword)) {
@@ -1530,70 +1484,63 @@ public:
 			}
 			for (size_t i = 0; i < datas.size(); ++i) {
 				if (datas[i]->IsGenre()) { continue; }
-				if (bool is_find = false; is_search && !keyword.empty()) {
-					Exsubstr(keyword, "l=", [&](const std::string& strdata) {
+				if (bool is_find = false; !keyword.empty()) {
+					Exsubstr(keyword, "l=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (!IsDigit(strdata)) { return; }
 						if (std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
-							{ return course.Level == std::stoull(strdata); })) {
+							{ return course.Level == svtov<uint64_t>(strdata); })) {
 							BoxDatas.push_back(datas[i].get());
 							is_find = true;
 						}
 						});
-					Exsubstr(keyword, "l<=", [&](const std::string& strdata) {
+					Exsubstr(keyword, "l<=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (!IsDigit(strdata)) { return; }
 						if (std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
-							{ return course.Level <= std::stoull(strdata); })) {
+							{ return course.Level <= svtov<uint64_t>(strdata); })) {
 							BoxDatas.push_back(datas[i].get());
 							is_find = true;
 						}
 						});
-					Exsubstr(keyword, "l>=", [&](const std::string& strdata) {
+					Exsubstr(keyword, "l>=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (!IsDigit(strdata)) { return; }
 						if (std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
-							{ return course.Level >= std::stoull(strdata); })) {
+							{ return course.Level >= svtov<uint64_t>(strdata); })) {
 							BoxDatas.push_back(datas[i].get());
 							is_find = true;
 						}
 						});
-					Exsubstr(keyword, "c=", [&](const std::string& strdata) {
+					Exsubstr(keyword, "c=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (!IsDigit(strdata)) { return; }
-						if (stoi(strdata) >= (int)CourseType::Count) { return; }
-						if (datas[i]->GetChart()->Courses[stoi(strdata)].IsPlayable) {
+						if (svtov<int>(strdata) >= (int)CourseType::Count) { return; }
+						if (datas[i]->GetChart()->Courses[svtov<int>(strdata)].IsPlayable) {
 							BoxDatas.push_back(datas[i].get());
 							is_find = true;
 						}
 						});
-					Exsubstr(keyword, "b=", [&](const std::string& strdata) {
+					Exsubstr(keyword, "b=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (!IsDigit(strdata)) { return; }
-						if ((int)datas[i]->GetChart()->BPM == (int)std::stod(strdata)) {
+						if ((int)datas[i]->GetChart()->BPM == svtov<double>(strdata)) {
 							BoxDatas.push_back(datas[i].get());
 							is_find = true;
 						}
 						});
-					Exsubstr(keyword, "b<=", [&](const std::string& strdata) {
+					Exsubstr(keyword, "b<=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (!IsDigit(strdata)) { return; }
-						if (datas[i]->GetChart()->BPM <= std::stod(strdata)) {
+						if (datas[i]->GetChart()->BPM <= svtov<double>(strdata)) {
 							BoxDatas.push_back(datas[i].get());
 							is_find = true;
 						}
 						});
-					Exsubstr(keyword, "b>=", [&](const std::string& strdata) {
+					Exsubstr(keyword, "b>=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (!IsDigit(strdata)) { return; }
-						if (datas[i]->GetChart()->BPM >= std::stod(strdata)) {
+						if (datas[i]->GetChart()->BPM >= svtov<double>(strdata)) {
 							BoxDatas.push_back(datas[i].get());
 							is_find = true;
 						}
@@ -1607,7 +1554,7 @@ public:
 				}
 				BoxDatas.push_back(datas[i].get());
 			}
-			if (is_search && BoxDatas.empty()) {
+			if (BoxDatas.empty()) {
 				BoxDatasUpdate();
 			}
 			};
@@ -1677,9 +1624,22 @@ public:
 
 		for (auto&& file : DropFiles) {
 
-			fs::path path(u8StrToWStr(file));
+			fs::path path(StrToWStr(file));
 
 			if (path.extension() != ".zip") {
+				if (fs::is_directory(path)) {
+					fs::path dir = ImportFolderPath / path.filename();
+					fs::create_directories(dir);
+					for (auto&& entry : fs::recursive_directory_iterator(path)) {
+						if (entry.is_regular_file()) {
+							fs::copy(entry.path(), dir / fs::relative(entry.path(), path), fs::copy_options::overwrite_existing);
+						}
+						else if (entry.is_directory()) {
+							fs::create_directories(dir / entry.path().filename());
+						}
+					}
+					continue;
+				}
 				fs::copy(path, ImportFolderPath / path.filename(), fs::copy_options::overwrite_existing);
 				continue;
 			}
@@ -1689,14 +1649,14 @@ public:
 			UnZipper unzip(istream);
 
 			for (auto&& entry : unzip.listFiles()) {
-				fs::path filename = u8StrToWStr(entry.fileName());
-				if (!entry.isDir()) {
-					std::vector<uint8_t> content = entry.readContent();
-					MemToFile(ImportFolderPath / filename, content);
+				std::string name = entry.fileName();
+				if (name.back() == '/') { name.pop_back(); }
+				if (entry.isDir()) {
+					fs::create_directories(ImportFolderPath / StrToWStr(name));
+					continue;
 				}
-				else if (!fs::exists(filename)) {
-					fs::create_directories(ImportFolderPath / filename);
-				}
+				std::vector<uint8_t> content = entry.readContent();
+				MemToFile(ImportFolderPath / StrToWStr(name), content);
 			}
 		}
 
@@ -1794,7 +1754,7 @@ public:
 						pos,
 						GetColor(255, 255, 255),
 						GetColor(0, 0, 0),
-						BoxDatas[i]->GetChart()->Title
+						BoxDatas[i]->GetChart()->Title.data()
 					);
 				}
 			}
@@ -1890,6 +1850,7 @@ public:
 				else if (BoxDatas[BoxDataIndex]->GetChart()->Courses[CourseIndex].IsPlayable) {
 					SongDownload(BoxDatas[BoxDataIndex]->GetChart()->SongLink, BoxDatas[BoxDataIndex]->GetChart()->SongPath);
 					DemoSong.Delete();
+					PrevScene = Scene::SongSelect;
 					NowScene = Scene::Loading;
 				}
 			}
@@ -1948,7 +1909,7 @@ public:
 			}
 
 			InputData.Load();
-			BoxDatasUpdate(true, ToLower(InputData.Buffer));
+			BoxDatasUpdate(ToLower(InputData.Buffer));
 
 			if (BoxDatas.empty()) {
 				BoxDatasUpdate();
@@ -2119,13 +2080,12 @@ public:
 		for (size_t i = 0; i < Shared.Players.size(); i++) {
 
 			bool g = 1 - (GrantIndex == i) * IsSelect;
-			bool s = !Shared.Players[i].State;
 
 			Skin.Base->MultiRoom.Image.PlayerBox.Draw({ 0, 100.0f * i });
 			Skin.Base->MultiRoom.Font.Player.Draw({
 				Skin.Base->MultiRoom.Config.PlayerPos.X,
 				Skin.Base->MultiRoom.Config.PlayerPos.Y + 100.0f * i },
-				GetColor(255 * g, 255 * g, 255 * s),
+				GetColor(255 * g, 255 * g, 255 * !Shared.Players[i].State),
 				GetColor(0, 0, 0),
 				GetStrlen(Shared.Players[i].Name, Skin.Base->MultiRoom.Font.Player.Handle),
 				Shared.Players[i].Name
@@ -2172,6 +2132,7 @@ public:
 			}
 			else {
 				if (!Shared.WaveData.empty()) {
+					PrevScene = Scene::MultiRoom;
 					NowScene = Scene::Loading;
 				}
 				Input.HitKeyProcess(VK_TAB, KeyState::Down, [&] {
@@ -2280,13 +2241,7 @@ public:
 			LoadData.Load(u8"temp.tja");
 		}
 
-		std::string line;
-		std::vector<std::string> Lines;
-		std::ifstream ifs(fs::path(LoadData.ChartPath));
-		while (std::getline(ifs, line)) {
-			Lines.push_back(line);
-		}
-		ifs.close();
+		TextfileReader text(fs::path(LoadData.ChartPath));
 
 		if (fs::exists(u8"temp.tja")) {
 			fs::remove(u8"temp.tja");
@@ -2315,14 +2270,14 @@ public:
 		Chart.RawNoteDatas.push_back(MainData);
 		MainData.AbsTime = _offset;
 
-		for (size_t i = 0; i < (size_t)CourseType::Count; ++i) {
+		for (int i = 0; i < (int)CourseType::Count; ++i) {
 			if (LoadData.Courses[i].IsPlayable && i != CourseIndex) {
-				for (size_t j = (size_t)LoadData.Courses[i].Index; j < Lines.size(); ++j) {
-					if (Lines[j].find("#END") != std::string::npos) {
-						Lines[j] = "";
+				for (int j = (int)LoadData.Courses[i].Index; j < text.lines().size(); ++j) {
+					if (text[j].find("#END") != std::string_view::npos) {
+						text[j] = "";
 						break;
 					}
-					Lines[j] = "";
+					text[j] = "";
 				}
 			}
 		}
@@ -2349,58 +2304,58 @@ public:
 
 		double BranchAddTime = 0;
 
-		for (size_t i = 0; i < Lines.size(); ++i) {
+		for (size_t i = 0; i < text.lines().size(); ++i) {
 			try {
-				Exsubstr(Lines[i], "#START", [&](const std::string& data) {
+				Exsubstr(text[i], "#START", [&](std::string_view data) {
 					StartFlag = true;
 					});
-				Exsubstr(Lines[i], "#END", [&](const std::string& data) {
+				Exsubstr(text[i], "#END", [&](std::string_view data) {
 					StartFlag = false;
 					});
-				Exsubstr(Lines[i], "#GOGOSTART", [&](const std::string& data) {
+				Exsubstr(text[i], "#GOGOSTART", [&](std::string_view data) {
 					MainData.GoGoStart = true;
 					});
-				Exsubstr(Lines[i], "#GOGOEND", [&](const std::string& data) {
+				Exsubstr(text[i], "#GOGOEND", [&](std::string_view data) {
 					MainData.GoGoEnd = true;
 					});
-				Exsubstr(Lines[i], "#BARLINEON", [&](const std::string& data) {
+				Exsubstr(text[i], "#BARLINEON", [&](std::string_view data) {
 					BarlineDisplay = true;
 					});
-				Exsubstr(Lines[i], "#BARLINEOFF", [&](const std::string& data) {
+				Exsubstr(text[i], "#BARLINEOFF", [&](std::string_view data) {
 					BarlineDisplay = false;
 					});
 				if (!StartFlag) {
-					Exsubstr(Lines[i], "#BMSCROLL", [&](const std::string& data) {
+					Exsubstr(text[i], "#BMSCROLL", [&](std::string_view data) {
 						Chart.ScrollType = ScrollType::BMSCROLL;
 						});
-					Exsubstr(Lines[i], "#HBSCROLL", [&](const std::string& data) {
+					Exsubstr(text[i], "#HBSCROLL", [&](std::string_view data) {
 						Chart.ScrollType = ScrollType::HBSCROLL;
 						});
 				}
-				Exsubstr(Lines[i], "#BRANCHSTART", [&](const std::string& data) {
+				Exsubstr(text[i], "#BRANCHSTART", [&](std::string_view data) {
 					MainData.Section = true;
 					});
-				Exsubstr(Lines[i], "#LEVELHOLD", [&](const std::string& data) {
+				Exsubstr(text[i], "#LEVELHOLD", [&](std::string_view data) {
 					MainData.LevelHold = true;
 					});
-				Exsubstr(Lines[i], "#BRANCHSTART", [&](const std::string& data) {
+				Exsubstr(text[i], "#BRANCHSTART", [&](std::string_view data) {
 					auto sp = split(data, ',');
 					BranchData item;
 					switch (sp[0][0]) {
 					case 'p':
 						item.Type = IfBranchType::Perfect;
-						item.ExpertBranch = std::stod(sp[1]);
-						item.MasterBranch = std::stod(sp[2]);
+						item.ExpertBranch = svtov<double>(sp[1]);
+						item.MasterBranch = svtov<double>(sp[2]);
 						break;
 					case 'r':
 						item.Type = IfBranchType::Roll;
-						item.ExpertBranch = std::stod(sp[1]);
-						item.MasterBranch = std::stod(sp[2]);
+						item.ExpertBranch = svtov<double>(sp[1]);
+						item.MasterBranch = svtov<double>(sp[2]);
 						break;
 					case 's':
 						item.Type = IfBranchType::Score;
-						item.ExpertBranch = std::stod(sp[1]);
-						item.MasterBranch = std::stod(sp[2]);
+						item.ExpertBranch = svtov<double>(sp[1]);
+						item.MasterBranch = svtov<double>(sp[2]);
 						break;
 					}
 					BranchCount = 0;
@@ -2413,7 +2368,7 @@ public:
 					BranchAddTime = 0;
 					});
 				if (NowBranchStartFlag) {
-					Exsubstr(Lines[i], "#N", [&](const std::string& data) {
+					Exsubstr(text[i], "#N", [&](std::string_view data) {
 						if (BranchCount == 0) { MemData = MainData; }
 						MainData = MemData;
 						if (BranchCount != 0) { Chart.RawNoteDatas.back().RelaTime += -BranchAddTime; }
@@ -2422,8 +2377,8 @@ public:
 						BranchAddTime = 0;
 						++BranchCount;
 						});
-					if (Lines[i].find("#END") == std::string::npos) {
-						Exsubstr(Lines[i], "#E", [&](const std::string& data) {
+					if (text[i].find("#END") == std::string_view::npos) {
+						Exsubstr(text[i], "#E", [&](std::string_view data) {
 							if (BranchCount == 0) { MemData = MainData; }
 							MainData = MemData;
 							if (BranchCount != 0) { Chart.RawNoteDatas.back().RelaTime += -BranchAddTime; }
@@ -2433,8 +2388,8 @@ public:
 							++BranchCount;
 							});
 					}
-					if (Lines[i].find("#MEASURE") == std::string::npos) {
-						Exsubstr(Lines[i], "#M", [&](const std::string& data) {
+					if (text[i].find("#MEASURE") == std::string_view::npos) {
+						Exsubstr(text[i], "#M", [&](std::string_view data) {
 							if (BranchCount == 0) { MemData = MainData; }
 							MainData = MemData;
 							if (BranchCount != 0) { Chart.RawNoteDatas.back().RelaTime += -BranchAddTime; }
@@ -2444,7 +2399,7 @@ public:
 							++BranchCount;
 							});
 					}
-					Exsubstr(Lines[i], "#BRANCHEND", [&](const std::string& data) {
+					Exsubstr(text[i], "#BRANCHEND", [&](std::string_view data) {
 						if (BranchCount == 0) { MainData.BranchStart = true; }
 						MainData.IsBranch = BranchType::Null;
 						NowBranchStartFlag = false;
@@ -2452,56 +2407,56 @@ public:
 						BranchCount = 0;
 						});
 				}
-				Exsubstr(Lines[i], "#SCROLL", [&](const std::string& data) {
-					if (data.find("i") != std::string::npos) {
-						int Uindex = data.rfind("+") == std::string::npos ? 0 : data.rfind("+");
-						int Dindex = data.rfind("-") == std::string::npos ? 0 : data.rfind("-");
+				Exsubstr(text[i], "#SCROLL", [&](std::string_view data) {
+					if (data.find("i") != std::string_view::npos) {
+						int Uindex = data.rfind("+") == std::string_view::npos ? 0 : data.rfind("+");
+						int Dindex = data.rfind("-") == std::string_view::npos ? 0 : data.rfind("-");
 
 						bool Flag = Uindex > Dindex;
 
-						if (data.rfind("+") != std::string::npos && Flag) {
-							std::string real = strtrim(data.substr(0, data.rfind("+")));
-							std::string imag = strtrim(data.substr(data.rfind("+") + 1, data.rfind("i") - (data.rfind("+") + 1)));
-							MainData.Scroll = real.empty() ? 0 : stod(real);
-							MainData.Scrolli = imag.empty() ? -1 : stod(imag) * -1;
+						if (data.rfind("+") != std::string_view::npos && Flag) {
+							std::string_view real = strtrim(data.substr(0, data.rfind("+")));
+							std::string_view imag = strtrim(data.substr(data.rfind("+") + 1, data.rfind("i") - (data.rfind("+") + 1)));
+							MainData.Scroll = real.empty() ? 0 : svtov<double>(real);
+							MainData.Scrolli = imag.empty() ? -1 : svtov<double>(imag) * -1;
 						}
-						if (data.rfind("-") != std::string::npos && !Flag) {
-							std::string real = strtrim(data.substr(0, data.rfind("-")));
-							std::string imag = strtrim(data.substr(data.rfind("-") + 1, data.rfind("i") - (data.rfind("-") + 1)));
-							MainData.Scroll = real == "" ? 0 : stod(real);
-							MainData.Scrolli = imag == "" ? 1 : stod(imag);
+						if (data.rfind("-") != std::string_view::npos && !Flag) {
+							std::string_view real = strtrim(data.substr(0, data.rfind("-")));
+							std::string_view imag = strtrim(data.substr(data.rfind("-") + 1, data.rfind("i") - (data.rfind("-") + 1)));
+							MainData.Scroll = real == "" ? 0 : svtov<double>(real);
+							MainData.Scrolli = imag == "" ? 1 : svtov<double>(imag);
 						}
 					}
 					else {
-						MainData.Scroll = stod(data);
+						MainData.Scroll = svtov<double>(data);
 						MainData.Scrolli = 0;
 					}
 					});
-				Exsubstr(Lines[i], "#BPMCHANGE", [&](const std::string& data) {
-					MainData.BPM = stod(data);
+				Exsubstr(text[i], "#BPMCHANGE", [&](std::string_view data) {
+					MainData.BPM = svtov<double>(data);
 					MainData.BpmChangeFlag = true;
 					});
-				Exsubstr(Lines[i], "#MEASURE", [&](const std::string& data) {
+				Exsubstr(text[i], "#MEASURE", [&](std::string_view data) {
 					auto sp = split(data, '/');
-					MainData.Measure = stod(sp[0]) / stod(sp[1]);
+					MainData.Measure = svtov<double>(sp[0]) / svtov<double>(sp[1]);
 					});
-				Exsubstr(Lines[i], "#DELAY", [&](const std::string& data) {
-					Chart.RawNoteDatas.back().RelaTime += stod(data) * 1000;
-					MainData.AbsTime += stod(data) * 1000;
+				Exsubstr(text[i], "#DELAY", [&](std::string_view data) {
+					Chart.RawNoteDatas.back().RelaTime += svtov<double>(data) * 1000;
+					MainData.AbsTime += svtov<double>(data) * 1000;
 					});
 
-				if (Lines[i].find("#") != std::string::npos) { continue; }
+				if (text[i].find("#") != std::string_view::npos) { continue; }
 				if (!StartFlag) { continue; }
 
 				if (!BarlineLoading) {
 					BarlineLoading = true;
-					for (size_t j = i; j < Lines.size(); ++j) {
-						if (Lines[j].find("#") != std::string::npos) { continue; }
-						for (size_t k = 0, strsize = Lines[j].size(); k < strsize; ++k) {
-							if (Lines[j][k] == ',') {
+					for (size_t j = i; j < text.lines().size(); ++j) {
+						if (text[j].find("#") != std::string_view::npos) { continue; }
+						for (size_t k = 0, strsize = text[j].size(); k < strsize; ++k) {
+							if (text[j][k] == ',') {
 								goto BARLINEREADEND;
 							}
-							else if (Lines[j][k] >= '0' && Lines[j][k] <= '9') {
+							else if (text[j][k] >= '0' && text[j][k] <= '9') {
 								++BarlineNoteCount;
 							}
 						}
@@ -2511,13 +2466,13 @@ public:
 			}
 			catch (const std::invalid_argument) {
 				MessageBox(NULL, TEXT(std::string(std::to_string(i + 1) + "行目の記述が不正です。").c_str()), TEXT("エラー"), MB_ICONERROR);
-				NowScene = Scene::SongSelect;
+				NowScene = PrevScene;
 				return;
 			}
 
-			for (size_t j = 0, strsize = Lines[i].size(); j < strsize; ++j) {
-				bool ChartFlag = (Lines[i][j] >= '0' && Lines[i][j] <= '9');
-				bool EndFlag = Lines[i][j] == ',';
+			for (size_t j = 0, strsize = text[i].size(); j < strsize; ++j) {
+				bool ChartFlag = (text[i][j] >= '0' && text[i][j] <= '9');
+				bool EndFlag = text[i][j] == ',';
 				bool EmptyFlag = BarlineNoteCount == 0;
 				if (ChartFlag || EndFlag || EmptyFlag) {
 
@@ -2528,7 +2483,7 @@ public:
 						break;
 					}
 
-					MainData.NoteType = Lines[i][j];
+					MainData.NoteType = text[i][j];
 
 					double barlinetime = (240000 / MainData.BPM) * MainData.Measure;
 					double divtime = barlinetime / (EmptyFlag ? 1 : BarlineNoteCount);
