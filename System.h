@@ -1,20 +1,10 @@
 ﻿#pragma once
-#include "Library/Include.h"
-#include <shobjidl.h>
-#include <filesystem>
-#include <fstream>
-#include <complex>
-#include <thread>
-#include <mutex>
-
-namespace fs = std::filesystem;
-using namespace libarrier;
-using namespace cppunzip;
+#include "Include.h"
 
 fs::path GetExecutablePath() {
 	std::vector<char> buffer(MAX_PATH);
 	while (true) {
-		DWORD len = GetModuleFileName(NULL, buffer.data(), (DWORD)buffer.size());
+		uint32_t len = GetModuleFileName(NULL, buffer.data(), (DWORD)buffer.size());
 		if (len == 0) return L"";
 		if (len < buffer.size()) {
 			return fs::path(buffer.data());
@@ -1095,7 +1085,6 @@ public:
 		CourseData Courses[(size_t)CourseType::Count];
 
 		bool Load(const fs::path& path) {
-
 			TextfileReader text(path);
 			ChartPath = path.u8string();
 
@@ -2824,7 +2813,7 @@ RollType = '\0'
 			NowGoGo = false;
 			AddScore = 0;
 			AllNoteCount = 0;
-			BranchAnimationTime = 0.15;
+			BranchAnimationTime = 0.2;
 			SongBlankTime = 0;
 			SongSpeed = 1.0;
 			NowBPM = 0;
@@ -2840,7 +2829,7 @@ RollType = '\0'
 		uint64_t AllNoteCount = 0;
 
 		Timer BranchAnimationTimer;
-		double BranchAnimationTime = 0.15;
+		double BranchAnimationTime = 0.2;
 		BranchType NowBranchFlag = BranchType::Null;
 		ABranchType NowBranchAnimation = ABranchType::Null;
 		bool LevelHold = false;
@@ -4853,10 +4842,10 @@ RollType = '\0'
 		return _waitvsyncLog.exchange(false);
 	}
 
-	int Main() {
+	void Main() {
 
 		if (!Init()) {
-			return -1;
+			return;
 		}
 
 		Timer WaitTimer;
@@ -4907,6 +4896,5 @@ RollType = '\0'
 
 		thd.join();
 		DxLib_End();
-		return 0;
 	}
 };
