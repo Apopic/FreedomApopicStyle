@@ -56,6 +56,7 @@ public:
 		JSONDATA(HitNoteDisp);
 		JSONDATA(RollSpeed);
 		JSONDATA(WaitVSync);
+		JSONDATA(KeyHoldProcInterval);
 		JSONDATA(FastInput);
 		JSONDATA(FastDrawRate);
 		JSONDATA(SoundDeviceType);
@@ -101,6 +102,7 @@ public:
 			JSONDATA(HitNoteDisp),
 			JSONDATA(RollSpeed),
 			JSONDATA(WaitVSync),
+			JSONDATA(KeyHoldProcInterval),
 			JSONDATA(FastInput),
 			JSONDATA(FastDrawRate),
 			JSONDATA(SoundDeviceType),
@@ -171,6 +173,7 @@ public:
 	double SongSpeed = 1;
 	double BGBrightness = 100;
 	double RollSpeed = 30;
+	double KeyHoldProcInterval = 0.15;
 	double FastDrawRate = 0.5;
 
 	float SongVolume = 62;
@@ -933,12 +936,10 @@ public:
 		Skin.Base->Title.SE.Don.SetVolume(Config.SEVolume);
 		Skin.Base->Title.SE.Ka.SetVolume(Config.SEVolume);
 	}
-
 	void TitleDraw() {
-		Skin.Base->Title.Image.BackGround.Draw({ 0, 0 });
+		Skin.Base->Title.Image.BackGround.Draw({});
 		Skin.Base->Title.Image.Logo.Draw({});
 	}
-
 	void TitleProc() {
 
 		Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
@@ -972,7 +973,7 @@ public:
 	}
 
 	void ModeSelectDraw() {
-		Skin.Base->Title.Image.BackGround.Draw({ 0, 0 });
+		Skin.Base->ModeSelect.Image.BackGround.Draw({ 0, 0 });
 		for (size_t i = 0; i < (size_t)Mode::Count; ++i) {
 			unsigned int c = 100 * ((size_t)ModeSelector == i);
 			SetDrawAddColor(c, c, c);
@@ -1030,10 +1031,10 @@ public:
 		Input.HitKeyesProcess(Config.DonInputRight, KeyState::Down, DonKeyProc);
 		Input.HitKeyProcess(VK_RETURN, KeyState::Down, DonKeyProc);
 
-		Input.HitKeyesProcess(Config.KaInputLeft, KeyState::Down, [&] { KaKeyProc(false); });
-		Input.HitKeyesProcess(Config.KaInputRight, KeyState::Down, [&] { KaKeyProc(true); });
-		Input.HitKeyesProcess({ VK_UP,VK_LEFT }, KeyState::Down, [&] { KaKeyProc(false); });
-		Input.HitKeyesProcess({ VK_DOWN,VK_RIGHT }, KeyState::Down, [&] { KaKeyProc(true); });
+		Input.HitKeyesProcess(Config.KaInputLeft, KeyState::Down, [&] { KaKeyProc(false); }, Config.KeyHoldProcInterval);
+		Input.HitKeyesProcess(Config.KaInputRight, KeyState::Down, [&] { KaKeyProc(true); }, Config.KeyHoldProcInterval);
+		Input.HitKeyesProcess({ VK_UP,VK_LEFT }, KeyState::Down, [&] { KaKeyProc(false); }, Config.KeyHoldProcInterval);
+		Input.HitKeyesProcess({ VK_DOWN,VK_RIGHT }, KeyState::Down, [&] { KaKeyProc(true); }, Config.KeyHoldProcInterval);
 	}
 
 	enum class CourseType {
@@ -1082,6 +1083,7 @@ public:
 		std::u8string MoviePath = u8"";
 		std::u8string ChartPath = u8"";
 		std::string SongLink = "";
+		std::string MovieLink = "";
 		CourseData Courses[(size_t)CourseType::Count];
 
 		bool Load(const fs::path& path) {
@@ -1094,114 +1096,123 @@ public:
 			std::vector<uint64_t> balloon;
 			CourseType course = CourseType::Null;
 
-			for (size_t i = 0; i < text.lines().size(); ++i) {
-				Exsubstr(text[i], "TITLE:", [&](std::string_view data) {
-					if (data.find("--") == 0) {
-						data.remove_prefix(2);
-						TitleDisplay = false;
-					}
-					Title = data;
-					TitleStrlen.Generic = GetStrlen(data, Skin.Base->SongSelect.Font.Title.Handle);
-					TitleStrlen.Playing = GetStrlen(data, Skin.Base->Playing.Font.Title.Handle);
-					TitleStrlen.Result = GetStrlen(data, Skin.Base->Result.Font.Title.Handle);
-					});
-				Exsubstr(text[i], "SUBTITLE:", [&](std::string_view data) {
-					if (data.find("--") == 0) {
-						data.remove_prefix(2);
-						SubtitleDisplay = false;
-					}
-					Subtitle = data;
-					SubtitleStrlen.Generic = GetStrlen(data, Skin.Base->SongSelect.Font.Title.Handle);
-					SubtitleStrlen.Playing = GetStrlen(data, Skin.Base->Playing.Font.SubTitle.Handle);
-					SubtitleStrlen.Result = GetStrlen(data, Skin.Base->Result.Font.SubTitle.Handle);
-					});
-				Exsubstr(text[i], "BPM:", [&](std::string_view data) {
-					if (data.empty()) { return; }
-					BPM = svtov<double>(data);
-					});
-				Exsubstr(text[i], "OFFSET:", [&](std::string_view data) {
-					if (data.empty()) { return; }
-					SongOffset = svtov<double>(data);
-					});
-				Exsubstr(text[i], "MOVIEOFFSET:", [&](std::string_view data) {
-					if (data.empty()) { return; }
-					MovieOffset = svtov<double>(data);
-					});
-				Exsubstr(text[i], "DEMOSTART:", [&](std::string_view data) {
-					if (!data.empty()) { return; }
-					DemoStart = svtov<double>(data);
-					});
-				Exsubstr(text[i], "SONGVOL:", [&](std::string_view data) {
-					if (!data.empty()) { return; }
-					SongVolume = svtov<float>(data);
-					});
-				Exsubstr(text[i], "SEVOL:", [&](std::string_view data) {
-					if (!data.empty()) { return; }
-					SeVolume = svtov<float>(data);
-					});
-				Exsubstr(text[i], "WAVE:", [&](std::string_view data) {
-					if (data.empty()) { return; }
-					SongPath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
-					});
-				Exsubstr(text[i], "BGMOVIE:", [&](std::string_view data) {
-					if (data.empty()) { return; }
-					MoviePath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
-					});
-				Exsubstr(text[i], "SONGLINK:", [&](std::string_view data) {
-					if (data.empty()) { return; }
-					SongLink = data;
-					});
-				Exsubstr(text[i], "COURSE:", [&](std::string_view data) {
-					if (data.empty()) { return; }
-					index = i;
-					course = CourseType::Null;
-					std::string str = ToLower(data);
-					if (str == "easy") {
-						course = CourseType::Easy;
-					}
-					else if (str == "normal") {
-						course = CourseType::Normal;
-					}
-					else if (str == "hard") {
-						course = CourseType::Hard;
-					}
-					else if (str == "oni") {
-						course = CourseType::Oni;
-					}
-					else if (str == "edit") {
-						course = CourseType::Edit;
-					}
-					if (course != CourseType::Null) {
-						return;
-					}
-					course = (CourseType)svtov<int>(data);
-					});
-				Exsubstr(text[i], "LEVEL:", [&](std::string_view data) {
-					if (data.empty()) { return; }
-					level = svtov<uint64_t>(data);
-					});
-				Exsubstr(text[i], "SCOREINIT:", [&](std::string_view data) {
-					if (data.empty()) { return; }
-					addscore = svtov<uint64_t>(data);
-					});
-				Exsubstr(text[i], "BALLOON:", [&](std::string_view data) {
-					if (data.empty()) { return; }
-					auto datas = split(data, ',');
-					for (auto&& d : datas) {
-						balloon.push_back(svtov<uint64_t>(strtrim(d)));
-					}
-					});
-				Exsubstr(text[i], "#START", [&](std::string_view data) {
-					if (course == CourseType::Null) {
-						course = CourseType::Oni;
-					}
-					Courses[(size_t)course].Index = index;
-					Courses[(size_t)course].Level = level;
-					Courses[(size_t)course].AddScore = addscore;
-					Courses[(size_t)course].Balloons = balloon;
-					Courses[(size_t)course].IsPlayable = true;
-					balloon = std::vector<uint64_t>();
-					});
+			try {
+				for (size_t i = 0; i < text.lines().size(); ++i) {
+					Exsubstr(text[i], "TITLE:", [&](std::string_view data) {
+						if (data.find("--") == 0) {
+							data.remove_prefix(2);
+							TitleDisplay = false;
+						}
+						Title = data;
+						TitleStrlen.Generic = GetStrlen(data, Skin.Base->SongSelect.Font.Title.Handle);
+						TitleStrlen.Playing = GetStrlen(data, Skin.Base->Playing.Font.Title.Handle);
+						TitleStrlen.Result = GetStrlen(data, Skin.Base->Result.Font.Title.Handle);
+						});
+					Exsubstr(text[i], "SUBTITLE:", [&](std::string_view data) {
+						if (data.find("--") == 0) {
+							data.remove_prefix(2);
+							SubtitleDisplay = false;
+						}
+						Subtitle = data;
+						SubtitleStrlen.Generic = GetStrlen(data, Skin.Base->SongSelect.Font.Title.Handle);
+						SubtitleStrlen.Playing = GetStrlen(data, Skin.Base->Playing.Font.SubTitle.Handle);
+						SubtitleStrlen.Result = GetStrlen(data, Skin.Base->Result.Font.SubTitle.Handle);
+						});
+					Exsubstr(text[i], "BPM:", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						BPM = svtov<double>(data);
+						});
+					Exsubstr(text[i], "OFFSET:", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						SongOffset = svtov<double>(data);
+						});
+					Exsubstr(text[i], "MOVIEOFFSET:", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						MovieOffset = svtov<double>(data);
+						});
+					Exsubstr(text[i], "DEMOSTART:", [&](std::string_view data) {
+						if (!data.empty()) { return; }
+						DemoStart = svtov<double>(data);
+						});
+					Exsubstr(text[i], "SONGVOL:", [&](std::string_view data) {
+						if (!data.empty()) { return; }
+						SongVolume = svtov<float>(data);
+						});
+					Exsubstr(text[i], "SEVOL:", [&](std::string_view data) {
+						if (!data.empty()) { return; }
+						SeVolume = svtov<float>(data);
+						});
+					Exsubstr(text[i], "WAVE:", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						SongPath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
+						});
+					Exsubstr(text[i], "BGMOVIE:", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						MoviePath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
+						});
+					Exsubstr(text[i], "SONGLINK:", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						SongLink = data;
+						});
+					Exsubstr(text[i], "MOVIELINK:", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						MovieLink = data;
+						});
+					Exsubstr(text[i], "COURSE:", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						index = i;
+						course = CourseType::Null;
+						std::string str = ToLower(data);
+						if (str == "easy") {
+							course = CourseType::Easy;
+						}
+						else if (str == "normal") {
+							course = CourseType::Normal;
+						}
+						else if (str == "hard") {
+							course = CourseType::Hard;
+						}
+						else if (str == "oni") {
+							course = CourseType::Oni;
+						}
+						else if (str == "edit") {
+							course = CourseType::Edit;
+						}
+						if (course != CourseType::Null) {
+							return;
+						}
+						course = (CourseType)svtov<int>(data);
+						});
+					Exsubstr(text[i], "LEVEL:", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						level = svtov<uint64_t>(data);
+						});
+					Exsubstr(text[i], "SCOREINIT:", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						addscore = svtov<uint64_t>(data);
+						});
+					Exsubstr(text[i], "BALLOON:", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						auto datas = split(data, ',');
+						for (auto&& d : datas) {
+							balloon.push_back(svtov<uint64_t>(strtrim(d)));
+						}
+						});
+					Exsubstr(text[i], "#START", [&](std::string_view data) {
+						if (course == CourseType::Null) {
+							course = CourseType::Oni;
+						}
+						Courses[(size_t)course].Index = index;
+						Courses[(size_t)course].Level = level;
+						Courses[(size_t)course].AddScore = addscore;
+						Courses[(size_t)course].Balloons = balloon;
+						Courses[(size_t)course].IsPlayable = true;
+						balloon = std::vector<uint64_t>();
+						});
+				}
+			}
+			catch (...) {
+				MessageBox(NULL, TEXT((path.string() + "の読み込みに失敗しました").c_str()), TEXT("エラー"), MB_ICONERROR);
 			}
 			return true;
 		}
@@ -1388,75 +1399,55 @@ public:
 						for (auto& data : datas[i]->GetGenre()->Datas) {
 							if (data->IsGenre()) { continue; }
 							bool is_find = false;
+							Exsubstr(keyword, "g=", [&](std::string_view strdata) {
+								if (strdata.empty()) { return; }
+								if (is_find) { return; }
+								is_find = TolowerFind(datas[i]->GetGenre()->Name, strdata);
+								});
 							Exsubstr(keyword, "l=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
-									{ return course.Level == svtov<uint64_t>(strdata); })) {
-									BoxDatas.push_back(data.get());
-									is_find = true;
-								}
+								is_find = std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
+									{ return course.Level == svtov<uint64_t>(strdata); });
 								});
 							Exsubstr(keyword, "l<=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
-									{ return course.Level <= svtov<uint64_t>(strdata); })) {
-									BoxDatas.push_back(data.get());
-									is_find = true;
-								}
+								is_find = std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
+									{ return course.Level <= svtov<uint64_t>(strdata); });
 								});
 							Exsubstr(keyword, "l>=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
-									{ return course.Level >= svtov<uint64_t>(strdata); })) {
-									BoxDatas.push_back(data.get());
-									is_find = true;
-								}
+								is_find = std::ranges::any_of(data->GetChart()->Courses, [&](const CourseData& course)
+									{ return course.Level >= svtov<uint64_t>(strdata); });
 								});
 							Exsubstr(keyword, "c=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
 								if (svtov<int>(strdata) >= (int)CourseType::Count) { return; }
-								if (data->GetChart()->Courses[svtov<int>(strdata)].IsPlayable) {
-									BoxDatas.push_back(data.get());
-									is_find = true;
-								}
-								});
-							Exsubstr(keyword, "g=", [&](std::string_view strdata) {
-								if (strdata.empty()) { return; }
-								if (is_find) { return; }
-								if (TolowerFind(datas[i]->GetGenre()->Name, strdata)) {
-									BoxDatas.push_back(data.get());
-									is_find = true;
-								}
+								is_find = data->GetChart()->Courses[svtov<int>(strdata)].IsPlayable;
 								});
 							Exsubstr(keyword, "b=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if ((int)data->GetChart()->BPM == svtov<double>(strdata)) {
-									BoxDatas.push_back(data.get());
-									is_find = true;
-								}
+								is_find = (int)data->GetChart()->BPM == svtov<int>(strdata);
 								});
 							Exsubstr(keyword, "b<=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (data->GetChart()->BPM <= svtov<double>(strdata)) {
-									BoxDatas.push_back(data.get());
-									is_find = true;
-								}
+								is_find = data->GetChart()->BPM <= svtov<double>(strdata);
 								});
 							Exsubstr(keyword, "b>=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
 								if (is_find) { return; }
-								if (data->GetChart()->BPM >= svtov<double>(strdata)) {
-									BoxDatas.push_back(data.get());
-									is_find = true;
-								}
+								is_find = data->GetChart()->BPM >= svtov<double>(strdata);
 								});
-							if (is_find) { continue; }
+
+							if (is_find) {
+								BoxDatas.push_back(data.get());
+								continue;
+							}
 							if (!TolowerFind(data->GetChart()->Title, keyword)
 								&& !TolowerFind(data->GetChart()->Subtitle, keyword)) {
 								continue;
@@ -1477,65 +1468,47 @@ public:
 					Exsubstr(keyword, "l=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
-							{ return course.Level == svtov<uint64_t>(strdata); })) {
-							BoxDatas.push_back(datas[i].get());
-							is_find = true;
-						}
+						is_find = std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
+							{ return course.Level == svtov<uint64_t>(strdata); });
 						});
 					Exsubstr(keyword, "l<=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
-							{ return course.Level <= svtov<uint64_t>(strdata); })) {
-							BoxDatas.push_back(datas[i].get());
-							is_find = true;
-						}
+						is_find = std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
+							{ return course.Level <= svtov<uint64_t>(strdata); });
 						});
 					Exsubstr(keyword, "l>=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
-							{ return course.Level >= svtov<uint64_t>(strdata); })) {
-							BoxDatas.push_back(datas[i].get());
-							is_find = true;
-						}
+						is_find = std::ranges::any_of(datas[i]->GetChart()->Courses, [&](const CourseData& course)
+							{ return course.Level >= svtov<uint64_t>(strdata); });
 						});
 					Exsubstr(keyword, "c=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
 						if (svtov<int>(strdata) >= (int)CourseType::Count) { return; }
-						if (datas[i]->GetChart()->Courses[svtov<int>(strdata)].IsPlayable) {
-							BoxDatas.push_back(datas[i].get());
-							is_find = true;
-						}
+						is_find = datas[i]->GetChart()->Courses[svtov<int>(strdata)].IsPlayable;
 						});
 					Exsubstr(keyword, "b=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if ((int)datas[i]->GetChart()->BPM == svtov<double>(strdata)) {
-							BoxDatas.push_back(datas[i].get());
-							is_find = true;
-						}
+						is_find = (int)datas[i]->GetChart()->BPM == svtov<int>(strdata);
 						});
 					Exsubstr(keyword, "b<=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (datas[i]->GetChart()->BPM <= svtov<double>(strdata)) {
-							BoxDatas.push_back(datas[i].get());
-							is_find = true;
-						}
+						is_find = datas[i]->GetChart()->BPM <= svtov<double>(strdata);
 						});
 					Exsubstr(keyword, "b>=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
-						if (datas[i]->GetChart()->BPM >= svtov<double>(strdata)) {
-							BoxDatas.push_back(datas[i].get());
-							is_find = true;
-						}
+						is_find = datas[i]->GetChart()->BPM >= svtov<double>(strdata);
 						});
 
-					if (is_find) { continue; }
+					if (is_find) { 			
+						BoxDatas.push_back(datas[i].get());
+						continue;
+					}
 					if (!TolowerFind(datas[i]->GetChart()->Title, keyword)
 						&& !TolowerFind(datas[i]->GetChart()->Subtitle, keyword)) {
 						continue;
@@ -1550,15 +1523,14 @@ public:
 		recusiveproc(TempBoxDatas, recusiveproc);
 	}
 	std::vector<uint8_t> FileToMem(const fs::path& path) {
+		std::vector<std::uint8_t> buffer;
 		if (fs::exists(path)) {
 			size_t size = fs::file_size(path);
+			buffer.resize(size);
 			std::ifstream ifs(path, std::ios::binary);
-			std::vector<std::uint8_t> buffer(size);
-			if (ifs.read(reinterpret_cast<char*>(buffer.data()), size)) {
-				ifs.close();
-				return buffer;
-			}
+			ifs.read(reinterpret_cast<char*>(buffer.data()), size);
 		}
+		return buffer;
 	}
 	void MemToFile(const fs::path& path, const std::vector<uint8_t>& datas) {
 		std::ofstream ofs(path, std::ios::binary);
@@ -1650,11 +1622,10 @@ public:
 		}
 
 		EnumChart(Config.SongDirectories);
-
 	}
 	void SongDownload(const std::string& link, const fs::path& path) {
 		if (!link.empty() && !fs::exists(path)) {
-			if (MessageBox(NULL, TEXT("音声ファイルがありません。ダウンロードしますか？"), "", MB_YESNO) == IDYES) {
+			if (MessageBox(NULL, TEXT("音源ファイルがありません。ダウンロードしますか？"), "", MB_YESNO) == IDYES) {
 				if (fs::exists("song.ogg")) {
 					fs::remove("song.ogg");
 				}
@@ -1670,6 +1641,24 @@ public:
 			}
 		}
 	}
+	void MovieDownload(const std::string& link, const fs::path& path) {
+		if (!link.empty() && !fs::exists(path)) {
+			if (MessageBox(NULL, TEXT("動画ファイルがありません。ダウンロードしますか？"), "", MB_YESNO) == IDYES) {
+				if (fs::exists("movie.avi")) {
+					fs::remove("movie.avi");
+				}
+				std::string powershell = "powershell -Command ";
+				std::string command = powershell + "yt-dlp --recode-video avi -o movie " + link;
+				if (std::system(command.c_str()) != 0) {
+					MessageBox(NULL, TEXT("動画のダウンロードに失敗しました"), TEXT("エラー"), MB_ICONERROR);
+					return;
+				}
+				if (fs::exists("movie.avi")) {
+					fs::rename("movie.avi", path);
+				}
+			}
+		}
+	}
 
 	void SongSelectInit() {
 		SetDragFileValidFlag(TRUE);
@@ -1677,7 +1666,7 @@ public:
 		Skin.Base->SongSelect.SE.Ka.SetVolume((Config.SEVolume));
 		if (BoxDatas.empty()) {
 			MessageBox(NULL, TEXT("譜面がありません。"), TEXT("エラー"), MB_ICONERROR);
-			NowScene = Scene::Title;
+			NowScene = Scene::ModeSelect;
 			return;
 		}
 	}
@@ -1818,10 +1807,11 @@ public:
 	}
 	void SongSelectProc() {
 		Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
-			if (IsCourseSelect) {
-				IsCourseSelect = false;
-			}
-			else if (!IsMulti) {
+			if (!IsMulti) {
+				if (IsCourseSelect) {
+					IsCourseSelect = false;
+					return;
+				}
 				NowScene = Scene::ModeSelect;
 			}
 			});
@@ -1838,6 +1828,7 @@ public:
 				}
 				else if (BoxDatas[BoxDataIndex]->GetChart()->Courses[CourseIndex].IsPlayable) {
 					SongDownload(BoxDatas[BoxDataIndex]->GetChart()->SongLink, BoxDatas[BoxDataIndex]->GetChart()->SongPath);
+					MovieDownload(BoxDatas[BoxDataIndex]->GetChart()->MovieLink, BoxDatas[BoxDataIndex]->GetChart()->MoviePath);
 					DemoSong.Delete();
 					PrevScene = Scene::SongSelect;
 					NowScene = Scene::Loading;
@@ -1914,10 +1905,10 @@ public:
 
 		if (InputData.Handle == 0) {
 
-			Input.HitKeyesProcess(Config.KaInputLeft, KeyState::Down, [&] { KaInputProc(false); });
-			Input.HitKeyesProcess(Config.KaInputRight, KeyState::Down, [&] { KaInputProc(true); });
-			Input.HitKeyesProcess({ VK_UP, VK_LEFT }, KeyState::Down, [&] { KaInputProc(false); });
-			Input.HitKeyesProcess({ VK_DOWN, VK_RIGHT }, KeyState::Down, [&] { KaInputProc(true); });
+			Input.HitKeyesProcess(Config.KaInputLeft, KeyState::Down, [&] { KaInputProc(false); }, Config.KeyHoldProcInterval);
+			Input.HitKeyesProcess(Config.KaInputRight, KeyState::Down, [&] { KaInputProc(true); }, Config.KeyHoldProcInterval);
+			Input.HitKeyesProcess({ VK_UP, VK_LEFT }, KeyState::Down, [&] { KaInputProc(false); }, Config.KeyHoldProcInterval);
+			Input.HitKeyesProcess({ VK_DOWN, VK_RIGHT }, KeyState::Down, [&] { KaInputProc(true); }, Config.KeyHoldProcInterval);
 
 			Input.HitKeyesProcess(Config.DonInputLeft, KeyState::Down, DonInputProc);
 			Input.HitKeyesProcess(Config.DonInputRight, KeyState::Down, DonInputProc);
@@ -1979,7 +1970,9 @@ public:
 	int GrantIndex = -1;
 
 	void MultiDataInit() {
-		if (Socket.IsValid()) { Socket.Close(); }
+		if (IsMulti) {
+			Socket.Close();
+		}
 		Shared = SharedData();
 		Socket = TCPSocket();
 		IsMulti = false;
@@ -2004,7 +1997,10 @@ public:
 	template<typename T>
 	void Recv(T& dest) {
 		if (Socket.Available() > 0) {
-			dest = *Socket.ASyncEncryptionRecv().get()->Get<T>();
+			auto pak = *Socket.ASyncEncryptionRecv().get();
+			if (pak.GetHeader().value().IsSameAs<T>()) {
+				dest = *pak.Get<T>();
+			}
 		}
 	}
 	void MultiRoomInit() {
@@ -2012,9 +2008,7 @@ public:
 		Skin.Base->MultiRoom.SE.Ka.SetVolume(Config.SEVolume);
 		if (!IsMulti) {
 			if (Connect(Config.ServerAddress, Config.ServerPort)) {
-				PlayerData data;
-				data.Name = Config.PlayerName;
-				Shared.Players.push_back(std::move(data));
+				Shared.Players.push_back(PlayerData{ .Name = Config.PlayerName });
 				Socket.CryptEngine.Init(sharedkey);
 				IsMulti = true;
 			}
@@ -2110,8 +2104,7 @@ public:
 					}
 					if (DemoSongPlayBlank.GetElapsed().Second() > DemoSongPlayBlankTime() && !DemoSong.IsPlay()) {
 						SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
-						if (Shared.Players[Shared.MyIndex].IsHost) { DemoSong.Load(u8StrToStr(Chart.OriginalData.SongPath)); }
-						else { DemoSong.Load(Shared.WaveData.data(), Shared.WaveData.size()); }
+						DemoSong.Load(Shared.WaveData.data(), Shared.WaveData.size());
 						SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
 						DemoSong.SetCurrent(Chart.OriginalData.DemoStart * 1000.0);
 						DemoSong.SetVolume(Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
@@ -2170,8 +2163,10 @@ public:
 				}
 				};
 
-			Input.HitKeyProcess(VK_UP, KeyState::Down, [&] { KaInputProc(false); });
-			Input.HitKeyProcess(VK_DOWN, KeyState::Down, [&] { KaInputProc(true); });
+			Input.HitKeyesProcess(Config.KaInputLeft, KeyState::Down, [&] { KaInputProc(false); }, Config.KeyHoldProcInterval);
+			Input.HitKeyesProcess(Config.KaInputRight, KeyState::Down, [&] { KaInputProc(true); }, Config.KeyHoldProcInterval);
+			Input.HitKeyProcess(VK_UP, KeyState::Down, [&] { KaInputProc(false); }, Config.KeyHoldProcInterval);
+			Input.HitKeyProcess(VK_DOWN, KeyState::Down, [&] { KaInputProc(true); }, Config.KeyHoldProcInterval);
 
 			Input.HitKeyesProcess(Config.DonInputLeft, KeyState::Down, DonInputProc);
 			Input.HitKeyesProcess(Config.DonInputRight, KeyState::Down, DonInputProc);
@@ -2187,9 +2182,11 @@ public:
 		}
 
 		Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
-			if (Shared.Players[Shared.MyIndex].State) {
-				Shared.Players[Shared.MyIndex].State = 0;
-				return;
+			if (IsMulti) {
+				if (Shared.Players[Shared.MyIndex].State) {
+					Shared.Players[Shared.MyIndex].State = 0;
+					return;
+				}
 			}
 			MultiDataInit();
 			NowScene = Scene::ModeSelect;
@@ -2203,11 +2200,12 @@ public:
 		const double d = std::pow(b, std::pow(m, -1 / c));
 		return 1 / std::pow(std::log(judge * (b - d) / b + d) / std::log(b), c);
 	}
+
 	void SetSongSpeed() {
 		double SongSpeed = !IsMulti ? Config.SongSpeed : Shared.SongSpeed;
 		if (!Chart.OriginalData.MoviePath.empty()) {
 			Chart.Movie.Load(u8StrToStr(Chart.OriginalData.MoviePath), SongSpeed,
-				(Chart.OriginalData.MovieOffset < 0 ? Chart.OriginalData.MovieOffset * -1000 : Chart.SongBlankTime));
+				Chart.OriginalData.MovieOffset < 0 ? Chart.OriginalData.MovieOffset * -1000 : -Chart.SongBlankTime);
 		}
 		Chart.SongData.SetVolume(Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
 		int freq = Chart.SongData.Frequency * SongSpeed;
@@ -2223,6 +2221,7 @@ public:
 
 		if (!IsMulti || Shared.Players[Shared.MyIndex].IsHost) {
 			LoadData = *BoxDatas[BoxDataIndex]->GetChart();
+			LoadData.Load(fs::path(LoadData.ChartPath));
 		}
 		else {
 			CourseIndex = Shared.CourseIndex;
@@ -2632,16 +2631,14 @@ RollType = '\0'
 		}
 		Chart.NowBranchFlag = BranchStartFindFlag ? BranchType::Normal : BranchType::Null;
 
-		if (!IsMulti || Shared.Players[Shared.MyIndex].IsHost) {
-			SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
+		SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
+		if (!IsMulti) {
 			Chart.SongData.Load(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath));
-			SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
 		}
 		else {
-			SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
 			Chart.SongData.Load(Shared.WaveData.data(), Shared.WaveData.size());
-			SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
 		}
+		SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
 
 		SetSongSpeed();
 
@@ -2795,12 +2792,12 @@ RollType = '\0'
 	struct PlayData {
 
 		void Init() {
+			RawNoteDatas.clear();
 			BranchDatas.clear();
 			Judge.clear();
-			RawNoteDatas.clear();
 			SongData.Delete();
-			BranchAnimationTimer.Reset();
 			NowTime.Reset();
+			BranchAnimationTimer.Reset();
 			RollViewEndTimer.Reset();
 			WaitRollTime.Reset();
 			Movie.Init();
@@ -2844,11 +2841,13 @@ RollType = '\0'
 		bool NowGoGo = false;
 
 		struct MovieData {
+
 			void Init() {
 				DeleteGraph(Handle);
 				Size = { 0,0 };
 				Handle = -1;
 			}
+
 			void Load(const std::string& path, double speed, double time) {
 				Handle = LoadGraph(path.c_str());
 				GetGraphSizeF(Handle, &Size.Width, &Size.Height);
@@ -2858,8 +2857,10 @@ RollType = '\0'
 				SetPlaySpeedRateMovieToGraph(Handle, speed);
 				SeekMovieToGraph(Handle, time);
 			}
+
 			int Handle = -1;
 			Size2D<float> Size;
+
 		} Movie;
 
 		bool AutoPlayLR = false;
@@ -2905,7 +2906,7 @@ RollType = '\0'
 	std::vector<std::string> Names = std::vector<std::string>();
 
 	void SetDrawBranchArea(Pos2D<float> DelayPos) const {
-		if (Chart.NowBranchFlag != BranchType::NotDisplay) {
+		if (!Chart.BranchDatas.empty()) {
 			SetDrawArea(
 				Skin.Base->Playing.Image.Lane.Pos.X - Skin.Base->Playing.Image.Lane.Size.Width / 2,
 				Skin.Base->Playing.Image.Lane.Pos.Y - Skin.Base->Playing.Image.Lane.Size.Height / 2 + DelayPos.Y,
@@ -2915,15 +2916,11 @@ RollType = '\0'
 		}
 	}
 	void PlayingInit() {
-
 		if (IsMulti) {
-			if (!Names.empty()) { Names.clear(); }
-			for (auto&& player : Shared.Players) {
-				Names.push_back(player.Name);
-			}
+			auto names_view = Shared.Players | std::views::transform(&PlayerData::Name);
+			Names.assign(names_view.begin(), names_view.end());
 			std::ranges::rotate(Names, Names.begin() + Shared.MyIndex);
 		}
-
 		for (auto&& taiko : MiniTaikoFlash) {
 			taiko.Reset();
 		}
@@ -2969,7 +2966,7 @@ RollType = '\0'
 				DelayPos.Y -= Skin.Base->Playing.Config.MultiPlayLaneDistance;
 			}
 
-			if ((Chart.Movie.Handle != -1)) {
+			if (Chart.Movie.Handle != -1) {
 				SetDrawBlendMode(DX_BLENDMODE_ALPHA, 225);
 			}
 			Skin.Base->Playing.Image.LaneFrame.Draw(DelayPos);
@@ -3208,6 +3205,7 @@ RollType = '\0'
 			for (auto&& data : Chart.RawNoteDatas | std::ranges::views::reverse) {
 
 				double NoteTheta = atan2(data.Scrolli, data.Scroll);
+				double BranchDelayPos = 0.0;
 
 				NotePos = GetNotePos(data);
 
@@ -3215,30 +3213,32 @@ RollType = '\0'
 
 				switch (Chart.NowBranchAnimation) {
 				case ABranchType::Normal_Expert:
-					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; NotePos.Y += NoteBranchMotion; }
-					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; NotePos.Y -= Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; BranchDelayPos += NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; BranchDelayPos -= Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
 					break;
 				case ABranchType::Normal_Master:
-					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; NotePos.Y += NoteBranchMotion; }
-					if (data.IsBranch == BranchType::Master) { NoteBranch = true; NotePos.Y -= Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; BranchDelayPos += NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Master) { NoteBranch = true; BranchDelayPos -= Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
 					break;
 				case ABranchType::Expert_Normal:
-					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; NotePos.Y -= NoteBranchMotion; }
-					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; NotePos.Y += Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; BranchDelayPos -= NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; BranchDelayPos += Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
 					break;
 				case ABranchType::Expert_Master:
-					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; NotePos.Y += NoteBranchMotion; }
-					if (data.IsBranch == BranchType::Master) { NoteBranch = true; NotePos.Y -= Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; BranchDelayPos += NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Master) { NoteBranch = true; BranchDelayPos -= Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
 					break;
 				case ABranchType::Master_Normal:
-					if (data.IsBranch == BranchType::Master) { NoteBranch = true; NotePos.Y -= NoteBranchMotion; }
-					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; NotePos.Y += Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Master) { NoteBranch = true; BranchDelayPos -= NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Normal) { NoteBranch = true; BranchDelayPos += Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
 					break;
 				case ABranchType::Master_Expert:
-					if (data.IsBranch == BranchType::Master) { NoteBranch = true; NotePos.Y -= NoteBranchMotion; }
-					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; NotePos.Y += Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Master) { NoteBranch = true; BranchDelayPos -= NoteBranchMotion; }
+					if (data.IsBranch == BranchType::Expert) { NoteBranch = true; BranchDelayPos += Skin.Base->Playing.Image.Lane.Size.Height - NoteBranchMotion; }
 					break;
 				}
+
+				NotePos.Y += BranchDelayPos;
 
 				if (!NoteBranch) { continue; }
 				if (data.BarlineDisplay) {
@@ -3295,7 +3295,10 @@ RollType = '\0'
 				if (data.NoteType >= '5' &&
 					data.NoteType <= '6') {
 					const Pos2D<double>& cnote = NotePos;
-					const Pos2D<double>& dnote = GetNotePos(Chart.RawNoteDatas[data.RollEndIndex]);
+					const Pos2D<double>& dnote = { 
+						GetNotePos(Chart.RawNoteDatas[data.RollEndIndex]).X, 
+						GetNotePos(Chart.RawNoteDatas[data.RollEndIndex]).Y + BranchDelayPos
+					};
 
 					bool DispFlag =
 						InRange(cnote.X, cnote.Y) ||
@@ -3770,11 +3773,6 @@ RollType = '\0'
 				data.HitFlag = true;
 				data.NoteType = '\0';
 
-				if (data.Section) {
-					data.Section = false;
-					Chart.Judge[0].Branch.Init();
-				}
-
 				return;
 			}
 
@@ -3817,6 +3815,11 @@ RollType = '\0'
 
 			bool NoteBranch = data.IsBranch == Chart.NowBranchFlag || data.IsBranch == BranchType::Null;
 			bool HitFlag = data.AbsTime < NowTime;
+
+			if (data.Section && HitFlag) {
+				data.Section = false;
+				Chart.Judge[0].Branch.Init();
+			}
 
 			if (!NoteBranch) { continue; }
 			if (data.LevelHold && HitFlag) {
@@ -3880,6 +3883,11 @@ RollType = '\0'
 				bool HitFlag = data.AbsTime < NowTime;
 				bool IsHitNote = (data.NoteType >= '1' && data.NoteType <= '4');
 
+				if (data.Section && HitFlag) {
+					data.Section = false;
+					Chart.Judge[0].Branch.Init();
+				}
+
 				if (!NoteBranch) {
 					continue;
 				}
@@ -3926,11 +3934,6 @@ RollType = '\0'
 					}
 					data.NoteType = '\0';
 					data.HitFlag = true;
-
-					if (data.Section) {
-						data.Section = false;
-						Chart.Judge[0].Branch.Init();
-					}
 				}
 			}
 
@@ -4051,6 +4054,11 @@ RollType = '\0'
 			Score.Crown = data[chartpath][CourseName]["Crown"];
 		}
 		return Score;
+	}
+	void ResultInit() {
+		if (IsMulti) {
+			std::ranges::rotate(Chart.Judge, Chart.Judge.begin() + Shared.MyIndex);
+		}
 	}
 	void ResultEnd() {
 		if (IsMulti) {
@@ -4196,11 +4204,11 @@ RollType = '\0'
 			Input.HitKeyProcess(VK_LEFT, KeyState::Down, [&] {
 				Skin.Base->SongSelect.SE.Ka.Play();
 				ResultIndex > 0 ? --ResultIndex : 0;
-				});
+				}, Config.KeyHoldProcInterval);
 			Input.HitKeyProcess(VK_RIGHT, KeyState::Down, [&] {
 				Skin.Base->SongSelect.SE.Ka.Play();
 				ResultIndex < Shared.PlayerCount - 1 ? ++ResultIndex : ResultIndex;
-				});
+				}, Config.KeyHoldProcInterval);
 
 			if (!Shared.Players[Shared.MyIndex].IsHost) {
 				if (Shared.HitKey == HitType::Back) {
@@ -4244,6 +4252,7 @@ RollType = '\0'
 			"HitNoteDisp",
 			"RollSpeed",
 			"WaitVSync",
+			"KeyHoldProcInterval",
 			"FastInput",
 			"FastDrawRate",
 			"SoundDeviceType",
@@ -4359,25 +4368,11 @@ RollType = '\0'
 	void ConfigDataInput(int& i, T& data, I& input) {
 		if (ConfigSelector == i) {
 			if (ConfigInputFlag == 1) {
+
 				input = data;
 			}
 			if (ConfigInputFlag == 2) {
 				data = input;
-			}
-		}
-		i++;
-	}
-	template<typename T, typename I>
-	void ConfigVectorInput(int& i, T& data, I& input) {
-		if (ConfigSelector == i) {
-			if (ConfigInputFlag == 1) {
-				input = data;
-			}
-			if (ConfigInputFlag == 2) {
-				data.clear();
-				for (auto&& elem : InputData.Vector) {
-					data.push_back(elem);
-				}
 			}
 		}
 		i++;
@@ -4441,6 +4436,7 @@ RollType = '\0'
 				ConfigDataDraw(i, j, Config.HitNoteDisp ? "true" : "false");
 				ConfigDataDraw(i, j, std::to_string(Config.RollSpeed));
 				ConfigDataDraw(i, j, Config.WaitVSync ? "true" : "false");
+				ConfigDataDraw(i, j, std::to_string(Config.KeyHoldProcInterval));
 				ConfigDataDraw(i, j, Config.FastInput ? "true" : "false");
 				ConfigDataDraw(i, j, std::to_string(Config.FastDrawRate));
 				ConfigDataDraw(i, j, std::to_string(Config.SoundDeviceType));
@@ -4493,21 +4489,21 @@ RollType = '\0'
 			Input.HitKeyProcess(VK_UP, KeyState::Down, [&] {
 				Skin.Base->Title.SE.Ka.Play();
 				ConfigSelector <= 0 ? 0 : ConfigSelector--;
-				});
+				}, Config.KeyHoldProcInterval);
 			Input.HitKeyProcess(VK_DOWN, KeyState::Down, [&] {
 				Skin.Base->Title.SE.Ka.Play();
 				ConfigSelector >= ConfigMenuString[(int)ConfigGenre].size() - 1 ? ConfigSelector = ConfigMenuString[(int)ConfigGenre].size() - 1 : ConfigSelector++;
-				});
+				}, Config.KeyHoldProcInterval);
 
 			if (ConfigGenre == ConfigGenreData::Key) {
 				Input.HitKeyProcess(VK_LEFT, KeyState::Down, [&] {
 					Skin.Base->Title.SE.Ka.Play();
 					ConfigKeySelector <= 0 ? 0 : ConfigKeySelector--;
-					});
+					}, Config.KeyHoldProcInterval);
 				Input.HitKeyProcess(VK_RIGHT, KeyState::Down, [&] {
 					Skin.Base->Title.SE.Ka.Play();
 					ConfigKeySelector >= 4 - 1 ? 4 : ConfigKeySelector++;
-					});
+					}, Config.KeyHoldProcInterval);
 			}
 		}
 
@@ -4585,12 +4581,13 @@ RollType = '\0'
 					ConfigDataInput(i, Config.SongSpeed, InputData.Double);
 					ConfigDataInput(i, Config.BGBrightness, InputData.Double);
 					ConfigDataInput(i, Config.SkinName, InputData.String);
-					ConfigVectorInput(i, Config.SongDirectories, InputData.Vector);
+					ConfigDataInput(i, Config.SongDirectories, InputData.Vector);
 					ConfigDataInput(i, Config.SongVolume, InputData.Float);
 					ConfigDataInput(i, Config.SEVolume, InputData.Float);
 					ConfigDataInput(i, Config.HitNoteDisp, InputData.Bool);
 					ConfigDataInput(i, Config.RollSpeed, InputData.Double);
 					ConfigDataInput(i, Config.WaitVSync, InputData.Bool);
+					ConfigDataInput(i, Config.KeyHoldProcInterval, InputData.Double);
 					ConfigDataInput(i, Config.FastInput, InputData.Bool);
 					ConfigDataInput(i, Config.FastDrawRate, InputData.Double);
 					ConfigDataInput(i, Config.SoundDeviceType, InputData.Int);
@@ -4742,8 +4739,6 @@ RollType = '\0'
 				break;
 			case Scene::Playing:
 				PlayingInit();
-				break;
-			case Scene::Result:
 				break;
 			}
 		}
