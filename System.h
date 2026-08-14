@@ -1018,12 +1018,10 @@ public:
 		static auto KaKeyProc = [&](bool direction) {
 			Skin.Base->Title.SE.Ka.Play();
 			if (!direction) {
-				(int&)ModeSelector -= 1;
-				if (ModeSelector <= Mode::Single) { ModeSelector = Mode::Single; }
+				ModeSelector > Mode::Single ? (int&)ModeSelector -= 1 : (int&)ModeSelector = 4;
 			}
 			else {
-				(int&)ModeSelector += 1;
-				if (ModeSelector >= Mode::Count) { ModeSelector = Mode::End; }
+				ModeSelector < Mode::End ? (int&)ModeSelector += 1 : (int&)ModeSelector = 0;
 			}
 			};
 
@@ -4368,7 +4366,6 @@ RollType = '\0'
 	void ConfigDataInput(int& i, T& data, I& input) {
 		if (ConfigSelector == i) {
 			if (ConfigInputFlag == 1) {
-
 				input = data;
 			}
 			if (ConfigInputFlag == 2) {
