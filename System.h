@@ -48,6 +48,7 @@ public:
 		JSONDATA(JudgeOffset);
 		JSONDATA(ChartSpeed);
 		JSONDATA(SongSpeed);
+		JSONDATA(TrainingMode);
 		JSONDATA(BGBrightness);
 		JSONDATA(SkinName);
 		JSONDATA(SongDirectories);
@@ -94,6 +95,7 @@ public:
 			JSONDATA(JudgeOffset),
 			JSONDATA(ChartSpeed),
 			JSONDATA(SongSpeed),
+			JSONDATA(TrainingMode),
 			JSONDATA(BGBrightness),
 			JSONDATA(SkinName),
 			JSONDATA(SongDirectories),
@@ -149,6 +151,7 @@ public:
 	uint16_t ServerPort = 8080;
 
 	bool AutoPlay = false;
+	bool TrainingMode = false;
 	bool HitNoteDisp = true;
 	bool WaitVSync = true;
 	bool FastInput = true;
@@ -1503,7 +1506,7 @@ public:
 						is_find = datas[i]->GetChart()->BPM >= svtov<double>(strdata);
 						});
 
-					if (is_find) { 			
+					if (is_find) {
 						BoxDatas.push_back(datas[i].get());
 						continue;
 					}
@@ -1624,18 +1627,18 @@ public:
 	void SongDownload(const std::string& link, const fs::path& path) {
 		if (!link.empty() && !fs::exists(path)) {
 			if (MessageBox(NULL, TEXT("音源ファイルがありません。ダウンロードしますか？"), "", MB_YESNO) == IDYES) {
-				
+
 				if (fs::exists("song.ogg")) {
 					fs::remove("song.ogg");
 				}
-				
+
 				std::string powershell = "powershell -Command ";
 				std::string command = powershell + "yt-dlp -x --audio-format vorbis -o song " + link;
 				if (std::system(command.c_str()) != 0) {
 					MessageBox(NULL, TEXT("音源のダウンロードに失敗しました"), TEXT("エラー"), MB_ICONERROR);
 					return;
 				}
-				
+
 				if (fs::exists("song.ogg")) {
 					fs::rename("song.ogg", path);
 				}
@@ -1645,7 +1648,7 @@ public:
 	void MovieDownload(const std::string& link, const fs::path& path) {
 		if (!link.empty() && !fs::exists(path)) {
 			if (MessageBox(NULL, TEXT("動画ファイルがありません。ダウンロードしますか？"), "", MB_YESNO) == IDYES) {
-				
+
 				if (fs::exists("movie.avi")) {
 					fs::remove("movie.avi");
 				}
@@ -2295,6 +2298,7 @@ public:
 
 		size_t BalloonIndex = 0;
 		size_t NoteCount = 0;
+		size_t BarlineCount = 0;
 
 		double BranchAddTime = 0;
 
@@ -2488,6 +2492,7 @@ public:
 						AddBarline = true;
 						if (BarlineDisplay) {
 							MainData.BarlineDisplay = true;
+							++BarlineCount;
 						}
 						else {
 							MainData.BarlineDisplay = false;
@@ -2631,6 +2636,7 @@ RollType = '\0'
 		}
 
 		Chart.AllNoteCount = NoteCount;
+		Chart.AllBarlineCount = BarlineCount;
 		Chart.AddScore = LoadData.Courses[CourseIndex].AddScore;
 		if (Chart.AddScore == 0) {
 			Chart.AddScore = 1000000 / (double)NoteCount;
@@ -2669,9 +2675,11 @@ RollType = '\0'
 				return;
 			}
 		}
+		else if (!Config.TrainingMode) {
+			WaitVSync(10);
+			Chart.NowTime.Start();
+		}
 
-		WaitVSync(10);
-		Chart.NowTime.Start();
 		NowScene = Scene::Playing;
 	}
 
@@ -2816,6 +2824,7 @@ RollType = '\0'
 			NowGoGo = false;
 			AddScore = 0;
 			AllNoteCount = 0;
+			AllBarlineCount = 0;
 			BranchAnimationTime = 0.2;
 			SongBlankTime = 0;
 			SongSpeed = 1.0;
@@ -2853,6 +2862,8 @@ RollType = '\0'
 
 		Timer RollViewEndTimer;
 		double RollViewEndTime = 0.75;
+
+		size_t AllBarlineCount = 0;
 	};
 
 	PlayData Chart;
@@ -2890,6 +2901,26 @@ RollType = '\0'
 	std::vector<_HitNote> HitNote = std::vector<_HitNote>();
 	std::vector<std::string> Names = std::vector<std::string>();
 
+	struct TrainingData {
+
+		Timer BarlineMoveTimer;
+		double BarlineMoveTime = 0.05;
+		double Offset = 0;
+		double MemNowTime = 0;
+		size_t NoteDataIndex = 0;
+		size_t BarlineIndex = 0;
+
+		void Init() {
+			BarlineMoveTimer;
+			BarlineMoveTime = 0.05;
+			Offset = 0;
+			MemNowTime = 0;
+			NoteDataIndex = 0;
+			BarlineIndex = 0;
+		}
+
+	} Training;
+
 	void SetDrawBranchArea(Pos2D<float> DelayPos) const {
 		if (!Chart.BranchDatas.empty()) {
 			SetDrawArea(
@@ -2902,7 +2933,7 @@ RollType = '\0'
 	}
 	void PlayingInit() {
 		if (IsMulti) {
-			auto names_view = Shared.Players | std::views::transform(&PlayerData::Name);		
+			auto names_view = Shared.Players | std::views::transform(&PlayerData::Name);
 			Names.assign(names_view.begin(), names_view.end());
 			auto it = Names.begin() + Shared.MyIndex;
 			std::rotate(Names.begin(), it, it + 1);
@@ -2916,7 +2947,7 @@ RollType = '\0'
 	}
 	void PlayingDraw() {
 
-		const double NowTime = ChartNowTime(1000);
+		const double NowTime = ChartNowTime(1000) + Training.Offset;
 
 		Skin.Base->Playing.Image.BackGround.Draw({});
 
@@ -3281,8 +3312,8 @@ RollType = '\0'
 				if (data.NoteType >= '5' &&
 					data.NoteType <= '6') {
 					const Pos2D<double>& cnote = NotePos;
-					const Pos2D<double>& dnote = { 
-						GetNotePos(Chart.RawNoteDatas[data.RollEndIndex]).X, 
+					const Pos2D<double>& dnote = {
+						GetNotePos(Chart.RawNoteDatas[data.RollEndIndex]).X,
 						GetNotePos(Chart.RawNoteDatas[data.RollEndIndex]).Y + BranchDelayPos
 					};
 
@@ -3565,6 +3596,21 @@ RollType = '\0'
 				);
 			}
 		}
+
+		if (!IsMulti) {
+			if (Config.TrainingMode) {
+				if (!Chart.NowTime.IsRunning()) {
+					DrawFormatString(
+						Skin.Base->Playing.Image.Note.Pos.X,
+						Skin.Base->Playing.Image.Note.Pos.Y - 100,
+						GetColor(255, 255, 255),
+						"(%d/%d)",
+						Training.BarlineIndex, Chart.AllBarlineCount
+					);
+				}
+			}
+		}
+
 		if (Config.ViewDebug) {
 			DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.u8string().c_str());
 		}
@@ -3600,17 +3646,25 @@ RollType = '\0'
 	}
 	void PlayingProc() {
 
-		const double NowTime = ChartNowTime(1000);
+		const double NowTime = ChartNowTime(1000) + Training.Offset;
 
-		if (Chart.SongBlankTime < NowTime && Chart.SongBlankTime + 128 > NowTime && !Chart.SongData.IsPlay()) {
-			Chart.SongData.Play();
-		}
-		else if (Chart.SongBlankTime + 5000 < NowTime && !Chart.SongData.IsPlay()) {
-			if (!IsMulti || CheckState(3)) {
-				NowScene = Scene::Result;
-				return;
+		if (Chart.NowTime.IsRunning()) {
+			if (Chart.SongBlankTime < NowTime && Chart.SongBlankTime + 128 > NowTime && !Chart.SongData.IsPlay()) {
+				if (Training.BarlineIndex < Chart.AllBarlineCount) {
+					Chart.SongData.Play(TRUE);
+				}
 			}
-			Shared.Players[Shared.MyIndex].State = 3;
+			else if (Chart.SongBlankTime + 5000 < NowTime && !Chart.SongData.IsPlay()) {
+				if (Config.TrainingMode && !IsMulti) {
+					NowScene = Scene::Loading;
+					return;
+				}
+				if (!IsMulti || CheckState(3)) {
+					NowScene = Scene::Result;
+					return;
+				}
+				Shared.Players[Shared.MyIndex].State = 3;
+			}
 		}
 
 		if (Chart.NowBranchFlag != BranchType::Null && !Chart.LevelHold) {
@@ -3669,10 +3723,106 @@ RollType = '\0'
 				}
 			}
 		}
-
 		else {
+			if (Config.TrainingMode) {
+				if (!Chart.NowTime.IsRunning()) {
+					if (!Training.BarlineMoveTimer.IsRunning()) {
+
+						static auto MoveInputProc = [&](bool direction) {
+							if (direction) {
+								if (Training.BarlineIndex < Chart.AllBarlineCount) {
+									auto find = std::ranges::find_if(std::next(Chart.RawNoteDatas.begin() + Training.NoteDataIndex), Chart.RawNoteDatas.end(), &NoteData::BarlineDisplay);
+									if (find != Chart.RawNoteDatas.end()) {
+										Training.NoteDataIndex = std::distance(Chart.RawNoteDatas.begin(), find);
+										++Training.BarlineIndex;
+										Training.MemNowTime = NowTime;
+										Training.BarlineMoveTimer.Start();
+									}
+								}
+							}
+							else {
+								if (Training.BarlineIndex > 0) {
+									auto find = std::ranges::find_if(std::reverse_iterator(Chart.RawNoteDatas.begin() + Training.NoteDataIndex), Chart.RawNoteDatas.rend(), &NoteData::BarlineDisplay);
+									if (find != Chart.RawNoteDatas.rend()) {
+										Training.NoteDataIndex = std::distance(Chart.RawNoteDatas.begin(), std::prev(find.base()));
+										--Training.BarlineIndex;
+										Training.MemNowTime = NowTime;
+										Training.BarlineMoveTimer.Start();
+									}
+								}
+							}
+							};
+
+						static auto WarpInputProc = [&](bool direction) {
+							if (direction) {
+								auto find = std::ranges::find_if(Chart.RawNoteDatas.begin(), Chart.RawNoteDatas.end(), &NoteData::BarlineDisplay);
+								if (find != Chart.RawNoteDatas.end()) {
+									Training.NoteDataIndex = std::distance(Chart.RawNoteDatas.begin(), find);
+									Training.BarlineIndex = 0;
+									Training.MemNowTime = NowTime;
+									Training.BarlineMoveTimer.Start();
+								}
+							}
+							else {
+								auto find = std::ranges::find_if(Chart.RawNoteDatas.rbegin(), Chart.RawNoteDatas.rend(), &NoteData::BarlineDisplay);
+								if (find != Chart.RawNoteDatas.rend()) {
+									Training.NoteDataIndex = std::distance(Chart.RawNoteDatas.begin(), std::prev(find.base()));
+									Training.BarlineIndex = Chart.AllBarlineCount;
+									Training.MemNowTime = NowTime;
+									Training.BarlineMoveTimer.Start();
+
+								}
+							}
+							};
+
+						static auto StartInputProc = [&] {
+							Chart.NowTime.Start();
+							if (Chart.SongBlankTime < NowTime
+								&& Training.BarlineIndex > 0
+								&& Training.BarlineIndex < Chart.AllBarlineCount) {
+								if (Chart.Movie.Handle != -1) {
+									SeekMovieToGraph(Chart.Movie.Handle, (Chart.OriginalData.MovieOffset < 0) ? Training.Offset + Chart.OriginalData.MovieOffset * -1000 : Training.Offset - Chart.SongBlankTime);
+								}
+								Chart.SongData.SetCurrent(NowTime - Chart.SongBlankTime);
+								Chart.SongData.Play(FALSE);
+							}
+							};
+
+						static auto BranchChangeProc = [&](bool direction) {
+							auto MemBranch = Chart.NowBranchFlag;
+							if (direction) {
+								Chart.NowBranchFlag = (Chart.NowBranchFlag < BranchType::Master) ? (BranchType)((int)Chart.NowBranchFlag + 1) : BranchType::Master;
+							}
+							else {
+								Chart.NowBranchFlag = (Chart.NowBranchFlag > BranchType::Normal) ? (BranchType)((int)Chart.NowBranchFlag - 1) : BranchType::Normal;
+							}
+							};
+
+						Input.HitKeyProcess(VK_NEXT, KeyState::Down, [] { MoveInputProc(false); }, Config.KeyHoldProcInterval);
+						Input.HitKeyProcess(VK_PRIOR, KeyState::Down, [] { MoveInputProc(true); }, Config.KeyHoldProcInterval);
+						Input.HitKeyProcess(VK_DOWN, KeyState::Down, [] { BranchChangeProc(false); });
+						Input.HitKeyProcess(VK_UP, KeyState::Down, [] { BranchChangeProc(true); });
+						Input.HitKeyProcess(VK_END, KeyState::Down, [] { WarpInputProc(false); });
+						Input.HitKeyProcess(VK_HOME, KeyState::Down, [] { WarpInputProc(true); });
+
+						Input.HitKeyesProcess(Config.DonInputLeft, KeyState::Down, StartInputProc);
+						Input.HitKeyesProcess(Config.DonInputRight, KeyState::Down, StartInputProc);
+						Input.HitKeyProcess(VK_SPACE, KeyState::Down, StartInputProc);
+						Input.HitKeyProcess(VK_RETURN, KeyState::Down, StartInputProc);
+					}
+					else {
+						const double MoveTime = Training.BarlineMoveTimer.GetElapsed().Second();
+						double Rate = GetEasingRate(MoveTime / Training.BarlineMoveTime, ease::Base::In, ease::Line::Linear);
+						Training.Offset = std::lerp(Training.MemNowTime, Chart.RawNoteDatas[Training.NoteDataIndex].AbsTime, Rate);
+						if (Rate >= 1.0) {
+							Training.BarlineMoveTimer.Reset();
+						}
+					}
+				}
+			}
 
 			Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
+				Training.Init();
 				NowScene = Scene::SongSelect;
 				});
 			Input.HitKeyProcess(VK_TAB, KeyState::Down, [&] {
@@ -3859,136 +4009,140 @@ RollType = '\0'
 			}
 		}
 
-		if (Config.AutoPlay) {
-			size_t RollCount = 0;
-			NoteData* BalloonData = nullptr;
-			bool NextImage = false;
-			for (auto&& data : Chart.RawNoteDatas) {
+		if (Chart.NowTime.IsRunning()) {
+			if (Config.AutoPlay) {
 
-				bool NoteBranch = data.IsBranch == Chart.NowBranchFlag || data.IsBranch == BranchType::Null;
-				bool HitFlag = data.AbsTime < NowTime;
-				bool IsHitNote = (data.NoteType >= '1' && data.NoteType <= '4');
+				size_t RollCount = 0;
+				NoteData* BalloonData = nullptr;
+				bool NextImage = false;
 
-				if (data.Section && HitFlag) {
-					data.Section = false;
-					Chart.Judge[0].Branch.Init();
-				}
+				for (auto&& data : Chart.RawNoteDatas) {
 
-				if (!NoteBranch) {
-					continue;
-				}
+					bool NoteBranch = data.IsBranch == Chart.NowBranchFlag || data.IsBranch == BranchType::Null;
+					bool HitFlag = data.AbsTime < NowTime;
+					bool IsHitNote = (data.NoteType >= '1' && data.NoteType <= '4');
 
-				if (data.RollFlag == 1) {
-					++RollCount;
-					NextImage = data.NoteType == '6';
-				}
-
-				if (data.BalloonFlag == 1) {
-					BalloonData = &data;
-				}
-
-				if (HitFlag && !data.HitFlag && IsHitNote) {
-					HitNote[0].Add(HitNoteData(data.NoteType, JudgeType::Good));
-					Chart.Judge[0].Hit(JudgeType::Good, 0, data.NoteType);
-					switch (data.NoteType) {
-					case '1':
-						Skin.Base->Playing.SE.Don.Play();
-						MiniTaikoFlash[0 + Chart.AutoPlayLR * 2].Start();
-						Chart.AutoPlayLR = !Chart.AutoPlayLR;
-						HitAction((HitType)(0 + Chart.AutoPlayLR * 2));
-						break;
-					case '2':
-						Skin.Base->Playing.SE.Ka.Play();
-						MiniTaikoFlash[1 + Chart.AutoPlayLR * 2].Start();
-						Chart.AutoPlayLR = !Chart.AutoPlayLR;
-						HitAction((HitType)(1 + Chart.AutoPlayLR * 2));
-						break;
-					case '3':
-						Skin.Base->Playing.SE.Don.Play();
-						Skin.Base->Playing.SE.Don.Play();
-						MiniTaikoFlash[0].Start();
-						MiniTaikoFlash[2].Start();
-						HitAction(HitType::DonBig);
-						break;
-					case '4':
-						Skin.Base->Playing.SE.Ka.Play();
-						Skin.Base->Playing.SE.Ka.Play();
-						MiniTaikoFlash[1].Start();
-						MiniTaikoFlash[3].Start();
-						HitAction(HitType::KaBig);
-						break;
+					if (data.Section && HitFlag) {
+						data.Section = false;
+						Chart.Judge[0].Branch.Init();
 					}
-					data.NoteType = '\0';
-					data.HitFlag = true;
-				}
-			}
 
-			if (RollCount > 0 && !Chart.WaitRollTime.IsRunning()) {
-				Skin.Base->Playing.SE.Don.Play();
-				if (Chart.RollViewEndTimer.IsRunning() && Chart.Judge[0].Rolls.IsEnd) {
-					for (auto&& judge : Chart.Judge) {
-						judge.Rolls.NowCount = 0;
-						judge.Rolls.IsEnd = false;
+					if (!NoteBranch) {
+						continue;
 					}
+
+					if (data.RollFlag == 1) {
+						++RollCount;
+						NextImage = data.NoteType == '6';
+					}
+
+					if (data.BalloonFlag == 1) {
+						BalloonData = &data;
+					}
+
+					if (HitFlag && !data.HitFlag && IsHitNote) {
+						HitNote[0].Add(HitNoteData(data.NoteType, JudgeType::Good));
+						Chart.Judge[0].Hit(JudgeType::Good, 0, data.NoteType);
+						switch (data.NoteType) {
+						case '1':
+							Skin.Base->Playing.SE.Don.Play();
+							MiniTaikoFlash[0 + Chart.AutoPlayLR * 2].Start();
+							Chart.AutoPlayLR = !Chart.AutoPlayLR;
+							HitAction((HitType)(0 + Chart.AutoPlayLR * 2));
+							break;
+						case '2':
+							Skin.Base->Playing.SE.Ka.Play();
+							MiniTaikoFlash[1 + Chart.AutoPlayLR * 2].Start();
+							Chart.AutoPlayLR = !Chart.AutoPlayLR;
+							HitAction((HitType)(1 + Chart.AutoPlayLR * 2));
+							break;
+						case '3':
+							Skin.Base->Playing.SE.Don.Play();
+							Skin.Base->Playing.SE.Don.Play();
+							MiniTaikoFlash[0].Start();
+							MiniTaikoFlash[2].Start();
+							HitAction(HitType::DonBig);
+							break;
+						case '4':
+							Skin.Base->Playing.SE.Ka.Play();
+							Skin.Base->Playing.SE.Ka.Play();
+							MiniTaikoFlash[1].Start();
+							MiniTaikoFlash[3].Start();
+							HitAction(HitType::KaBig);
+							break;
+						}
+						data.NoteType = '\0';
+						data.HitFlag = true;
+					}
+				}
+
+				if (RollCount > 0 && !Chart.WaitRollTime.IsRunning()) {
+					Skin.Base->Playing.SE.Don.Play();
+					if (Chart.RollViewEndTimer.IsRunning() && Chart.Judge[0].Rolls.IsEnd) {
+						for (auto&& judge : Chart.Judge) {
+							judge.Rolls.NowCount = 0;
+							judge.Rolls.IsEnd = false;
+						}
+						Chart.RollViewEndTimer.Reset();
+					}
+					Chart.AutoPlayLR = !Chart.AutoPlayLR;
+					Chart.Judge[0].Roll++;
+					Chart.Judge[0].Branch.Roll++;
+					Chart.Judge[0].Rolls.NowCount++;
+					HitNote[0].Add(HitNoteData(NextImage ? '6' : '5', JudgeType::Roll));
+					Chart.WaitRollTime.Start();
+					HitAction((HitType)(0 + Chart.AutoPlayLR * 2));
+					Chart.Judge[0].NoteType = NextImage ? '6' : '5';
+				}
+				if (BalloonData != nullptr && !Chart.WaitRollTime.IsRunning()) {
+					Skin.Base->Playing.SE.Don.Play();
+					Chart.AutoPlayLR = !Chart.AutoPlayLR;
+					Chart.Judge[0].Roll++;
+					Chart.Judge[0].Branch.Roll++;
+					--BalloonData->BalloonCount;
+					Chart.Judge[0].Rolls.NowCount = BalloonData->BalloonCount;
 					Chart.RollViewEndTimer.Reset();
+					Chart.WaitRollTime.Start();
+					HitAction((HitType)(0 + Chart.AutoPlayLR * 2));
+					if (BalloonData->BalloonCount <= 0) {
+						Skin.Base->Playing.SE.Balloon.Play();
+						HitNote[0].Add(HitNoteData('3', JudgeType::Roll));
+						BalloonData->NoteType = '0';
+						BalloonData->HitFlag = true;
+						BalloonData->BalloonFlag = 2;
+						Chart.Judge[0].NoteType = '3';
+					}
 				}
-				Chart.AutoPlayLR = !Chart.AutoPlayLR;
-				Chart.Judge[0].Roll++;
-				Chart.Judge[0].Branch.Roll++;
-				Chart.Judge[0].Rolls.NowCount++;
-				HitNote[0].Add(HitNoteData(NextImage ? '6' : '5', JudgeType::Roll));
-				Chart.WaitRollTime.Start();
-				HitAction((HitType)(0 + Chart.AutoPlayLR * 2));
-				Chart.Judge[0].NoteType = NextImage ? '6' : '5';
-			}
-			if (BalloonData != nullptr && !Chart.WaitRollTime.IsRunning()) {
-				Skin.Base->Playing.SE.Don.Play();
-				Chart.AutoPlayLR = !Chart.AutoPlayLR;
-				Chart.Judge[0].Roll++;
-				Chart.Judge[0].Branch.Roll++;
-				--BalloonData->BalloonCount;
-				Chart.Judge[0].Rolls.NowCount = BalloonData->BalloonCount;
-				Chart.RollViewEndTimer.Reset();
-				Chart.WaitRollTime.Start();
-				HitAction((HitType)(0 + Chart.AutoPlayLR * 2));
-				if (BalloonData->BalloonCount <= 0) {
-					Skin.Base->Playing.SE.Balloon.Play();
-					HitNote[0].Add(HitNoteData('3', JudgeType::Roll));
-					BalloonData->NoteType = '0';
-					BalloonData->HitFlag = true;
-					BalloonData->BalloonFlag = 2;
-					Chart.Judge[0].NoteType = '3';
+				if (Chart.WaitRollTime.GetElapsed().Second() > 1.0 / Config.RollSpeed) {
+					Chart.WaitRollTime.Reset();
 				}
 			}
-			if (Chart.WaitRollTime.GetElapsed().Second() > 1.0 / Config.RollSpeed) {
-				Chart.WaitRollTime.Reset();
+			else {
+				Input.HitKeyesProcess(Config.DonInputLeft, KeyState::Down, [&] {
+					Skin.Base->Playing.SE.Don.Play();
+					MiniTaikoFlash[0].Start();
+					JudgeNote(NowTime, '1');
+					HitAction(HitType::DonLeft);
+					});
+				Input.HitKeyesProcess(Config.KaInputLeft, KeyState::Down, [&] {
+					Skin.Base->Playing.SE.Ka.Play();
+					MiniTaikoFlash[1].Start();
+					JudgeNote(NowTime, '2');
+					HitAction(HitType::KaLeft);
+					});
+				Input.HitKeyesProcess(Config.DonInputRight, KeyState::Down, [&] {
+					Skin.Base->Playing.SE.Don.Play();
+					MiniTaikoFlash[2].Start();
+					JudgeNote(NowTime, '1');
+					HitAction(HitType::DonRight);
+					});
+				Input.HitKeyesProcess(Config.KaInputRight, KeyState::Down, [&] {
+					Skin.Base->Playing.SE.Ka.Play();
+					MiniTaikoFlash[3].Start();
+					JudgeNote(NowTime, '2');
+					HitAction(HitType::KaRight);
+					});
 			}
-		}
-		else {
-			Input.HitKeyesProcess(Config.DonInputLeft, KeyState::Down, [&] {
-				Skin.Base->Playing.SE.Don.Play();
-				MiniTaikoFlash[0].Start();
-				JudgeNote(NowTime, '1');
-				HitAction(HitType::DonLeft);
-				});
-			Input.HitKeyesProcess(Config.KaInputLeft, KeyState::Down, [&] {
-				Skin.Base->Playing.SE.Ka.Play();
-				MiniTaikoFlash[1].Start();
-				JudgeNote(NowTime, '2');
-				HitAction(HitType::KaLeft);
-				});
-			Input.HitKeyesProcess(Config.DonInputRight, KeyState::Down, [&] {
-				Skin.Base->Playing.SE.Don.Play();
-				MiniTaikoFlash[2].Start();
-				JudgeNote(NowTime, '1');
-				HitAction(HitType::DonRight);
-				});
-			Input.HitKeyesProcess(Config.KaInputRight, KeyState::Down, [&] {
-				Skin.Base->Playing.SE.Ka.Play();
-				MiniTaikoFlash[3].Start();
-				JudgeNote(NowTime, '2');
-				HitAction(HitType::KaRight);
-				});
 		}
 	}
 
@@ -4226,6 +4380,7 @@ RollType = '\0'
 			"JudgeOffset",
 			"ChartSpeed",
 			"SongSpeed",
+			"TrainingMode",
 			"BGBrightness",
 			"SkinName",
 			"SongDirectories",
@@ -4409,6 +4564,7 @@ RollType = '\0'
 				ConfigDataDraw(i, j, std::to_string(Config.JudgeOffset));
 				ConfigDataDraw(i, j, std::to_string(Config.ChartSpeed));
 				ConfigDataDraw(i, j, std::to_string(Config.SongSpeed));
+				ConfigDataDraw(i, j, Config.TrainingMode ? "true" : "false");
 				ConfigDataDraw(i, j, std::to_string(Config.BGBrightness));
 				ConfigDataDraw(i, j, Config.SkinName);
 				ConfigVectorDraw(i, j, Config.SongDirectories);
@@ -4560,6 +4716,7 @@ RollType = '\0'
 					ConfigDataInput(i, Config.JudgeOffset, InputData.Double);
 					ConfigDataInput(i, Config.ChartSpeed, InputData.Double);
 					ConfigDataInput(i, Config.SongSpeed, InputData.Double);
+					ConfigDataInput(i, Config.TrainingMode, InputData.Bool);
 					ConfigDataInput(i, Config.BGBrightness, InputData.Double);
 					ConfigDataInput(i, Config.SkinName, InputData.String);
 					ConfigDataInput(i, Config.SongDirectories, InputData.Vector);
@@ -4803,7 +4960,8 @@ RollType = '\0'
 
 	static inline std::atomic_bool _waitvsyncLog = false;
 	static inline std::mutex _syncmtx;
-	static inline void _LogUpdate(bool* endflag) { ;
+	static inline void _LogUpdate(bool* endflag) {
+		;
 		while (true) {
 			WaitVSync(1);
 			if (*endflag) { break; }
