@@ -1077,16 +1077,16 @@ public:
 		double DemoStart = 0.0;
 		float SongVolume = 100.0;
 		float SeVolume = 100.0;
-		std::u8string SongPath = u8"";
-		std::u8string MoviePath = u8"";
-		std::u8string ChartPath = u8"";
+		fs::path SongPath = "";
+		fs::path MoviePath = "";
+		fs::path ChartPath = "";
 		std::string SongLink = "";
 		std::string MovieLink = "";
 		CourseData Courses[(size_t)CourseType::Count];
 
 		bool Load(const fs::path& path) {
 			TextfileReader text(path);
-			ChartPath = path.u8string();
+			ChartPath = path;
 
 			size_t index = 0;
 			uint64_t level = 0;
@@ -1210,7 +1210,7 @@ public:
 				}
 			}
 			catch (...) {
-				MessageBox(NULL, TEXT((path.string() + "の読み込みに失敗しました").c_str()), TEXT("エラー"), MB_ICONERROR);
+				MessageBox(NULL, TEXT(std::string(path.string() + "の読み込みに失敗しました").c_str()), TEXT("エラー"), MB_ICONERROR);
 			}
 			return true;
 		}
@@ -1335,7 +1335,7 @@ public:
 
 	SoundData DemoSong = SoundData();
 
-	size_t CourseIndex = 0;
+	size_t CourseIndex = (size_t)CourseType::Easy;
 	bool IsCourseSelect = false;
 
 	void EnumChart(const std::vector<std::string>& dir) {
@@ -1624,15 +1624,18 @@ public:
 	void SongDownload(const std::string& link, const fs::path& path) {
 		if (!link.empty() && !fs::exists(path)) {
 			if (MessageBox(NULL, TEXT("音源ファイルがありません。ダウンロードしますか？"), "", MB_YESNO) == IDYES) {
+				
 				if (fs::exists("song.ogg")) {
 					fs::remove("song.ogg");
 				}
+				
 				std::string powershell = "powershell -Command ";
 				std::string command = powershell + "yt-dlp -x --audio-format vorbis -o song " + link;
 				if (std::system(command.c_str()) != 0) {
 					MessageBox(NULL, TEXT("音源のダウンロードに失敗しました"), TEXT("エラー"), MB_ICONERROR);
 					return;
 				}
+				
 				if (fs::exists("song.ogg")) {
 					fs::rename("song.ogg", path);
 				}
@@ -1642,15 +1645,18 @@ public:
 	void MovieDownload(const std::string& link, const fs::path& path) {
 		if (!link.empty() && !fs::exists(path)) {
 			if (MessageBox(NULL, TEXT("動画ファイルがありません。ダウンロードしますか？"), "", MB_YESNO) == IDYES) {
+				
 				if (fs::exists("movie.avi")) {
 					fs::remove("movie.avi");
 				}
+
 				std::string powershell = "powershell -Command ";
 				std::string command = powershell + "yt-dlp --recode-video avi -o movie " + link;
 				if (std::system(command.c_str()) != 0) {
 					MessageBox(NULL, TEXT("動画のダウンロードに失敗しました"), TEXT("エラー"), MB_ICONERROR);
 					return;
 				}
+
 				if (fs::exists("movie.avi")) {
 					fs::rename("movie.avi", path);
 				}
@@ -1787,10 +1793,10 @@ public:
 					Skin.Base->SongSelect.Config.LevelPos.Y + y },
 					GetColor(255, 255, 255),
 					GetColor(0, 0, 0),
-					u8StrToStr(u8"★×") + std::to_string(BoxDatas[BoxDataIndex]->GetChart()->Courses[i].Level)
+					ToStr<std::u8string>(u8"★×") + std::to_string(BoxDatas[BoxDataIndex]->GetChart()->Courses[i].Level)
 					);
 
-				ScoreData Score = ScoreDataLoad(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->ChartPath), i);
+				ScoreData Score = ScoreDataLoad(BoxDatas[BoxDataIndex]->GetChart()->ChartPath.string(), i);
 
 				Skin.Base->SongSelect.Font.HighScore.Draw({
 					Skin.Base->SongSelect.Config.HighScorePos.X,
@@ -1863,7 +1869,7 @@ public:
 			}
 			else if (DemoSongPlayBlank.GetElapsed().Second() > DemoSongPlayBlankTime() && !DemoSong.IsPlay()) {
 				SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
-				DemoSong.Load(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath));
+				DemoSong.Load(ToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath.u8string()));
 				SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
 				DemoSong.SetCurrent(BoxDatas[BoxDataIndex]->GetChart()->DemoStart * 1000.0);
 				DemoSong.SetVolume(BoxDatas[BoxDataIndex]->GetChart()->SongVolume * (Config.SongVolume / 100));
@@ -2054,7 +2060,7 @@ public:
 				Skin.Base->MultiRoom.Config.LevelPos,
 				GetColor(255, 255, 255),
 				GetColor(0, 0, 0),
-				u8StrToStr(u8"★×") + std::to_string(Chart.OriginalData.Courses[Shared.CourseIndex].Level)
+				ToStr<std::u8string>(u8"★×") + std::to_string(Chart.OriginalData.Courses[Shared.CourseIndex].Level)
 			);
 		}
 
@@ -2202,8 +2208,9 @@ public:
 	void SetSongSpeed() {
 		double SongSpeed = !IsMulti ? Config.SongSpeed : Shared.SongSpeed;
 		if (!Chart.OriginalData.MoviePath.empty()) {
-			Chart.Movie.Load(u8StrToStr(Chart.OriginalData.MoviePath), SongSpeed,
+			Chart.Movie.Load(ToStr(Chart.OriginalData.MoviePath.u8string()), SongSpeed,
 				Chart.OriginalData.MovieOffset < 0 ? Chart.OriginalData.MovieOffset * -1000 : -Chart.SongBlankTime);
+			Chart.Movie.Resize(Skin.Info.Resolution.Y);
 		}
 		Chart.SongData.SetVolume(Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
 		int freq = Chart.SongData.Frequency * SongSpeed;
@@ -2219,18 +2226,19 @@ public:
 
 		if (!IsMulti || Shared.Players[Shared.MyIndex].IsHost) {
 			LoadData = *BoxDatas[BoxDataIndex]->GetChart();
-			LoadData.Load(fs::path(LoadData.ChartPath));
+			LoadData.Load(LoadData.ChartPath);
 		}
 		else {
 			CourseIndex = Shared.CourseIndex;
-			MemToFile(u8"temp.tja", Shared.FileData);
-			LoadData.Load(u8"temp.tja");
+			MemToFile("temp.tja", Shared.FileData);
+			LoadData.Load("temp.tja");
 		}
 
-		TextfileReader text(fs::path(LoadData.ChartPath));
+		TextfileReader text(LoadData.ChartPath);
+		std::vector<std::string_view> lines(text.begin(), text.end());
 
-		if (fs::exists(u8"temp.tja")) {
-			fs::remove(u8"temp.tja");
+		if (fs::exists("temp.tja")) {
+			fs::remove("temp.tja");
 		}
 
 		Chart.Init();
@@ -2256,14 +2264,14 @@ public:
 		Chart.RawNoteDatas.push_back(MainData);
 		MainData.AbsTime = _offset;
 
-		for (int i = 0; i < (int)CourseType::Count; ++i) {
+		for (size_t i = 0; i < (size_t)CourseType::Count; ++i) {
 			if (LoadData.Courses[i].IsPlayable && i != CourseIndex) {
-				for (int j = (int)LoadData.Courses[i].Index; j < text.lines().size(); ++j) {
-					if (text[j].find("#END") != std::string_view::npos) {
-						text[j] = "";
+				for (size_t j = (size_t)LoadData.Courses[i].Index; j < lines.size(); ++j) {
+					if (lines[j].find("#END") != std::string::npos) {
+						lines[j] = "";
 						break;
 					}
-					text[j] = "";
+					lines[j] = "";
 				}
 			}
 		}
@@ -2290,41 +2298,41 @@ public:
 
 		double BranchAddTime = 0;
 
-		for (size_t i = 0; i < text.lines().size(); ++i) {
+		for (size_t i = 0; i < lines.size(); ++i) {
 			try {
-				Exsubstr(text[i], "#START", [&](std::string_view data) {
+				Exsubstr(lines[i], "#START", [&](std::string_view data) {
 					StartFlag = true;
 					});
-				Exsubstr(text[i], "#END", [&](std::string_view data) {
+				Exsubstr(lines[i], "#END", [&](std::string_view data) {
 					StartFlag = false;
 					});
-				Exsubstr(text[i], "#GOGOSTART", [&](std::string_view data) {
+				Exsubstr(lines[i], "#GOGOSTART", [&](std::string_view data) {
 					MainData.GoGoStart = true;
 					});
-				Exsubstr(text[i], "#GOGOEND", [&](std::string_view data) {
+				Exsubstr(lines[i], "#GOGOEND", [&](std::string_view data) {
 					MainData.GoGoEnd = true;
 					});
-				Exsubstr(text[i], "#BARLINEON", [&](std::string_view data) {
+				Exsubstr(lines[i], "#BARLINEON", [&](std::string_view data) {
 					BarlineDisplay = true;
 					});
-				Exsubstr(text[i], "#BARLINEOFF", [&](std::string_view data) {
+				Exsubstr(lines[i], "#BARLINEOFF", [&](std::string_view data) {
 					BarlineDisplay = false;
 					});
 				if (!StartFlag) {
-					Exsubstr(text[i], "#BMSCROLL", [&](std::string_view data) {
+					Exsubstr(lines[i], "#BMSCROLL", [&](std::string_view data) {
 						Chart.ScrollType = ScrollType::BMSCROLL;
 						});
-					Exsubstr(text[i], "#HBSCROLL", [&](std::string_view data) {
+					Exsubstr(lines[i], "#HBSCROLL", [&](std::string_view data) {
 						Chart.ScrollType = ScrollType::HBSCROLL;
 						});
 				}
-				Exsubstr(text[i], "#BRANCHSTART", [&](std::string_view data) {
+				Exsubstr(lines[i], "#BRANCHSTART", [&](std::string_view data) {
 					MainData.Section = true;
 					});
-				Exsubstr(text[i], "#LEVELHOLD", [&](std::string_view data) {
+				Exsubstr(lines[i], "#LEVELHOLD", [&](std::string_view data) {
 					MainData.LevelHold = true;
 					});
-				Exsubstr(text[i], "#BRANCHSTART", [&](std::string_view data) {
+				Exsubstr(lines[i], "#BRANCHSTART", [&](std::string_view data) {
 					auto sp = split(data, ',');
 					BranchData item;
 					switch (sp[0][0]) {
@@ -2354,7 +2362,7 @@ public:
 					BranchAddTime = 0;
 					});
 				if (NowBranchStartFlag) {
-					Exsubstr(text[i], "#N", [&](std::string_view data) {
+					Exsubstr(lines[i], "#N", [&](std::string_view data) {
 						if (BranchCount == 0) { MemData = MainData; }
 						MainData = MemData;
 						if (BranchCount != 0) { Chart.RawNoteDatas.back().RelaTime += -BranchAddTime; }
@@ -2363,8 +2371,8 @@ public:
 						BranchAddTime = 0;
 						++BranchCount;
 						});
-					if (text[i].find("#END") == std::string_view::npos) {
-						Exsubstr(text[i], "#E", [&](std::string_view data) {
+					if (lines[i].find("#END") == std::string_view::npos) {
+						Exsubstr(lines[i], "#E", [&](std::string_view data) {
 							if (BranchCount == 0) { MemData = MainData; }
 							MainData = MemData;
 							if (BranchCount != 0) { Chart.RawNoteDatas.back().RelaTime += -BranchAddTime; }
@@ -2374,8 +2382,8 @@ public:
 							++BranchCount;
 							});
 					}
-					if (text[i].find("#MEASURE") == std::string_view::npos) {
-						Exsubstr(text[i], "#M", [&](std::string_view data) {
+					if (lines[i].find("#MEASURE") == std::string_view::npos) {
+						Exsubstr(lines[i], "#M", [&](std::string_view data) {
 							if (BranchCount == 0) { MemData = MainData; }
 							MainData = MemData;
 							if (BranchCount != 0) { Chart.RawNoteDatas.back().RelaTime += -BranchAddTime; }
@@ -2385,7 +2393,7 @@ public:
 							++BranchCount;
 							});
 					}
-					Exsubstr(text[i], "#BRANCHEND", [&](std::string_view data) {
+					Exsubstr(lines[i], "#BRANCHEND", [&](std::string_view data) {
 						if (BranchCount == 0) { MainData.BranchStart = true; }
 						MainData.IsBranch = BranchType::Null;
 						NowBranchStartFlag = false;
@@ -2393,7 +2401,7 @@ public:
 						BranchCount = 0;
 						});
 				}
-				Exsubstr(text[i], "#SCROLL", [&](std::string_view data) {
+				Exsubstr(lines[i], "#SCROLL", [&](std::string_view data) {
 					if (data.find("i") != std::string_view::npos) {
 						int Uindex = data.rfind("+") == std::string_view::npos ? 0 : data.rfind("+");
 						int Dindex = data.rfind("-") == std::string_view::npos ? 0 : data.rfind("-");
@@ -2418,31 +2426,31 @@ public:
 						MainData.Scrolli = 0;
 					}
 					});
-				Exsubstr(text[i], "#BPMCHANGE", [&](std::string_view data) {
+				Exsubstr(lines[i], "#BPMCHANGE", [&](std::string_view data) {
 					MainData.BPM = svtov<double>(data);
 					MainData.BpmChangeFlag = true;
 					});
-				Exsubstr(text[i], "#MEASURE", [&](std::string_view data) {
+				Exsubstr(lines[i], "#MEASURE", [&](std::string_view data) {
 					auto sp = split(data, '/');
 					MainData.Measure = svtov<double>(sp[0]) / svtov<double>(sp[1]);
 					});
-				Exsubstr(text[i], "#DELAY", [&](std::string_view data) {
+				Exsubstr(lines[i], "#DELAY", [&](std::string_view data) {
 					Chart.RawNoteDatas.back().RelaTime += svtov<double>(data) * 1000;
 					MainData.AbsTime += svtov<double>(data) * 1000;
 					});
 
-				if (text[i].find("#") != std::string_view::npos) { continue; }
+				if (lines[i].find("#") != std::string_view::npos) { continue; }
 				if (!StartFlag) { continue; }
 
 				if (!BarlineLoading) {
 					BarlineLoading = true;
-					for (size_t j = i; j < text.lines().size(); ++j) {
-						if (text[j].find("#") != std::string_view::npos) { continue; }
-						for (size_t k = 0, strsize = text[j].size(); k < strsize; ++k) {
-							if (text[j][k] == ',') {
+					for (size_t j = i; j < lines.size(); ++j) {
+						if (lines[j].find("#") != std::string_view::npos) { continue; }
+						for (size_t k = 0, strsize = lines[j].size(); k < strsize; ++k) {
+							if (lines[j][k] == ',') {
 								goto BARLINEREADEND;
 							}
-							else if (text[j][k] >= '0' && text[j][k] <= '9') {
+							else if (lines[j][k] >= '0' && lines[j][k] <= '9') {
 								++BarlineNoteCount;
 							}
 						}
@@ -2456,9 +2464,9 @@ public:
 				return;
 			}
 
-			for (size_t j = 0, strsize = text[i].size(); j < strsize; ++j) {
-				bool ChartFlag = (text[i][j] >= '0' && text[i][j] <= '9');
-				bool EndFlag = text[i][j] == ',';
+			for (size_t j = 0, strsize = lines[i].size(); j < strsize; ++j) {
+				bool ChartFlag = (lines[i][j] >= '0' && lines[i][j] <= '9');
+				bool EndFlag = lines[i][j] == ',';
 				bool EmptyFlag = BarlineNoteCount == 0;
 				if (ChartFlag || EndFlag || EmptyFlag) {
 
@@ -2469,7 +2477,7 @@ public:
 						break;
 					}
 
-					MainData.NoteType = text[i][j];
+					MainData.NoteType = lines[i][j];
 
 					double barlinetime = (240000 / MainData.BPM) * MainData.Measure;
 					double divtime = barlinetime / (EmptyFlag ? 1 : BarlineNoteCount);
@@ -2631,7 +2639,7 @@ RollType = '\0'
 
 		SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
 		if (!IsMulti) {
-			Chart.SongData.Load(u8StrToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath));
+			Chart.SongData.Load(ToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath.u8string()));
 		}
 		else {
 			Chart.SongData.Load(Shared.WaveData.data(), Shared.WaveData.size());
@@ -2794,11 +2802,11 @@ RollType = '\0'
 			BranchDatas.clear();
 			Judge.clear();
 			SongData.Delete();
+			Movie.Delete();
 			NowTime.Reset();
 			BranchAnimationTimer.Reset();
 			RollViewEndTimer.Reset();
 			WaitRollTime.Reset();
-			Movie.Init();
 			ScrollType = ScrollType::Normal;
 			NowBranchFlag = BranchType::Null;
 			NowBranchAnimation = ABranchType::Null;
@@ -2833,33 +2841,12 @@ RollType = '\0'
 		double SongBlankTime = 0;
 		double SongSpeed = 1.0;
 
+		MovieData Movie;
+
 		Timer NowTime;
 		ScrollType ScrollType = ScrollType::Normal;
 		double NowBPM = 0;
 		bool NowGoGo = false;
-
-		struct MovieData {
-
-			void Init() {
-				DeleteGraph(Handle);
-				Size = { 0,0 };
-				Handle = -1;
-			}
-
-			void Load(const std::string& path, double speed, double time) {
-				Handle = LoadGraph(path.c_str());
-				GetGraphSizeF(Handle, &Size.Width, &Size.Height);
-				float ExtendRate = Size.Height / 720.0f;
-				Size = { Size.Width / ExtendRate, Size.Height / ExtendRate };
-				SetMovieVolumeToGraph(0, Handle);
-				SetPlaySpeedRateMovieToGraph(Handle, speed);
-				SeekMovieToGraph(Handle, time);
-			}
-
-			int Handle = -1;
-			Size2D<float> Size;
-
-		} Movie;
 
 		bool AutoPlayLR = false;
 		Timer WaitRollTime;
@@ -2943,7 +2930,7 @@ RollType = '\0'
 				FALSE);
 
 			if ((NowTime + (Chart.OriginalData.MovieOffset * -1000)) > 128 && Chart.NowTime.IsRunning()) {
-				PlayMovieToGraph(Chart.Movie.Handle);
+				Chart.Movie.Play();
 			}
 
 			SetDrawBlendMode(DX_BLENDMODE_ALPHA, 255 * (1 - (Config.BGBrightness / 100)));
@@ -3578,7 +3565,7 @@ RollType = '\0'
 			}
 		}
 		if (Config.ViewDebug) {
-			DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.c_str());
+			DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.u8string().c_str());
 		}
 	}
 	void HitAction(HitType type) {
@@ -4012,7 +3999,7 @@ RollType = '\0'
 		json data;
 		JudgeData Judge = Chart.Judge[0];
 		fs::path filepath = GetExecutablePath().parent_path() / "scoredata.json";
-		std::string ChartPath = u8StrToStr(Chart.OriginalData.ChartPath);
+		std::string ChartPath = Chart.OriginalData.ChartPath.string();
 		std::string CourseName = magic_enum::enum_name((CourseType)CourseIndex).data();
 
 		if (!fs::exists(filepath)) {
@@ -4053,11 +4040,6 @@ RollType = '\0'
 		}
 		return Score;
 	}
-	void ResultInit() {
-		if (IsMulti) {
-			std::ranges::rotate(Chart.Judge, Chart.Judge.begin() + Shared.MyIndex);
-		}
-	}
 	void ResultEnd() {
 		if (IsMulti) {
 			std::ranges::for_each(Shared.Players, [](PlayerData& data) { data.State = 0; });
@@ -4066,7 +4048,7 @@ RollType = '\0'
 			ResultIndex = 0;
 			return;
 		}
-		else if (Chart.Judge[0].Score > ScoreDataLoad(u8StrToStr(Chart.OriginalData.ChartPath), CourseIndex).Score) {
+		else if (Chart.Judge[0].Score > ScoreDataLoad(Chart.OriginalData.ChartPath.string(), CourseIndex).Score) {
 			ScoreDataSave();
 		}
 		CrownIndex = 0;
@@ -4819,9 +4801,7 @@ RollType = '\0'
 
 	static inline std::atomic_bool _waitvsyncLog = false;
 	static inline std::mutex _syncmtx;
-	static inline void _LogUpdate(bool* endflag) {
-		WaitVSync(1);
-		uint64_t mem = 0, now = 0;
+	static inline void _LogUpdate(bool* endflag) { ;
 		while (true) {
 			WaitVSync(1);
 			if (*endflag) { break; }
@@ -4886,7 +4866,7 @@ RollType = '\0'
 			}
 		}
 
-		thd.join();
 		DxLib_End();
+		thd.join();
 	}
 };
