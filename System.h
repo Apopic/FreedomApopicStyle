@@ -1811,12 +1811,12 @@ public:
 	}
 	void SongSelectProc() {
 		Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
-			if (!IsMulti) {
-				if (IsCourseSelect) {
-					IsCourseSelect = false;
-					return;
-				}
-				NowScene = Scene::ModeSelect;
+			if (IsCourseSelect) {
+				IsCourseSelect = false;
+				return;
+			}
+			else {
+				NowScene = !IsMulti ? Scene::ModeSelect : Scene::MultiRoom;
 			}
 			});
 		static auto DonInputProc = [&] {
@@ -2902,9 +2902,10 @@ RollType = '\0'
 	}
 	void PlayingInit() {
 		if (IsMulti) {
-			auto names_view = Shared.Players | std::views::transform(&PlayerData::Name);
+			auto names_view = Shared.Players | std::views::transform(&PlayerData::Name);		
 			Names.assign(names_view.begin(), names_view.end());
-			std::ranges::rotate(Names, Names.begin() + Shared.MyIndex);
+			auto it = Names.begin() + Shared.MyIndex;
+			std::rotate(Names.begin(), it, it + 1);
 		}
 		for (auto&& taiko : MiniTaikoFlash) {
 			taiko.Reset();
@@ -4122,6 +4123,7 @@ RollType = '\0'
 		JudgeDraw(Skin.Base->Result.Config.RollPos, Judge.Roll);
 		JudgeDraw(Skin.Base->Result.Config.MaxComboPos, Judge.MaxCombo);
 
+		CrownIndex = 0;
 		if (Judge.Accuracy >= 75) {
 			CrownIndex = 1;
 		}
