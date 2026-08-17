@@ -1243,7 +1243,7 @@ public:
 						MovieOffset = svtov<double>(data);
 						});
 					Exsubstr(text[i], "DEMOSTART:", [&](std::string_view data) {
-						if (!data.empty()) { return; }
+						if (data.empty()) { return; }
 						DemoStart = svtov<double>(data);
 						});
 					Exsubstr(text[i], "SONGVOL:", [&](std::string_view data) {
@@ -1766,20 +1766,13 @@ public:
 			fs::path path(StrToWStr(file));
 
 			if (path.extension() != ".zip") {
+				fs::path dir = ImportFolderPath / path.filename();
 				if (fs::is_directory(path)) {
-					fs::path dir = ImportFolderPath / path.filename();
-					fs::create_directories(dir);
-					for (auto&& entry : fs::recursive_directory_iterator(path)) {
-						if (entry.is_regular_file()) {
-							fs::copy(entry.path(), dir / fs::relative(entry.path(), path), fs::copy_options::overwrite_existing);
-						}
-						else if (entry.is_directory()) {
-							fs::create_directories(dir / entry.path().filename());
-						}
-					}
-					continue;
+					fs::copy(path, dir, std::filesystem::copy_options::recursive | fs::copy_options::overwrite_existing);
 				}
-				fs::copy(path, ImportFolderPath / path.filename(), fs::copy_options::overwrite_existing);
+				else {
+					fs::copy(path, dir, fs::copy_options::overwrite_existing);
+				}
 				continue;
 			}
 
@@ -2163,7 +2156,6 @@ public:
 		}
 
 		BoxDatasUpdate();
-
 	}
 	void DanSelectEnd() {
 		SetDragFileValidFlag(FALSE);
