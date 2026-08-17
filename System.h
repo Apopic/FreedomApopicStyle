@@ -240,6 +240,7 @@ public:
 		const json& Titledata = data["Base"]["Title"];
 		const json& ModeSelectdata = data["Base"]["ModeSelect"];
 		const json& SongSelectdata = data["Base"]["SongSelect"];
+		const json& DanSelectdata = data["Base"]["DanSelect"];
 		const json& MultiRoomdata = data["Base"]["MultiRoom"];
 		const json& Playingdata = data["Base"]["Playing"];
 		const json& Resultdata = data["Base"]["Result"];
@@ -343,6 +344,26 @@ public:
 
 #pragma endregion
 
+#pragma region DanSelect
+
+		ValLoad(DanSelect, Config, BoxDistance);
+		ValLoad(DanSelect, Config, SongBoxListPos);
+		ValLoad(DanSelect, Config, KeyWordPos);
+
+		DataLoad(DanSelect, Image, BackGround);
+		DataLoad(DanSelect, Image, Box);
+		DataLoad(DanSelect, Image, SearchBox);
+		DataLoad(DanSelect, Image, Crown);
+
+		DataLoad(DanSelect, Font, Title);
+		DataLoad(DanSelect, Font, SubTitle);
+		DataLoad(DanSelect, Font, KeyWord);
+
+		DataLoad(DanSelect, SE, Don);
+		DataLoad(DanSelect, SE, Ka);
+
+#pragma endregion
+
 #pragma region MultiRoom
 
 		ValLoad(MultiRoom, Config, PlayerPos);
@@ -374,13 +395,15 @@ public:
 		ValLoad(Playing, Config, TitlePos);
 		ValLoad(Playing, Config, SubTitlePos);
 		ValLoad(Playing, Config, PlayerNamePos);
+		ValLoad(Playing, Config, ExamNamePos);
+		ValLoad(Playing, Config, ExamValPos);
 		ValLoad(Playing, Config, MultiPlayLaneDistance);
 		ValLoad(Playing, Config, LaneExtendRate);
 		ValLoad(Playing, Config, JudgeUpperExplosionFrameTime);
 		ValLoad(Playing, Config, GoGoFireFrameTime);
 
-		DataLoad(Playing, Image, Box);
 		DataLoad(Playing, Image, BackGround);
+		DataLoad(Playing, Image, DanBackGround);
 		DataLoad(Playing, Image, LaneFrame);
 		DataLoad(Playing, Image, Lane);
 		DataLoad(Playing, Image, NormalLane);
@@ -400,14 +423,18 @@ public:
 		DataLoad(Playing, Image, GoGoFire);
 		DataLoad(Playing, Image, JudgeString);
 		DataLoad(Playing, Image, ProgressBar);
+		DataLoad(Playing, Image, ExamProgressBar);
 
 		DataLoad(Playing, Font, Title);
 		DataLoad(Playing, Font, SubTitle);
 		DataLoad(Playing, Font, PlayerName);
+		DataLoad(Playing, Font, ExamName);
+		DataLoad(Playing, Font, ExamVal);
 
 		DataLoad(Playing, SE, Don);
 		DataLoad(Playing, SE, Ka);
 		DataLoad(Playing, SE, Balloon);
+		DataLoad(Playing, SE, DanFall);
 
 #pragma endregion
 
@@ -563,6 +590,30 @@ public:
 			struct _BGM {
 			} BGM;
 		} SongSelect;
+		struct _DanSelect {
+			struct _Config {
+				Pos2D<float> BoxDistance;
+				Pos2D<float> SongBoxListPos;
+				Pos2D<float> KeyWordPos;
+			} Config;
+			struct _Image {
+				GraphData BackGround;
+				GraphData Box;
+				GraphData SearchBox;
+				GraphData Crown;
+			} Image;
+			struct _Font {
+				FontData Title;
+				FontData SubTitle;
+				FontData KeyWord;
+			} Font;
+			struct _SE {
+				SoundData Don;
+				SoundData Ka;
+			} SE;
+			struct _BGM {
+			} BGM;
+		} DanSelect;
 		struct _MultiRoom {
 			struct _Config {
 				Pos2D<float> PlayerPos;
@@ -598,14 +649,16 @@ public:
 				Pos2D<float> TitlePos;
 				Pos2D<float> SubTitlePos;
 				Pos2D<float> PlayerNamePos;
+				Pos2D<float> ExamNamePos;
+				Pos2D<float> ExamValPos;
 				float MultiPlayLaneDistance;
 				double LaneExtendRate;
 				double JudgeUpperExplosionFrameTime;
 				double GoGoFireFrameTime;
 			} Config;
 			struct _Image {
-				GraphData Box;
 				GraphData BackGround;
+				GraphData DanBackGround;
 				GraphData LaneFrame;
 				GraphData Lane;
 				GraphData NormalLane;
@@ -625,16 +678,20 @@ public:
 				GraphData GoGoFire;
 				GraphData JudgeString;
 				GraphData ProgressBar;
+				GraphData ExamProgressBar;
 			} Image;
 			struct _Font {
 				FontData Title;
 				FontData SubTitle;
 				FontData PlayerName;
+				FontData ExamName;
+				FontData ExamVal;
 			} Font;
 			struct _SE {
 				SoundData Don;
 				SoundData Ka;
 				SoundData Balloon;
+				SoundData DanFall;
 			} SE;
 			struct _BGM {
 			} BGM;
@@ -756,7 +813,12 @@ struct BranchJudge {
 
 struct RollData {
 	uint64_t NowCount = 0;
-	bool IsEnd = 0;
+	bool IsEnd = false;
+
+	void Init() {
+		NowCount = 0;
+		IsEnd = false;
+	}
 
 	auto operator<=>(const RollData&) const = default;
 };
@@ -923,6 +985,7 @@ public:
 		Title,
 		ModeSelect,
 		SongSelect,
+		DanSelect,
 		MultiRoom,
 		Loading,
 		Playing,
@@ -934,6 +997,10 @@ public:
 	Scene NowScene = Scene::Title;
 	Scene MemScene = Scene::Null;
 	Scene PrevScene = Scene::Null;
+
+	bool IsDanSelect() const {
+		return (NowScene == Scene::DanSelect);
+	}
 
 	void TitleInit() {
 		Skin.Base->Title.SE.Don.SetVolume(Config.SEVolume);
@@ -968,9 +1035,10 @@ public:
 	} ModeSelector = Mode::Single;
 
 	void ModeSelectInit() {
-		Chart.Init();
+		Chart.Init(true);
 		DemoSongPlayBlank.Reset();
 		DemoSong.Delete();
+		BoxDataIndex = 0;
 		Skin.Base->ModeSelect.SE.Don.SetVolume(Config.SEVolume);
 		Skin.Base->ModeSelect.SE.Ka.SetVolume(Config.SEVolume);
 	}
@@ -1007,6 +1075,7 @@ public:
 				NowScene = Scene::MultiRoom;
 				break;
 			case Mode::Dan:
+				NowScene = Scene::DanSelect;
 				break;
 			case Mode::Config:
 				PrevScene = Scene::ModeSelect;
@@ -1045,7 +1114,33 @@ public:
 		Hard,
 		Oni,
 		Edit,
+		Tower,
+		Dan,
 		Count
+	};
+
+	enum class ExamTypes {
+		Null = -1,
+		Accuracy,
+		Good,
+		Ok,
+		Bad,
+		Score,
+		Roll,
+		HitNote,
+		MaxCombo,
+	};
+
+	enum class ExamRange {
+		Null = -1,
+		More,
+		Less,
+	};
+
+	struct ExamData {
+		ExamTypes ExamType = ExamTypes::Null;
+		ExamRange Range = ExamRange::Null;
+		double PassVal[2]{ 0.0,0.0 };
 	};
 
 	struct CourseData {
@@ -1066,26 +1161,34 @@ public:
 			size_t Generic = 0;
 			size_t Playing = 0;
 			size_t Result = 0;
+			std::vector<size_t> Dan;
 		} Strlen;
 
 		std::string Title = "";
 		std::string Subtitle = "";
+		std::vector<std::string> DanTitle;
+		std::vector<std::string> DanSubtitle;
 		bool TitleDisplay = true;
 		bool SubtitleDisplay = true;
-		StrlenData TitleStrlen = StrlenData();
-		StrlenData SubtitleStrlen = StrlenData();
+		StrlenData TitleStrlen;
+		StrlenData SubtitleStrlen;
 		double BPM = 120.0;
 		double SongOffset = 0.0;
 		double MovieOffset = 0.0;
 		double DemoStart = 0.0;
 		float SongVolume = 100.0;
 		float SeVolume = 100.0;
-		fs::path SongPath = "";
-		fs::path MoviePath = "";
+		fs::path SongPath = u8"";
+		fs::path MoviePath = u8"";
+		std::vector<fs::path> DanSongPath;
 		fs::path ChartPath = "";
 		std::string SongLink = "";
 		std::string MovieLink = "";
 		CourseData Courses[(size_t)CourseType::Count];
+
+		std::vector<ExamData> ExamDatas;
+		std::vector<size_t> DanIndex;
+		bool IsDan = false;
 
 		bool Load(const fs::path& path) {
 			TextfileReader text(path);
@@ -1096,6 +1199,14 @@ public:
 			uint64_t addscore = 0;
 			std::vector<uint64_t> balloon;
 			CourseType course = CourseType::Null;
+
+			ExamData Exam;
+			std::vector<std::string> DanTitles;
+			std::vector<std::string> DanSubtitles;
+			std::vector<size_t> DanTitleStrlens;
+			std::vector<size_t> DanSubtitleStrlens;
+			std::vector<size_t> DanIndexs;
+			std::vector<fs::path> DanSongPaths;
 
 			try {
 				for (size_t i = 0; i < text.lines().size(); ++i) {
@@ -1179,6 +1290,9 @@ public:
 						else if (str == "edit") {
 							course = CourseType::Edit;
 						}
+						else if (str == "dan") {
+							course = CourseType::Dan;
+						}
 						if (course != CourseType::Null) {
 							return;
 						}
@@ -1199,10 +1313,48 @@ public:
 							balloon.push_back(svtov<uint64_t>(strtrim(d)));
 						}
 						});
+					Exsubstr(text[i], "EXAM" + std::to_string(ExamDatas.size() + 1) + ":", [&](std::string_view data) {
+						if (data.empty()) { return; }
+						auto sp = split(data, ',');
+						if (sp[3] == "m") {
+							Exam.Range = ExamRange::More;
+						}
+						if (sp[3] == "l") {
+							Exam.Range = ExamRange::Less;
+						}
+						if (sp[0] == "g") {
+							Exam.ExamType = ExamTypes::Accuracy;
+						}
+						else if (sp[0] == "jp") {
+							Exam.ExamType = ExamTypes::Good;
+						}
+						else if (sp[0] == "jg") {
+							Exam.ExamType = ExamTypes::Ok;
+						}
+						else if (sp[0] == "jb") {
+							Exam.ExamType = ExamTypes::Bad;
+						}
+						else if (sp[0] == "s") {
+							Exam.ExamType = ExamTypes::Score;
+						}
+						else if (sp[0] == "r") {
+							Exam.ExamType = ExamTypes::Roll;
+						}
+						else if (sp[0] == "h") {
+							Exam.ExamType = ExamTypes::HitNote;
+						}
+						else if (sp[0] == "c") {
+							Exam.ExamType = ExamTypes::MaxCombo;
+						}
+						Exam.PassVal[0] = svtov<double>(sp[1]);
+						Exam.PassVal[1] = svtov<double>(sp[2]);
+						ExamDatas.push_back(Exam);
+						});
 					Exsubstr(text[i], "#START", [&](std::string_view data) {
 						if (course == CourseType::Null) {
 							course = CourseType::Oni;
 						}
+						IsDan = (course == CourseType::Dan);
 						Courses[(size_t)course].Index = index;
 						Courses[(size_t)course].Level = level;
 						Courses[(size_t)course].AddScore = addscore;
@@ -1210,6 +1362,26 @@ public:
 						Courses[(size_t)course].IsPlayable = true;
 						balloon = std::vector<uint64_t>();
 						});
+					if (IsDan) {
+						Exsubstr(text[i], "#NEXTSONG", [&](std::string_view data) {
+							if (data.empty()) { return; }
+							auto sp = split(data, ',');
+							DanTitles.push_back(std::string(sp[0]));
+							DanTitleStrlens.push_back(GetStrlen(sp[0], Skin.Base->Playing.Font.Title.Handle));
+							DanSubtitles.push_back(std::string(sp[1]));
+							DanSubtitleStrlens.push_back(GetStrlen(sp[1], Skin.Base->Playing.Font.SubTitle.Handle));
+							DanIndexs.push_back(i);
+							DanSongPaths.push_back(path.parent_path().u8string() + u8"\\" + std::u8string(sp[3].begin(), sp[3].end()));
+							});
+						Exsubstr(text[i], "#END", [&](std::string_view data) {
+							DanTitle = DanTitles;
+							TitleStrlen.Dan = DanTitleStrlens;
+							DanSubtitle = DanSubtitles;
+							SubtitleStrlen.Dan = DanSubtitleStrlens;
+							DanIndex = DanIndexs;
+							DanSongPath = DanSongPaths;
+							});
+					}
 				}
 			}
 			catch (...) {
@@ -1399,6 +1571,8 @@ public:
 					if (!keyword.empty()) {
 						for (auto& data : datas[i]->GetGenre()->Datas) {
 							if (data->IsGenre()) { continue; }
+							if (data->GetChart()->IsDan != IsDanSelect()) { continue; }
+
 							bool is_find = false;
 							Exsubstr(keyword, "g=", [&](std::string_view strdata) {
 								if (strdata.empty()) { return; }
@@ -1465,7 +1639,10 @@ public:
 			}
 			for (size_t i = 0; i < datas.size(); ++i) {
 				if (datas[i]->IsGenre()) { continue; }
+				if (datas[i]->GetChart()->IsDan != IsDanSelect()) { continue; }
+
 				if (bool is_find = false; !keyword.empty()) {
+
 					Exsubstr(keyword, "l=", [&](std::string_view strdata) {
 						if (strdata.empty()) { return; }
 						if (is_find) { return; }
@@ -1668,14 +1845,18 @@ public:
 	}
 
 	void SongSelectInit() {
+
 		SetDragFileValidFlag(TRUE);
 		Skin.Base->SongSelect.SE.Don.SetVolume((Config.SEVolume));
 		Skin.Base->SongSelect.SE.Ka.SetVolume((Config.SEVolume));
+
 		if (BoxDatas.empty()) {
 			MessageBox(NULL, TEXT("譜面がありません。"), TEXT("エラー"), MB_ICONERROR);
 			NowScene = Scene::ModeSelect;
 			return;
 		}
+
+		BoxDatasUpdate();
 	}
 	void SongSelectEnd() {
 		SetDragFileValidFlag(FALSE);
@@ -1739,7 +1920,7 @@ public:
 						pos,
 						GetColor(255, 255, 255),
 						GetColor(0, 0, 0),
-						BoxDatas[i]->GetChart()->Title.data()
+						BoxDatas[i]->GetChart()->Title
 					);
 				}
 			}
@@ -1772,7 +1953,7 @@ public:
 				BoxDatas[BoxDataIndex]->GetChart()->Subtitle
 			);
 
-			for (size_t i = 0; i < (size_t)CourseType::Count; ++i) {
+			for (size_t i = 0; i <= (size_t)CourseType::Edit; ++i) {
 
 				unsigned int c = 100 * (CourseIndex == i);
 				float y = Skin.Base->SongSelect.Config.CourseBoxDistance * i;
@@ -1816,7 +1997,6 @@ public:
 		Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
 			if (IsCourseSelect) {
 				IsCourseSelect = false;
-				return;
 			}
 			else {
 				NowScene = !IsMulti ? Scene::ModeSelect : Scene::MultiRoom;
@@ -1957,6 +2137,210 @@ public:
 					}
 					DemoSongPlayBlank.Reset();
 					DemoSong.Delete();
+				}
+
+				FileImport();
+			}
+
+			return;
+		}
+
+		Input.HitKeyProcess(VK_RETURN, KeyState::Down, SongSearchProc);
+	}
+
+	void DanSelectInit() {
+
+		SetDragFileValidFlag(TRUE);
+		Skin.Base->DanSelect.SE.Don.SetVolume((Config.SEVolume));
+		Skin.Base->DanSelect.SE.Ka.SetVolume((Config.SEVolume));
+		NowSongCount = 0;
+		CourseIndex = 0;
+
+		if (BoxDatas.empty()) {
+			MessageBox(NULL, TEXT("譜面がありません。"), TEXT("エラー"), MB_ICONERROR);
+			NowScene = Scene::ModeSelect;
+			return;
+		}
+
+		BoxDatasUpdate();
+
+	}
+	void DanSelectEnd() {
+		SetDragFileValidFlag(FALSE);
+	}
+	void DanSelectDraw() {
+
+		Skin.Base->DanSelect.Image.BackGround.Draw({});
+
+		if (InputData.Handle != 0) {
+			SetDrawBlendMode(DX_BLENDMODE_ALPHA, 50);
+		}
+
+		for (int i = (BoxDataIndex - 6); i < (BoxDataIndex + 6); ++i) {
+			if (i < 0 || i >= BoxDatas.size()) {
+				continue;
+			}
+
+			Pos2D<float> pos = {
+				0,
+				(i - BoxDataIndex) * Skin.Base->DanSelect.Config.BoxDistance.Y
+			};
+			pos = {
+				pos.X + Skin.Base->DanSelect.Config.SongBoxListPos.X,
+				pos.Y + Skin.Base->DanSelect.Config.SongBoxListPos.Y
+			};
+
+			unsigned int c = 200 * (BoxDataIndex == i);
+			SetDrawAddColor(
+				(BoxDatas[i]->GenreColor.R + c),
+				(BoxDatas[i]->GenreColor.G + c),
+				(BoxDatas[i]->GenreColor.B + c)
+			);
+			Skin.Base->DanSelect.Image.Box.Draw({ 0, pos.Y });
+			SetDrawAddColor(0, 0, 0);
+
+			if (BoxDatas[i]->IsGenre()) {
+				if (BoxDatas[i]->GetGenre()->IsOpen) {
+					Skin.Base->DanSelect.Font.Title.Draw(
+						pos,
+						GetColor(255, 255, 255),
+						GetColor(0, 0, 0),
+						"Close"
+					);
+				}
+				else {
+					Skin.Base->DanSelect.Font.Title.Draw(
+						pos,
+						GetColor(255, 255, 255),
+						GetColor(0, 0, 0),
+						BoxDatas[i]->GetGenre()->Name
+					);
+				}
+			}
+			else {
+				Skin.Base->DanSelect.Font.Title.Draw(
+					pos,
+					GetColor(255, 255, 255),
+					GetColor(0, 0, 0),
+					BoxDatas[i]->GetChart()->Title
+				);
+				Skin.Base->DanSelect.Image.Crown.Draw(pos, ScoreDataLoad(BoxDatas[i]->GetChart()->ChartPath.string(), (int)CourseType::Dan).Crown);
+			}
+		}
+		SetDrawBlendMode(0, 0);
+
+		if (InputData.Handle != 0) {
+
+			Skin.Base->DanSelect.Image.SearchBox.Draw({});
+			SetKeyInputDrawArea(
+				Skin.Base->DanSelect.Image.SearchBox.Pos.X - Skin.Base->DanSelect.Image.SearchBox.Size.Width / 2,
+				Skin.Base->DanSelect.Image.SearchBox.Pos.Y - Skin.Base->DanSelect.Image.SearchBox.Size.Height / 2,
+				Skin.Base->DanSelect.Image.SearchBox.Pos.X + Skin.Base->DanSelect.Image.SearchBox.Size.Width / 2,
+				Skin.Base->DanSelect.Image.SearchBox.Pos.Y + Skin.Base->DanSelect.Image.SearchBox.Size.Height / 2,
+				InputData.Handle);
+			DrawKeyInputString(Skin.Base->DanSelect.Config.KeyWordPos.X, Skin.Base->DanSelect.Config.KeyWordPos.Y, InputData.Handle);
+		}
+	}
+	void DanSelectProc() {
+		
+		Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
+			NowScene = Scene::ModeSelect;
+			});
+		
+		static auto DonInputProc = [&] {
+			Skin.Base->DanSelect.SE.Don.Play();
+			if (BoxDatas[BoxDataIndex]->IsGenre()) {
+				bool& _f = BoxDatas[BoxDataIndex]->GetGenre()->IsOpen;
+				_f = !_f;
+				BoxDatasUpdate();
+			}
+			else if (BoxDatas[BoxDataIndex]->GetChart()->Courses[(int)CourseType::Dan].IsPlayable) {
+				CourseIndex = (int)CourseType::Dan;
+				PrevScene = Scene::DanSelect;
+				NowScene = Scene::Loading;
+			}
+			};
+		static auto KaInputProc = [&](bool direction) {
+			Skin.Base->DanSelect.SE.Ka.Play();
+			if (!direction) {
+				BoxDataIndex = BoxDataIndex == 0 ? BoxDatas.size() - 1 : BoxDataIndex - 1;
+			}
+			else {
+				BoxDataIndex = BoxDataIndex == BoxDatas.size() - 1 ? 0 : BoxDataIndex + 1;
+			}
+			};
+		static auto RandomInputProc = [&] {
+			Skin.Base->DanSelect.SE.Ka.Play();
+			BoxDataIndex = GetRand(BoxDatas.size() - 1);
+			};
+		static auto SongSearchProc = [&]() {
+
+			Skin.Base->DanSelect.SE.Don.Play();
+			if (InputData.Handle == 0) {
+				InputData.Handle = MakeKeyInput(CHAR_MAX, false, false, false);
+				SetActiveKeyInput(InputData.Handle);
+				SetKeyInputStringFont(Skin.Base->DanSelect.Font.KeyWord.Handle);
+				return;
+			}
+
+			InputData.Load();
+			BoxDatasUpdate(ToLower(InputData.Buffer));
+
+			if (BoxDatas.empty()) {
+				BoxDatasUpdate();
+			}
+
+			DeleteKeyInput(InputData.Handle);
+			InputData.Handle = 0;
+			BoxDataIndex = 0;
+
+			};
+
+		if (InputData.Handle == 0) {
+
+			Input.HitKeyesProcess(Config.KaInputLeft, KeyState::Down, [&] { KaInputProc(false); }, Config.KeyHoldProcInterval);
+			Input.HitKeyesProcess(Config.KaInputRight, KeyState::Down, [&] { KaInputProc(true); }, Config.KeyHoldProcInterval);
+			Input.HitKeyesProcess({ VK_UP, VK_LEFT }, KeyState::Down, [&] { KaInputProc(false); }, Config.KeyHoldProcInterval);
+			Input.HitKeyesProcess({ VK_DOWN, VK_RIGHT }, KeyState::Down, [&] { KaInputProc(true); }, Config.KeyHoldProcInterval);
+
+			Input.HitKeyesProcess(Config.DonInputLeft, KeyState::Down, DonInputProc);
+			Input.HitKeyesProcess(Config.DonInputRight, KeyState::Down, DonInputProc);
+			Input.HitKeyProcess(VK_RETURN, KeyState::Down, DonInputProc);
+
+			if (!IsCourseSelect) {
+
+				Input.HitKeyProcess(VK_TAB, KeyState::Down, RandomInputProc);
+				Input.HitKeyProcess(VK_SPACE, KeyState::Down, SongSearchProc);
+
+				Input.HitKeyProcess(VK_F1, KeyState::Down, [&] {
+					Skin.Base->DanSelect.SE.Don.Play();
+					NowScene = Scene::ConfigMenu;
+					PrevScene = Scene::DanSelect;
+					});
+				Input.HitKeyProcess(VK_F2, KeyState::Down, [&] {
+					Skin.Base->DanSelect.SE.Don.Play();
+					EnumChart(Config.SongDirectories);
+					});
+				Input.HitKeyProcess(VK_F3, KeyState::Down, [&] {
+					Skin.Base->DanSelect.SE.Don.Play();
+					Config.Load();
+					});
+				Input.HitKeyProcess(VK_F4, KeyState::Down, [&] {
+					Skin.Base->DanSelect.SE.Don.Play();
+					Skin.Load(Config.SkinName);
+					});
+
+				const int MouseWheel = Input.GetMouseWheel();
+
+				if (MouseWheel != 0) {
+					Skin.Base->DanSelect.SE.Ka.Play();
+					const int& _mousewheel = (std::abs(MouseWheel) % BoxDatas.size()) * (std::signbit(MouseWheel) ? -1 : 1) * -1;
+					if (std::signbit(_mousewheel)) {
+						BoxDataIndex = BoxDataIndex + _mousewheel <= -1 ? BoxDatas.size() + _mousewheel : BoxDataIndex + _mousewheel;
+					}
+					else {
+						BoxDataIndex = BoxDataIndex + _mousewheel >= BoxDatas.size() ? (BoxDataIndex + _mousewheel) - BoxDatas.size() : BoxDataIndex + _mousewheel;
+					}
 				}
 
 				FileImport();
@@ -2244,7 +2628,12 @@ public:
 			fs::remove("temp.tja");
 		}
 
-		Chart.Init();
+		bool dan_init = true;
+		if (Chart.OriginalData.IsDan) {
+			dan_init = IsDanFall();
+		}
+
+		Chart.Init(dan_init);
 
 		NoteData MainData;
 		NoteData MemData;
@@ -2283,7 +2672,7 @@ public:
 		size_t BarlineNoteCount = 0;
 		size_t BranchCount = 0;
 
-		bool StartFlag = false;
+		short StartFlag = 0;
 		bool NextFlag = false;
 		bool BarlineDisplay = true;
 		bool BarlineLoading = false;
@@ -2302,14 +2691,28 @@ public:
 
 		double BranchAddTime = 0;
 
-		for (size_t i = 0; i < lines.size(); ++i) {
+		size_t StartIndex = 0;
+
+		if (LoadData.IsDan) {
+			if (Chart.ExamDatas.empty()) {
+				Chart.ExamDatas.resize(LoadData.ExamDatas.size());
+			}
+			StartIndex = LoadData.DanIndex[NowSongCount];
+		}
+
+		for (size_t i = StartIndex; i < lines.size(); ++i) {
 			try {
 				Exsubstr(lines[i], "#START", [&](std::string_view data) {
-					StartFlag = true;
+					StartFlag = 1;
 					});
 				Exsubstr(lines[i], "#END", [&](std::string_view data) {
-					StartFlag = false;
+					StartFlag = 2;
 					});
+				if (LoadData.IsDan) {
+					Exsubstr(lines[i], "#NEXTSONG", [&](std::string_view data) {
+						++StartFlag;
+					});
+				}
 				Exsubstr(lines[i], "#GOGOSTART", [&](std::string_view data) {
 					MainData.GoGoStart = true;
 					});
@@ -2366,16 +2769,18 @@ public:
 					BranchAddTime = 0;
 					});
 				if (NowBranchStartFlag) {
-					Exsubstr(lines[i], "#N", [&](std::string_view data) {
-						if (BranchCount == 0) { MemData = MainData; }
-						MainData = MemData;
-						if (BranchCount != 0) { Chart.RawNoteDatas.back().RelaTime += -BranchAddTime; }
-						if (BranchCount == 0) { MainData.BranchStart = true; }
-						MainData.IsBranch = BranchType::Normal;
-						BranchAddTime = 0;
-						++BranchCount;
-						});
-					if (lines[i].find("#END") == std::string_view::npos) {
+					if (lines[i].find("#NEXTSONG") == std::string_view::npos) {
+						Exsubstr(lines[i], "#N", [&](std::string_view data) {
+							if (BranchCount == 0) { MemData = MainData; }
+							MainData = MemData;
+							if (BranchCount != 0) { Chart.RawNoteDatas.back().RelaTime += -BranchAddTime; }
+							if (BranchCount == 0) { MainData.BranchStart = true; }
+							MainData.IsBranch = BranchType::Normal;
+							BranchAddTime = 0;
+							++BranchCount;
+							});
+					}
+					if (lines[i].find("#END") == std::string_view::npos && lines[i].find("#EXAM") == std::string_view::npos) {
 						Exsubstr(lines[i], "#E", [&](std::string_view data) {
 							if (BranchCount == 0) { MemData = MainData; }
 							MainData = MemData;
@@ -2444,7 +2849,7 @@ public:
 					});
 
 				if (lines[i].find("#") != std::string_view::npos) { continue; }
-				if (!StartFlag) { continue; }
+				if (StartFlag != 1) { continue; }
 
 				if (!BarlineLoading) {
 					BarlineLoading = true;
@@ -2600,8 +3005,8 @@ RollType = '\0'
 					if (MainData.NoteType == '7' || MainData.NoteType == '9') {
 						auto& balloon = LoadData.Courses[CourseIndex].Balloons;
 						uint64_t ballooncount = 0;
-						if (BalloonIndex < balloon.size()) {
-							ballooncount = balloon[BalloonIndex];
+						if (BalloonIndex + Chart.DanBalloonIndex < balloon.size()) {
+							ballooncount = balloon[BalloonIndex + Chart.DanBalloonIndex];
 						}
 						else {
 							ballooncount = 5;
@@ -2635,20 +3040,30 @@ RollType = '\0'
 			}
 		}
 
-		Chart.AllNoteCount = NoteCount;
+		if (LoadData.IsDan) {
+			Chart.DanBalloonIndex += BalloonIndex;
+		}
+		if (NowSongCount == 0) {
+			Chart.AllNoteCount = NoteCount;
+		}
 		Chart.AllBarlineCount = BarlineCount;
 		Chart.AddScore = LoadData.Courses[CourseIndex].AddScore;
 		if (Chart.AddScore == 0) {
-			Chart.AddScore = 1000000 / (double)NoteCount;
+			Chart.AddScore = 1000000 / (double)Chart.AllNoteCount;
 		}
 		Chart.NowBranchFlag = BranchStartFindFlag ? BranchType::Normal : BranchType::Null;
 
 		SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
-		if (!IsMulti) {
-			Chart.SongData.Load(ToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath.u8string()));
+		if (!LoadData.IsDan) {
+			if (!IsMulti) {
+				Chart.SongData.Load(ToStr(LoadData.SongPath.u8string()));
+			}
+			else {
+				Chart.SongData.Load(Shared.WaveData.data(), Shared.WaveData.size());
+			}
 		}
 		else {
-			Chart.SongData.Load(Shared.WaveData.data(), Shared.WaveData.size());
+			Chart.SongData.Load(ToStr(LoadData.DanSongPath[NowSongCount].u8string()));
 		}
 		SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
 
@@ -2675,7 +3090,7 @@ RollType = '\0'
 				return;
 			}
 		}
-		else if (!Config.TrainingMode) {
+		else if (!Config.TrainingMode || LoadData.IsDan) {
 			WaitVSync(10);
 			Chart.NowTime.Start();
 		}
@@ -2803,12 +3218,26 @@ RollType = '\0'
 		double MasterBranch = 0;
 	};
 
+	struct ExamStreamData {
+		double ExamVals = 0.0;
+		bool IsFall = false;
+	};
+
 	struct PlayData {
 
-		void Init() {
+		void Init(bool dan_init) {
+			if (dan_init) {
+				ExamDatas.clear();
+				Judge.clear();
+				AllNoteCount = 0;
+				DanBalloonIndex = 0;
+			}
+			else {
+				Judge[0].Branch.Init();
+				Judge[0].Rolls.Init();
+			}
 			RawNoteDatas.clear();
 			BranchDatas.clear();
-			Judge.clear();
 			SongData.Delete();
 			Movie.Delete();
 			NowTime.Reset();
@@ -2823,7 +3252,6 @@ RollType = '\0'
 			LevelHold = false;
 			NowGoGo = false;
 			AddScore = 0;
-			AllNoteCount = 0;
 			AllBarlineCount = 0;
 			BranchAnimationTime = 0.2;
 			SongBlankTime = 0;
@@ -2864,6 +3292,9 @@ RollType = '\0'
 		double RollViewEndTime = 0.75;
 
 		size_t AllBarlineCount = 0;
+
+		std::vector<ExamStreamData> ExamDatas = std::vector<ExamStreamData>();
+		size_t DanBalloonIndex = 0;
 	};
 
 	PlayData Chart;
@@ -2920,6 +3351,12 @@ RollType = '\0'
 		}
 
 	} Training;
+
+	size_t NowSongCount = 0;
+
+	bool IsDanFall() const {
+		return (std::ranges::any_of(Chart.ExamDatas, &ExamStreamData::IsFall));
+	}
 
 	void SetDrawBranchArea(Pos2D<float> DelayPos) const {
 		if (!Chart.BranchDatas.empty()) {
@@ -3577,23 +4014,45 @@ RollType = '\0'
 		} while (idx < Shared.PlayerCount && IsMulti);
 
 		if (Shared.PlayerCount < 4) {
-			if (Chart.OriginalData.TitleDisplay) {
-				Skin.Base->Playing.Font.Title.Draw(
-					Skin.Base->Playing.Config.TitlePos,
-					GetColor(255, 255, 255),
-					GetColor(0, 0, 0),
-					Chart.OriginalData.TitleStrlen.Playing,
-					Chart.OriginalData.Title
-				);
+			if (!Chart.OriginalData.IsDan) {
+				if (Chart.OriginalData.TitleDisplay) {
+					Skin.Base->Playing.Font.Title.Draw(
+						Skin.Base->Playing.Config.TitlePos,
+						GetColor(255, 255, 255),
+						GetColor(0, 0, 0),
+						Chart.OriginalData.TitleStrlen.Playing,
+						Chart.OriginalData.Title
+					);
+				}
+				if (Chart.OriginalData.SubtitleDisplay) {
+					Skin.Base->Playing.Font.SubTitle.Draw(
+						Skin.Base->Playing.Config.SubTitlePos,
+						GetColor(255, 255, 255),
+						GetColor(0, 0, 0),
+						Chart.OriginalData.SubtitleStrlen.Playing,
+						Chart.OriginalData.Subtitle
+					);
+				}
 			}
-			if (Chart.OriginalData.SubtitleDisplay) {
-				Skin.Base->Playing.Font.SubTitle.Draw(
-					Skin.Base->Playing.Config.SubTitlePos,
-					GetColor(255, 255, 255),
-					GetColor(0, 0, 0),
-					Chart.OriginalData.SubtitleStrlen.Playing,
-					Chart.OriginalData.Subtitle
-				);
+			else {
+				if (Chart.OriginalData.TitleDisplay) {
+					Skin.Base->Playing.Font.Title.Draw(
+						Skin.Base->Playing.Config.TitlePos,
+						GetColor(255, 255, 255),
+						GetColor(0, 0, 0),
+						Chart.OriginalData.TitleStrlen.Dan[NowSongCount],
+						Chart.OriginalData.DanTitle[NowSongCount]
+					);
+				}
+				if (Chart.OriginalData.SubtitleDisplay) {
+					Skin.Base->Playing.Font.SubTitle.Draw(
+						Skin.Base->Playing.Config.SubTitlePos,
+						GetColor(255, 255, 255),
+						GetColor(0, 0, 0),
+						Chart.OriginalData.SubtitleStrlen.Dan[NowSongCount],
+						Chart.OriginalData.DanSubtitle[NowSongCount]
+					);
+				}
 			}
 		}
 
@@ -3606,6 +4065,53 @@ RollType = '\0'
 						GetColor(255, 255, 255),
 						"(%d/%d)",
 						Training.BarlineIndex, Chart.AllBarlineCount
+					);
+				}
+			}
+			if (Chart.OriginalData.IsDan) {
+				
+				Skin.Base->Playing.Image.DanBackGround.Draw({});
+				
+				for (size_t i = 0; i < Chart.ExamDatas.size(); i++) {
+
+					Skin.Base->Playing.Image.ExamProgressBar.Draw({ 0,120.0f * i }, 0);
+
+					auto OriginalExamData = Chart.OriginalData.ExamDatas[i];
+					auto ExamData = Chart.ExamDatas[i];
+					double Ratio = (double)ExamData.ExamVals / (double)OriginalExamData.PassVal[0];
+					float Width = Skin.Base->Playing.Image.ExamProgressBar.Size.Width * Ratio;
+					float MaxWidth = Skin.Base->Playing.Image.ExamProgressBar.Size.Width;
+
+					if (!ExamData.IsFall) {
+						Skin.Base->Playing.Image.ExamProgressBar.RectDraw(
+							{ 0,120.0f * i },
+							{ 0, Skin.Base->Playing.Image.ExamProgressBar.Size.Height },
+							{ Width < MaxWidth ? Width : MaxWidth,
+							Skin.Base->Playing.Image.ExamProgressBar.Size.Height },
+							1
+						);
+					}
+
+					bool IsFall = ExamData.IsFall;
+					bool IsPass = OriginalExamData.PassVal[0] <= ExamData.ExamVals && OriginalExamData.Range == ExamRange::More;
+					std::string valstr = !IsFall ? std::to_string((int)ExamData.ExamVals) : "0";
+					std::string examname = magic_enum::enum_name(OriginalExamData.ExamType).data();
+
+					Skin.Base->Playing.Font.ExamName.Draw(
+						{ Skin.Base->Playing.Config.ExamNamePos.X,
+						Skin.Base->Playing.Config.ExamNamePos.Y + (120.0f * i) },
+						GetColor(255, 255, 255),
+						GetColor(0, 0, 0),
+						GetStrlen(examname, Skin.Base->Playing.Font.ExamName.Handle),
+						examname
+					);
+					Skin.Base->Playing.Font.ExamVal.Draw(
+						{ Skin.Base->Playing.Config.ExamValPos.X,
+						Skin.Base->Playing.Config.ExamValPos.Y + (120.0f * i) },
+						GetColor(255, 255 * !IsFall, 255 * !IsFall * !IsPass),
+						GetColor(0, 0, 0),
+						GetStrlen(valstr, Skin.Base->Playing.Font.ExamVal.Handle),
+						valstr
 					);
 				}
 			}
@@ -3655,7 +4161,8 @@ RollType = '\0'
 				}
 			}
 			else if (Chart.SongBlankTime + 5000 < NowTime && !Chart.SongData.IsPlay()) {
-				if (Config.TrainingMode && !IsMulti) {
+				if (!IsMulti && (Config.TrainingMode || (Chart.OriginalData.IsDan && (NowSongCount < Chart.OriginalData.DanIndex.size() - 1) && !IsDanFall()))) {
+					NowSongCount += Chart.OriginalData.IsDan;
 					NowScene = Scene::Loading;
 					return;
 				}
@@ -3724,7 +4231,7 @@ RollType = '\0'
 			}
 		}
 		else {
-			if (Config.TrainingMode) {
+			if (Config.TrainingMode && !Chart.OriginalData.IsDan) {
 				if (!Chart.NowTime.IsRunning()) {
 					if (!Training.BarlineMoveTimer.IsRunning()) {
 
@@ -3821,13 +4328,57 @@ RollType = '\0'
 				}
 			}
 
+			if (Chart.OriginalData.IsDan) {
+				for (size_t i = 0; i < Chart.OriginalData.ExamDatas.size(); i++) {
+					
+					auto OriginalExamData = Chart.OriginalData.ExamDatas[i];
+					auto&& ExamVal = Chart.ExamDatas[i].ExamVals;
+
+					switch (OriginalExamData.ExamType) {
+					case ExamTypes::Accuracy:
+						ExamVal = std::abs(((int)OriginalExamData.PassVal[0] * (int)OriginalExamData.Range) - (int)Chart.Judge[0].Accuracy);
+						break;
+					case ExamTypes::Good:
+						ExamVal = std::abs(((int)OriginalExamData.PassVal[0] * (int)OriginalExamData.Range) - (int)Chart.Judge[0].Good);
+						break;
+					case ExamTypes::Ok:
+						ExamVal = std::abs(((int)OriginalExamData.PassVal[0] * (int)OriginalExamData.Range) - (int)Chart.Judge[0].Ok);
+							break;
+					case ExamTypes::Bad:
+						ExamVal = std::abs(((int)OriginalExamData.PassVal[0] * (int)OriginalExamData.Range) - (int)Chart.Judge[0].Bad);
+							break;
+					case ExamTypes::Score:
+						ExamVal = std::abs(((int)OriginalExamData.PassVal[0] * (int)OriginalExamData.Range) - (int)Chart.Judge[0].Score);
+							break;
+					case ExamTypes::Roll:
+						ExamVal = std::abs(((int)OriginalExamData.PassVal[0] * (int)OriginalExamData.Range) - (int)Chart.Judge[0].Roll);
+							break;
+					case ExamTypes::HitNote:
+						ExamVal = std::abs(((int)OriginalExamData.PassVal[0] * (int)OriginalExamData.Range) - (int)Chart.Judge[0].HitNote);
+							break;
+					case ExamTypes::MaxCombo:
+						ExamVal = std::abs(((int)OriginalExamData.PassVal[0] * (int)OriginalExamData.Range) - (int)Chart.Judge[0].MaxCombo);
+							break;
+					}
+
+					if (OriginalExamData.Range == ExamRange::Less && Chart.ExamDatas[i].ExamVals <= 0) {
+						if (!Chart.ExamDatas[i].IsFall) {
+							Skin.Base->Playing.SE.DanFall.Play();
+							Chart.ExamDatas[i].IsFall = true;
+						}
+					}
+				}
+			}
+
 			Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] {
 				Training.Init();
-				NowScene = Scene::SongSelect;
+				NowScene = PrevScene;
 				});
-			Input.HitKeyProcess(VK_TAB, KeyState::Down, [&] {
-				NowScene = Scene::Loading;
-				});
+			if (!Chart.OriginalData.IsDan) {
+				Input.HitKeyProcess(VK_TAB, KeyState::Down, [&] {
+					NowScene = Scene::Loading;
+					});
+			}
 		}
 
 		static auto JudgeNote = [&](double nowtime, char type) {
@@ -4196,6 +4747,7 @@ RollType = '\0'
 		return Score;
 	}
 	void ResultEnd() {
+
 		if (IsMulti) {
 			std::ranges::for_each(Shared.Players, [](PlayerData& data) { data.State = 0; });
 			Shared.Judge = JudgeData();
@@ -4206,7 +4758,9 @@ RollType = '\0'
 		else if (Chart.Judge[0].Score > ScoreDataLoad(Chart.OriginalData.ChartPath.string(), CourseIndex).Score) {
 			ScoreDataSave();
 		}
+
 		CrownIndex = 0;
+		Chart.Init(true);
 	}
 	void ResultDraw() {
 
@@ -4278,17 +4832,36 @@ RollType = '\0'
 		JudgeDraw(Skin.Base->Result.Config.MaxComboPos, Judge.MaxCombo);
 
 		CrownIndex = 0;
-		if (Judge.Accuracy >= 75) {
-			CrownIndex = 1;
+		if (!Chart.OriginalData.IsDan) {
+			if (Judge.Accuracy >= 75) {
+				CrownIndex = 1;
+			}
+			if (Judge.Accuracy >= 90) {
+				CrownIndex = 2;
+			}
+			if (Judge.Accuracy >= 90 && Judge.Bad == 0) {
+				CrownIndex = 3;
+			}
+			if (Judge.Accuracy >= 90 && Judge.Bad == 0 && Judge.Ok == 0) {
+				CrownIndex = 4;
+			}
 		}
-		if (Judge.Accuracy >= 90) {
-			CrownIndex = 2;
-		}
-		if (Judge.Accuracy >= 90 && Judge.Bad == 0) {
-			CrownIndex = 3;
-		}
-		if (Judge.Accuracy >= 90 && Judge.Bad == 0 && Judge.Ok == 0) {
-			CrownIndex = 4;
+		else {
+			if (!IsDanFall()) {
+				CrownIndex = 2;
+				for (size_t i = 0, m = 0, GoldPass = 0; i < Chart.ExamDatas.size(); ++i) {
+					if (Chart.OriginalData.ExamDatas[i].Range == ExamRange::More) {
+						++m;
+						if (Chart.ExamDatas[i].ExamVals >= Chart.OriginalData.ExamDatas[i].PassVal[1]) {
+							++GoldPass;
+						}
+					}
+					if (GoldPass >= m) {
+						CrownIndex = 3;
+						break;
+					}
+				}
+			}
 		}
 
 		Skin.Base->Result.Image.Crown.Draw({}, CrownIndex);
@@ -4328,7 +4901,7 @@ RollType = '\0'
 	void ResultProc() {
 		Input.HitKeyProcess(VK_RETURN, KeyState::Down, [&] {
 			if (!IsMulti) {
-				NowScene = Scene::SongSelect;
+				NowScene = PrevScene;
 			}
 			else if (Shared.Players[Shared.MyIndex].IsHost) {
 				NowScene = Scene::MultiRoom;
@@ -4846,6 +5419,9 @@ RollType = '\0'
 			case Scene::SongSelect:
 				SongSelectEnd();
 				break;
+			case Scene::DanSelect:
+				DanSelectEnd();
+				break;
 			case Scene::MultiRoom:
 				MultiRoomEnd();
 				break;
@@ -4872,6 +5448,9 @@ RollType = '\0'
 			case Scene::SongSelect:
 				SongSelectInit();
 				break;
+			case Scene::DanSelect:
+				DanSelectInit();
+				break;
 			case Scene::MultiRoom:
 				MultiRoomInit();
 				break;
@@ -4890,6 +5469,9 @@ RollType = '\0'
 			break;
 		case Scene::SongSelect:
 			SongSelectDraw();
+			break;
+		case Scene::DanSelect:
+			DanSelectDraw();
 			break;
 		case Scene::MultiRoom:
 			MultiRoomDraw();
@@ -4939,6 +5521,9 @@ RollType = '\0'
 			break;
 		case Scene::SongSelect:
 			SongSelectProc();
+			break;
+		case Scene::DanSelect:
+			DanSelectProc();
 			break;
 		case Scene::MultiRoom:
 			MultiRoomProc();
