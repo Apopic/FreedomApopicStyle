@@ -2059,7 +2059,7 @@ public:
                     continue;
                 }
                 std::vector<uint8_t> content = entry.readContent();
-                MemToFile(ImportFolderPath / StrToWStr(name), content);
+                MemToFile(ImportFolderPath / name, content);
             }
         }
 
@@ -2703,8 +2703,8 @@ public:
 
     SharedData Shared = SharedData();
     TCPSocket Socket = TCPSocket();
-    std::vector<uint8_t> FileData;
-    std::vector<uint8_t> WaveData;
+    std::vector<uint8_t> FileData = std::vector<uint8_t>();
+    std::vector<uint8_t> WaveData = std::vector<uint8_t>(); 
 
     bool IsMulti = false;
     bool IsLoad = false;
@@ -2715,9 +2715,14 @@ public:
         if (IsMulti) { Socket.Close(); }
         Shared = SharedData();
         Socket = TCPSocket();
+        FileData.clear();
+        WaveData.clear();
         IsMulti = false;
         IsLoad = false;
         IsSelect = false;
+    }
+    bool IsHost() const {
+        return (!Shared.Players.empty() && Shared.Players[Shared.MyIndex].IsHost);
     }
     bool CheckState(short i) const {
         return std::ranges::all_of(Shared.Players, [&](const PlayerData& data) { return data.State == i; });
@@ -2824,7 +2829,7 @@ public:
 
         static auto BackInputProc = [&] {
             if (IsMulti) {
-                if (Shared.Players[Shared.MyIndex].State) {
+                if (Shared.Players[Shared.MyIndex].State > 0) {
                     Shared.Players[Shared.MyIndex].State = 0;
                     return;
                 }
@@ -2835,10 +2840,12 @@ public:
 
         if (IsMulti) {
             if (IsLoad) {
-                if (Shared.HitKey == HitType::Enter) {
+                if (IsHost()) {
                     Shared.Clear();
+                }
+                if (Shared.HitKey == HitType::Enter) {
                     if (CheckState(2)) {
-                        if (!Shared.Players[Shared.MyIndex].IsHost) {
+                        if (!IsHost()) {
                             Skin.Base->MultiRoom.SE.Don.Play();
                         }
                         SetSpeed();
@@ -2857,23 +2864,25 @@ public:
                     if (DemoSongPlayBlank.GetElapsed().Second() > DemoSongPlayBlankTime() &&
                         !DemoSong.IsPlay()) {
                         SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
-                        DemoSong.Load(Shared.WaveData.data(), Shared.WaveData.size());
+                        DemoSong.Load(WaveData.data(), WaveData.size());
                         SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
                         DemoSong.SetCurrent(Chart.OriginalData.DemoStart * 1000.0);
-                        DemoSong.SetVolume(
-                            Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
+                        DemoSong.SetVolume(Chart.OriginalData.SongVolume * (Config.SongVolume / 100));
                         DemoSong.Play(FALSE);
                     }
                 }
             }
             else {
-                if (!Shared.WaveData.empty()) {
+
+                if (!Shared.FileData.empty() && !Shared.WaveData.empty()) {
+                    FileData = std::move(Shared.FileData);
+                    WaveData = std::move(Shared.WaveData);
                     PrevScene = Scene::MultiRoom;
                     NowScene = Scene::Loading;
                 }
 
                 static auto HostInputProc = [&] {
-                    if (Shared.Players[Shared.MyIndex].IsHost && Shared.PlayerCount >= 2) {
+                    if (IsHost() && Shared.PlayerCount >= 2) {
                         Skin.Base->MultiRoom.SE.Don.Play();
                         GrantIndex = Shared.MyIndex;
                         IsSelect = true;
@@ -2899,7 +2908,7 @@ public:
                     IsSelect = false;
                     return;
                 }
-                else if (Shared.Players[Shared.MyIndex].IsHost) {
+                else if (IsHost()) {
                     if (!IsLoad) {
                         Skin.Base->MultiRoom.SE.Don.Play();
                         NowScene = Scene::SongSelect;
@@ -2956,7 +2965,8 @@ public:
     }
         Touch.Process(TouchType::Other, BackInputProc, Skin.Base->MultiRoom.Image.Back);
 #endif
-}
+       
+    }
 
     double ScoreRateCalc(double judge, double basis) {
         const double c = 0.9;
@@ -2990,13 +3000,13 @@ public:
 
         ChartData LoadData;
 
-        if (!IsMulti || Shared.Players[Shared.MyIndex].IsHost) {
+        if (!IsMulti || IsHost()) {
             LoadData = *BoxDatas[BoxDataIndex]->GetChart();
             LoadData.Load(LoadData.ChartPath);
         }
         else {
             CourseIndex = Shared.CourseIndex;
-            MemToFile("temp.tja", Shared.FileData);
+            MemToFile("temp.tja", FileData);
             LoadData.Load("temp.tja");
         }
 
@@ -3438,11 +3448,11 @@ RollType = '\0'
 
         SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
         if (!Chart.IsDanMode()) {
-            if (!IsMulti || Shared.Players[Shared.MyIndex].IsHost) {
+            if (!IsMulti || IsHost()) {
                 Chart.SongData.Load(ToStr(LoadData.SongPath.u8string()));
             }
             else {
-                Chart.SongData.Load(Shared.WaveData.data(), Shared.WaveData.size());
+                Chart.SongData.Load(WaveData.data(), WaveData.size());
             }
         }
         else {
@@ -3463,10 +3473,11 @@ RollType = '\0'
 
         if (IsMulti) {
             if (!IsLoad) {
-                if (Shared.Players[Shared.MyIndex].IsHost) {
+                if (IsHost()) {
                     Shared.CourseIndex = CourseIndex;
                     Shared.FileData = FileToMem(fs::path(LoadData.ChartPath));
                     Shared.WaveData = FileToMem(fs::path(LoadData.SongPath));
+                    WaveData = Shared.WaveData;
                 }
                 IsLoad = true;
                 NowScene = Scene::MultiRoom;
@@ -5364,7 +5375,7 @@ RollType = '\0'
             if (!IsMulti) {
                 NowScene = PrevScene;
             }
-            else if (Shared.Players[Shared.MyIndex].IsHost) {
+            else if (IsHost()) {
                 NowScene = Scene::MultiRoom;
                 Shared.HitKey = HitType::Back;
             }
@@ -5397,7 +5408,7 @@ RollType = '\0'
                 ResultIndex < Shared.PlayerCount - 1 ? ++ResultIndex : ResultIndex;
                 });
 #endif
-            if (!Shared.Players[Shared.MyIndex].IsHost) {
+            if (!IsHost()) {
                 if (Shared.HitKey == HitType::Back) {
                     NowScene = Scene::MultiRoom;
                 }
@@ -5860,7 +5871,7 @@ RollType = '\0'
 
                     Shared.Players[Shared.MyIndex].Name = Config.PlayerName;
 
-                    if (Shared.Players[Shared.MyIndex].IsHost) {
+                    if (IsHost()) {
                         Shared.SongSpeed = Config.SongSpeed;
                     }
                 }
@@ -5921,7 +5932,7 @@ RollType = '\0'
 
                 if (IsMulti) {
                     Shared.Players[Shared.MyIndex].Name = Config.PlayerName;
-                    if (Shared.Players[Shared.MyIndex].IsHost) {
+                    if (IsHost()) {
                         Shared.SongSpeed = Config.SongSpeed;
                     }
                 }
