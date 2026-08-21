@@ -1983,11 +1983,11 @@ public:
         std::ofstream ofs(path, std::ios::binary);
         ofs.write(reinterpret_cast<const char*>(datas.data()), datas.size());
     }
+#ifndef __ANDROID__
     void FileImport() {
 
         std::vector<std::string> DropFiles;
 
-#ifndef __ANDROID__
         if (GetDragFileNum() <= 0) {
             return;
         }
@@ -2064,9 +2064,8 @@ public:
         }
 
         EnumChart(Config.SongDirectories);
-#endif
-
     }
+#endif
     void SongDownload(const std::string& link, const fs::path& path) {
         if (!link.empty() && !fs::exists(path)) {
 #ifndef __ANDROID__
@@ -2704,7 +2703,7 @@ public:
     SharedData Shared = SharedData();
     TCPSocket Socket = TCPSocket();
     std::vector<uint8_t> FileData = std::vector<uint8_t>();
-    std::vector<uint8_t> WaveData = std::vector<uint8_t>(); 
+    std::vector<uint8_t> WaveData = std::vector<uint8_t>();
 
     bool IsMulti = false;
     bool IsLoad = false;
@@ -2965,8 +2964,8 @@ public:
     }
         Touch.Process(TouchType::Other, BackInputProc, Skin.Base->MultiRoom.Image.Back);
 #endif
-       
-    }
+
+}
 
     double ScoreRateCalc(double judge, double basis) {
         const double c = 0.9;
@@ -3122,7 +3121,7 @@ public:
                         Chart.ScrollType = ScrollType::HBSCROLL;
                         });
                 }
-                Exsubstr(lines[i], "#BRANCHSTART", [&](std::string_view data) {
+                Exsubstr(lines[i], "#SECTION", [&](std::string_view data) {
                     MainData.Section = true;
                     });
                 Exsubstr(lines[i], "#LEVELHOLD", [&](std::string_view data) {
@@ -3445,6 +3444,11 @@ RollType = '\0'
             Chart.AddScore = 1000000 / (double)Chart.AllNoteCount;
         }
         Chart.NowBranchFlag = BranchStartFindFlag ? BranchType::Normal : BranchType::Null;
+        if (Config.TrainingMode && !Chart.IsDanMode() && Chart.IsBranchChart()) {
+            if (Training.MemBranchFlag > BranchType::Null) {
+                Chart.NowBranchFlag = Training.MemBranchFlag;
+            }
+        }
 
         SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
         if (!Chart.IsDanMode()) {
@@ -3656,6 +3660,9 @@ RollType = '\0'
         bool IsDanMode() const {
             return OriginalData.IsDan;
         }
+        bool IsBranchChart() const {
+            return !BranchDatas.empty();
+        }
 
         std::vector<NoteData> RawNoteDatas = std::vector<NoteData>();
         std::vector<JudgeData> Judge = std::vector<JudgeData>();
@@ -3739,6 +3746,7 @@ RollType = '\0'
         double MemNowTime = 0;
         uint64_t NoteDataIndex = 0;
         uint64_t BarlineIndex = 0;
+        BranchType MemBranchFlag = BranchType::Null;
 
         void Init() {
             BarlineMoveTimer.Reset();
@@ -3747,8 +3755,8 @@ RollType = '\0'
             MemNowTime = 0;
             NoteDataIndex = 0;
             BarlineIndex = 0;
+            MemBranchFlag = BranchType::Null;
         }
-
     } Training;
 
     size_t NowSongCount = 0;
@@ -3758,7 +3766,7 @@ RollType = '\0'
     }
 
     void SetDrawBranchArea(Pos2D<float> DelayPos) const {
-        if (!Chart.BranchDatas.empty()) {
+        if (Chart.IsBranchChart()) {
             SetDrawArea(
                 Skin.Base->Playing.Image.Lane.Pos.X - Skin.Base->Playing.Image.Lane.Size.Width / 2,
                 Skin.Base->Playing.Image.Lane.Pos.Y - Skin.Base->Playing.Image.Lane.Size.Height / 2 + DelayPos.Y,
@@ -4104,7 +4112,7 @@ RollType = '\0'
                             NotePos.Y - 65,
                             NotePos.X,
                             NotePos.Y + 65,
-                            GetColor(255, 255, 255 * !data.BranchStart)
+                            GetColor(255, 255, 255 * !data.Section)
                         );
                     }
                 }
@@ -4714,7 +4722,7 @@ RollType = '\0'
                             };
 
                         static auto BranchChangeProc = [&](bool direction) {
-                            auto MemBranch = Chart.NowBranchFlag;
+                            if (!Chart.IsBranchChart()) { return; }
                             if (direction) {
                                 Chart.NowBranchFlag = (Chart.NowBranchFlag < BranchType::Master)
                                     ? (BranchType)((int)Chart.NowBranchFlag + 1)
@@ -4725,6 +4733,7 @@ RollType = '\0'
                                     ? (BranchType)((int)Chart.NowBranchFlag - 1)
                                     : BranchType::Normal;
                             }
+                            Training.MemBranchFlag = Chart.NowBranchFlag;
                             };
 
 #ifndef __ANDROID__
@@ -4807,14 +4816,14 @@ RollType = '\0'
                 Training.Init();
                 NowScene = PrevScene;
                 };
+            static auto ReLoadInputProc = [&] {
+                if (Chart.IsDanMode()) { return; }
+                NowScene = Scene::Loading;
+                };
 
 #ifndef __ANDROID__
             Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, BackInputProc);
-            if (!Chart.IsDanMode()) {
-                Input.HitKeyProcess(VK_TAB, KeyState::Down, [&] {
-                    NowScene = Scene::Loading;
-                    });
-            }
+            Input.HitKeyProcess(VK_TAB, KeyState::Down, ReLoadInputProc);
 #else
             Touch.Process(TouchType::Other, BackInputProc, Skin.Base->Playing.Image.Back);
 #endif
