@@ -3090,6 +3090,9 @@ public:
 
         for (size_t i = StartIndex; i < lines.size(); ++i) {
             try {
+                if (auto pos = lines[i].find("//"); pos != std::string_view::npos) {
+                    lines[i] = lines[i].substr(0, pos);
+                }
                 Exsubstr(lines[i], "#START", [&](std::string_view data) {
                     StartFlag = 1;
                     });
