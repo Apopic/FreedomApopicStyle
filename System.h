@@ -541,6 +541,7 @@ public:
         DataLoad(Playing, Image, ProgressBar);
         DataLoad(Playing, Image, ExamProgressBar);
         DataLoad(Playing, Image, Back);
+        DataLoad(Playing, Image, Pause);
 
         DataLoad(Playing, Font, Title);
         DataLoad(Playing, Font, SubTitle);
@@ -810,6 +811,7 @@ public:
                 GraphData ProgressBar;
                 GraphData ExamProgressBar;
                 GraphData Back;
+                GraphData Pause;
             } Image;
             struct _Font {
                 FontData Title;
@@ -1297,8 +1299,8 @@ public:
             Skin.Base->ModeSelect.Image.Box.Draw({ 0, Skin.Base->ModeSelect.Config.BoxDistance * i });
             SetDrawAddColor(0, 0, 0);
             Skin.Base->ModeSelect.Font.Modes.Draw({
-                                                          Skin.Base->ModeSelect.Config.ModesPos.X,
-                                                          Skin.Base->ModeSelect.Config.ModesPos.Y + (Skin.Base->ModeSelect.Config.BoxDistance * i) }, GetColor(255, 255, 255), GetColor(0, 0, 0), magic_enum::enum_name((Mode)i).data());
+            Skin.Base->ModeSelect.Config.ModesPos.X,
+            Skin.Base->ModeSelect.Config.ModesPos.Y + (Skin.Base->ModeSelect.Config.BoxDistance * i) }, GetColor(255, 255, 255), GetColor(0, 0, 0), magic_enum::enum_name((Mode)i).data());
         }
     }
 
@@ -1402,6 +1404,13 @@ public:
         bool IsPlayable = false;
     };
 
+    static std::vector<std::string_view> FileEncode(std::vector<std::string>& strvec) {
+        for (auto&& str : strvec) {
+            str = SjisToUtf8(str);
+        }
+        return std::vector<std::string_view>(strvec.begin(), strvec.end());
+    }
+
     class ChartData {
     public:
 
@@ -1443,6 +1452,8 @@ public:
 
         bool Load(const fs::path& path) {
             TextfileReader text(path);
+            std::vector<std::string> strvec(text.begin(), text.end());
+            std::vector<std::string_view> lines = FileEncode(strvec);
             ChartPath = path;
 
             size_t index = 0;
@@ -1460,17 +1471,8 @@ public:
             std::vector<fs::path> DanSongPaths;
 
             try {
-                for (size_t i = 0; i < text.lines().size(); ++i) {
-#ifdef __ANDROID__
-                    if (!text[i].empty() && text[i].back() == '\n') {
-                        text[i].remove_suffix(1);
-                    }
-                    if (!text[i].empty() && text[i].back() == '\r') {
-                        text[i].remove_suffix(1);
-                    }
-#endif
-
-                    Exsubstr(text[i], "TITLE:", [&](std::string_view data) {
+                for (size_t i = 0; i < lines.size(); ++i) {
+                    Exsubstr(lines[i], "TITLE:", [&](std::string_view data) {
                         if (data.find("--") == 0) {
                             data.remove_prefix(2);
                             TitleDisplay = false;
@@ -1480,7 +1482,7 @@ public:
                         TitleStrlen.Playing = GetStrlen(data, Skin.Base->Playing.Font.Title.Handle);
                         TitleStrlen.Result = GetStrlen(data, Skin.Base->Result.Font.Title.Handle);
                         });
-                    Exsubstr(text[i], "SUBTITLE:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "SUBTITLE:", [&](std::string_view data) {
                         if (data.find("--") == 0) {
                             data.remove_prefix(2);
                             SubtitleDisplay = false;
@@ -1490,47 +1492,47 @@ public:
                         SubtitleStrlen.Playing = GetStrlen(data, Skin.Base->Playing.Font.SubTitle.Handle);
                         SubtitleStrlen.Result = GetStrlen(data, Skin.Base->Result.Font.SubTitle.Handle);
                         });
-                    Exsubstr(text[i], "BPM:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "BPM:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         BPM = svtov<double>(data);
                         });
-                    Exsubstr(text[i], "OFFSET:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "OFFSET:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         SongOffset = svtov<double>(data);
                         });
-                    Exsubstr(text[i], "MOVIEOFFSET:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "MOVIEOFFSET:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         MovieOffset = svtov<double>(data);
                         });
-                    Exsubstr(text[i], "DEMOSTART:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "DEMOSTART:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         DemoStart = svtov<double>(data);
                         });
-                    Exsubstr(text[i], "SONGVOL:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "SONGVOL:", [&](std::string_view data) {
                         if (!data.empty()) { return; }
                         SongVolume = svtov<double>(data);
                         });
-                    Exsubstr(text[i], "SEVOL:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "SEVOL:", [&](std::string_view data) {
                         if (!data.empty()) { return; }
                         SeVolume = svtov<float>(data);
                         });
-                    Exsubstr(text[i], "WAVE:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "WAVE:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         SongPath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
                         });
-                    Exsubstr(text[i], "BGMOVIE:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "BGMOVIE:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         MoviePath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
                         });
-                    Exsubstr(text[i], "SONGLINK:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "SONGLINK:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         SongLink = data;
                         });
-                    Exsubstr(text[i], "MOVIELINK:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "MOVIELINK:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         MovieLink = data;
                         });
-                    Exsubstr(text[i], "COURSE:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "COURSE:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         index = i;
                         course = CourseType::Null;
@@ -1558,22 +1560,22 @@ public:
                         }
                         course = (CourseType)svtov<int>(data);
                         });
-                    Exsubstr(text[i], "LEVEL:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "LEVEL:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         level = svtov<uint64_t>(data);
                         });
-                    Exsubstr(text[i], "SCOREINIT:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "SCOREINIT:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         addscore = svtov<uint64_t>(data);
                         });
-                    Exsubstr(text[i], "BALLOON:", [&](std::string_view data) {
+                    Exsubstr(lines[i], "BALLOON:", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         auto sp = split(data, ',');
                         for (auto&& s : sp) {
                             balloon.push_back(svtov<uint64_t>(s));
                         }
                         });
-                    Exsubstr(text[i], "EXAM" + std::to_string(ExamDatas.size() + 1) + ":", [&](std::string_view data) {
+                    Exsubstr(lines[i], "EXAM" + std::to_string(ExamDatas.size() + 1) + ":", [&](std::string_view data) {
                         if (data.empty()) { return; }
                         auto sp = split(data, ',');
                         if (sp[3] == "m") {
@@ -1610,7 +1612,7 @@ public:
                         Exam.PassVal[1] = svtov<double>(sp[2]);
                         ExamDatas.push_back(Exam);
                         });
-                    Exsubstr(text[i], "#START", [&](std::string_view data) {
+                    Exsubstr(lines[i], "#START", [&](std::string_view data) {
                         if (course == CourseType::Null) {
                             course = CourseType::Oni;
                         }
@@ -1623,7 +1625,7 @@ public:
                         balloon = std::vector<uint64_t>();
                         });
                     if (IsDan) {
-                        Exsubstr(text[i], "#NEXTSONG", [&](std::string_view data) {
+                        Exsubstr(lines[i], "#NEXTSONG", [&](std::string_view data) {
                             if (data.empty()) { return; }
                             auto sp = split(data, ',');
                             DanTitles.push_back(std::string(sp[0]));
@@ -1633,7 +1635,7 @@ public:
                             DanIndexs.push_back(i);
                             DanSongPaths.push_back(path.parent_path().u8string() + u8"\\" + std::u8string(sp[3].begin(), sp[3].end()));
                             });
-                        Exsubstr(text[i], "#END", [&](std::string_view data) {
+                        Exsubstr(lines[i], "#END", [&](std::string_view data) {
                             DanTitle = DanTitles;
                             TitleStrlen.Dan = DanTitleStrlens;
                             DanSubtitle = DanSubtitles;
@@ -2076,10 +2078,21 @@ public:
                 }
 
                 std::string powershell = "powershell -Command ";
-                std::string command = powershell + "yt-dlp -x --audio-format vorbis -o song " + link;
-                if (std::system(command.c_str()) != 0) {
-                    MessageBox(NULL, TEXT("音源のダウンロードに失敗しました"), TEXT("エラー"), MB_ICONERROR);
-                    return;
+
+                {
+                    std::string command = powershell + "yt-dlp -U";
+                    if (std::system(command.c_str()) != 0) {
+                        MessageBox(NULL, TEXT("yt-dlpの更新に失敗しました"), TEXT("エラー"), MB_ICONERROR);
+                        return;
+                    }
+                }
+
+                {
+                    std::string command = powershell + "yt-dlp -x --audio-format vorbis -o song " + link;
+                    if (std::system(command.c_str()) != 0) {
+                        MessageBox(NULL, TEXT("音源のダウンロードに失敗しました"), TEXT("エラー"), MB_ICONERROR);
+                        return;
+                    }
                 }
 
                 if (fs::exists("song.ogg")) {
@@ -2099,10 +2112,21 @@ public:
                 }
 
                 std::string powershell = "powershell -Command ";
-                std::string command = powershell + "yt-dlp --recode-video avi -o movie " + link;
-                if (std::system(command.c_str()) != 0) {
-                    MessageBox(NULL, TEXT("動画のダウンロードに失敗しました"), TEXT("エラー"), MB_ICONERROR);
-                    return;
+
+                {
+                    std::string command = powershell + "yt-dlp -U";
+                    if (std::system(command.c_str()) != 0) {
+                        MessageBox(NULL, TEXT("yt-dlpの更新に失敗しました"), TEXT("エラー"), MB_ICONERROR);
+                        return;
+                    }
+                }
+
+                {
+                    std::string command = powershell + "yt-dlp --recode-video avi -o movie " + link;
+                    if (std::system(command.c_str()) != 0) {
+                        MessageBox(NULL, TEXT("動画のダウンロードに失敗しました"), TEXT("エラー"), MB_ICONERROR);
+                        return;
+                    }
                 }
 
                 if (fs::exists("movie.avi")) {
@@ -3010,7 +3034,8 @@ public:
         }
 
         TextfileReader text(LoadData.ChartPath);
-        std::vector<std::string_view> lines(text.begin(), text.end());
+        std::vector<std::string> strvec(text.begin(), text.end());
+        std::vector<std::string_view> lines = FileEncode(strvec);
 
         if (fs::exists("temp.tja")) {
             fs::remove("temp.tja");
@@ -4290,12 +4315,12 @@ RollType = '\0'
             }
             else {
                 Skin.Base->Playing.Font.PlayerName.Draw({
-                                                                Skin.Base->Playing.Config.PlayerNamePos.X,
-                                                                Skin.Base->Playing.Config.PlayerNamePos.Y + DelayPos.Y },
-                                                                GetColor(255, 255, 255),
-                                                                GetColor(0, 0, 0),
-                                                                Names[idx]
-                                                                );
+                Skin.Base->Playing.Config.PlayerNamePos.X,
+                Skin.Base->Playing.Config.PlayerNamePos.Y + DelayPos.Y },
+                GetColor(255, 255, 255),
+                GetColor(0, 0, 0),
+                Names[idx]
+                );
             }
 
             {
@@ -4531,6 +4556,9 @@ RollType = '\0'
 
 #ifdef __ANDROID__
         Skin.Base->Playing.Image.Back.Draw({});
+        if (Config.TrainingMode && !Chart.IsDanMode()) {
+            Skin.Base->Playing.Image.Pause.Draw({});
+        }
 #endif
         if (Config.ViewDebug) {
             DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.u8string().c_str());
@@ -4753,7 +4781,7 @@ RollType = '\0'
                         Input.HitKeyProcess(VK_RETURN, KeyState::Down, StartInputProc);
 #else
                         Touch.Process(TouchType::RightKa, [] { MoveInputProc(false); });
-                        Touch.Process(TouchType::LeftKa, [] { MoveInputProc(false); });
+                        Touch.Process(TouchType::LeftKa, [] { MoveInputProc(true); });
                         Touch.Process(TouchType::Don, StartInputProc);
 #endif
                     }
@@ -4829,6 +4857,7 @@ RollType = '\0'
             Input.HitKeyProcess(VK_TAB, KeyState::Down, ReLoadInputProc);
 #else
             Touch.Process(TouchType::Other, BackInputProc, Skin.Base->Playing.Image.Back);
+            Touch.Process(TouchType::Other, ReLoadInputProc, Skin.Base->Playing.Image.Pause);
 #endif
         }
 
