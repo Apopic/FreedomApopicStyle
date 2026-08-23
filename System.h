@@ -1216,6 +1216,10 @@ struct SharedData {
     auto operator<=>(const SharedData&) const = default;
 };
 
+enum class DataType {
+    FASGameData
+};
+
 class Game {
 public:
 
@@ -1405,9 +1409,11 @@ public:
     };
 
     static std::vector<std::string_view> FileEncode(std::vector<std::string>& strvec) {
+#ifndef __ANDROID__
         for (auto&& str : strvec) {
             str = SjisToUtf8(str);
         }
+#endif
         return std::vector<std::string_view>(strvec.begin(), strvec.end());
     }
 
@@ -2755,13 +2761,13 @@ public:
     }
     template<typename T>
     void Send(T& data) {
-        Socket.ASyncEncryptionSend(Packet(data));
+        Socket.ASyncEncryptionSend(Packet(DataType::FASGameData, data));
     }
     template<typename T>
     void Recv(T& dest) {
         if (Socket.Available() > 0) {
             auto pak = *Socket.ASyncEncryptionRecv().get();
-            if (pak.GetHeader().value().IsSameAs<T>()) {
+            if (pak.GetHeader()->Is(DataType::FASGameData)) {
                 dest = *pak.Get<T>();
             }
         }
@@ -2783,7 +2789,12 @@ public:
     }
     void MultiRoomDraw() {
 
+        SetDrawBlendMode(0, 0);
         Skin.Base->MultiRoom.Image.BackGround.Draw({});
+
+#ifdef __ANDROID__
+        Skin.Base->MultiRoom.Image.Back.Draw({});
+#endif
 
         if (!IsMulti) {
             Skin.Base->MultiRoom.Font.String.Draw(
@@ -2842,12 +2853,10 @@ public:
         }
 
 #ifdef __ANDROID__
-        Skin.Base->MultiRoom.Image.Back.Draw({});
         Skin.Base->MultiRoom.Image.Config.Draw({});
         Skin.Base->MultiRoom.Image.Host.Draw({});
 #endif
     }
-
     void MultiRoomProc() {
 
         static auto BackInputProc = [&] {
@@ -2979,6 +2988,7 @@ public:
 
             Input.HitKeyProcess(VK_F1, KeyState::Down, ConfigInputProc);
         }
+
         Input.HitKeyProcess(VK_ESCAPE, KeyState::Down, BackInputProc);
 #else
             Touch.Process(TouchType::LeftKa, [&] { KaInputProc(false); });
@@ -2989,7 +2999,7 @@ public:
         Touch.Process(TouchType::Other, BackInputProc, Skin.Base->MultiRoom.Image.Back);
 #endif
 
-}
+    }
 
     double ScoreRateCalc(double judge, double basis) {
         const double c = 0.9;
@@ -4556,7 +4566,7 @@ RollType = '\0'
 
 #ifdef __ANDROID__
         Skin.Base->Playing.Image.Back.Draw({});
-        if (Config.TrainingMode && !Chart.IsDanMode()) {
+        if (Config.TrainingMode && !Chart.IsDanMode() && !IsMulti) {
             Skin.Base->Playing.Image.Pause.Draw({});
         }
 #endif
