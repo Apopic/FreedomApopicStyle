@@ -142,6 +142,8 @@ public:
         JSONDATA(RollSpeed);
         JSONDATA(FastInput);
         JSONDATA(FastDrawRate);
+        JSONDATA(FrameCountTimer);
+        JSONDATA(FrameExtendRate);
         JSONDATA(Exclusive);
         JSONDATA(SampleRate);
         JSONDATA(BufferSize);
@@ -194,6 +196,8 @@ public:
                 JSONDATA(RollSpeed),
                 JSONDATA(FastInput),
                 JSONDATA(FastDrawRate),
+                JSONDATA(FrameCountTimer),
+                JSONDATA(FrameExtendRate),
                 JSONDATA(Exclusive),
                 JSONDATA(SampleRate),
                 JSONDATA(BufferSize),
@@ -252,6 +256,7 @@ public:
     bool HitNoteDisp = true;
     bool WaitVSync = true;
     bool FastInput = true;
+    bool FrameCountTimer = true;
     bool Exclusive = false;
     bool FullScreen = false;
     bool ViewDebug = false;
@@ -275,6 +280,7 @@ public:
     double RollSpeed = 30;
     double KeyHoldProcInterval = 0.15;
     double FastDrawRate = 0.5;
+    double FrameExtendRate = 1.0;
 
     float SongVolume = 62.0f;
     float SEVolume = 70.0f;
@@ -1132,7 +1138,7 @@ struct JudgeData {
     auto operator<=>(const JudgeData&) const = default;
 };
 
-enum class HitType {
+enum class HitType : int {
     Null = -2,
     Empty,
     DonLeft,
@@ -1216,8 +1222,8 @@ struct SharedData {
     auto operator<=>(const SharedData&) const = default;
 };
 
-enum class DataType {
-    FASGameData
+enum class DataType : int {
+    FASData = 37683
 };
 
 class Game {
@@ -2761,15 +2767,14 @@ public:
     }
     template<typename T>
     void Send(T& data) {
-        Socket.ASyncEncryptionSend(Packet(DataType::FASGameData, data));
+        Socket.ASyncEncryptionSend(Packet(DataType::FASData, data));
     }
     template<typename T>
     void Recv(T& dest) {
-        if (Socket.Available() > 0) {
-            auto pak = *Socket.ASyncEncryptionRecv().get();
-            if (pak.GetHeader()->Is(DataType::FASGameData)) {
-                dest = *pak.Get<T>();
-            }
+        if (Socket.Available() <= 0) { return; }
+        auto pak = *Socket.ASyncEncryptionRecv().get();
+        if (pak.GetHeader()->TypeAs<DataType>() == DataType::FASData) {
+            dest = *pak.Get<T>();
         }
     }
     void MultiRoomInit() {
@@ -3039,16 +3044,16 @@ public:
         }
         else {
             CourseIndex = Shared.CourseIndex;
-            MemToFile("temp.tja", FileData);
-            LoadData.Load("temp.tja");
+            MemToFile(GetExecutablePath() / "temp.tja", FileData);
+            LoadData.Load(GetExecutablePath() / "temp.tja");
         }
 
         TextfileReader text(LoadData.ChartPath);
         std::vector<std::string> strvec(text.begin(), text.end());
         std::vector<std::string_view> lines = FileEncode(strvec);
 
-        if (fs::exists("temp.tja")) {
-            fs::remove("temp.tja");
+        if (fs::exists(GetExecutablePath() / "temp.tja")) {
+            fs::remove(GetExecutablePath() / "temp.tja");
         }
 
         bool dan_init = true;
@@ -3746,9 +3751,19 @@ RollType = '\0'
     Timer MiniTaikoFlash[16];
     double MiniTaikoFlashTime = 160;
 
-    double ChartNowTime(uint64_t elapsed) const {
-        return (Chart.NowTime.GetElapsed().Second() * elapsed) * Chart.SongSpeed;
+    double ChartNowTime(uint64_t elapsed, bool FrameCounter = false, double fastdrawrate = 0, double extendrate = 1) const {
+        double ret = 0;
+        if (FrameCounter) {
+            double hz = GetRefreshRate() * extendrate;
+            double frame = ((long long)((Chart.NowTime.GetElapsed().Second() * GetRefreshRate()) * hz) + fastdrawrate) / hz;
+            ret = (1000.0 * frame) / (double)GetRefreshRate();
+        }
+        else {
+            ret = Chart.NowTime.GetElapsed().Second() * elapsed;
+        }
+        return ret * Chart.SongSpeed;
     };
+
 
     struct _HitNote {
     private:
@@ -3829,7 +3844,7 @@ RollType = '\0'
     }
     void PlayingDraw() {
 
-        const double NowTime = ChartNowTime(1000) + Training.Offset;
+        const double NowTime = ChartNowTime(1000, Config.FrameCountTimer, Config.FastDrawRate, Config.FrameExtendRate) + Training.Offset;
 
         Skin.Base->Playing.Image.BackGround.Draw({});
 
@@ -4565,9 +4580,11 @@ RollType = '\0'
         }
 
 #ifdef __ANDROID__
-        Skin.Base->Playing.Image.Back.Draw({});
-        if (Config.TrainingMode && !Chart.IsDanMode() && !IsMulti) {
-            Skin.Base->Playing.Image.Pause.Draw({});
+        if (!IsMulti) {
+            Skin.Base->Playing.Image.Back.Draw({});
+            if (Config.TrainingMode && !Chart.IsDanMode()) {
+                Skin.Base->Playing.Image.Pause.Draw({});
+            }
         }
 #endif
         if (Config.ViewDebug) {
@@ -5417,7 +5434,9 @@ RollType = '\0'
         }
 
 #ifdef __ANDROID__
-        Skin.Base->Result.Image.Back.Draw({});
+        if (!IsMulti || IsHost()) {
+            Skin.Base->Result.Image.Back.Draw({}); 
+        }
 #endif
     }
     void ResultProc() {
@@ -5513,6 +5532,8 @@ RollType = '\0'
 #endif
                     "FastInput",
                     "FastDrawRate",
+                    "FrameCountTimer",
+                    "FrameExtendRate",
 #ifndef __ANDROID__
                     "SoundDeviceType",
 #endif
@@ -5702,6 +5723,8 @@ RollType = '\0'
                 ConfigDataDraw(i, j, std::to_string(Config.KeyHoldProcInterval));
                 ConfigDataDraw(i, j, Config.FastInput ? "true" : "false");
                 ConfigDataDraw(i, j, std::to_string(Config.FastDrawRate));
+                ConfigDataDraw(i, j, Config.FrameCountTimer ? "true" : "false");
+                ConfigDataDraw(i, j, std::to_string(Config.FrameExtendRate));
                 ConfigDataDraw(i, j, std::to_string(Config.SoundDeviceType));
                 ConfigDataDraw(i, j, Config.Exclusive ? "true" : "false");
                 ConfigDataDraw(i, j, std::to_string(Config.SampleRate));
@@ -5895,6 +5918,8 @@ RollType = '\0'
                     ConfigDataInput(i, Config.KeyHoldProcInterval, InputData.Double);
                     ConfigDataInput(i, Config.FastInput, InputData.Bool);
                     ConfigDataInput(i, Config.FastDrawRate, InputData.Double);
+                    ConfigDataInput(i, Config.FrameCountTimer, InputData.Bool);
+                    ConfigDataInput(i, Config.FrameExtendRate, InputData.Double);
                     ConfigDataInput(i, Config.SoundDeviceType, InputData.Int);
                     ConfigDataInput(i, Config.Exclusive, InputData.Bool);
                     ConfigDataInput(i, Config.SampleRate, InputData.Int);
