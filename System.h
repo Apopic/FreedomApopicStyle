@@ -1450,8 +1450,8 @@ public:
         double DemoStart = 0.0;
         float SongVolume = 100.0;
         float SeVolume = 100.0;
-        fs::path SongPath = u8"";
-        fs::path MoviePath = u8"";
+        fs::path SongPath = "";
+        fs::path MoviePath = "";
         std::vector<fs::path> DanSongPath;
         fs::path ChartPath = "";
         std::string SongLink = "";
@@ -1530,11 +1530,11 @@ public:
                         });
                     Exsubstr(lines[i], "WAVE:", [&](std::string_view data) {
                         if (data.empty()) { return; }
-                        SongPath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
+                        SongPath = path.parent_path() / data;
                         });
                     Exsubstr(lines[i], "BGMOVIE:", [&](std::string_view data) {
                         if (data.empty()) { return; }
-                        MoviePath = path.parent_path().u8string() + u8"\\" + std::u8string(data.begin(), data.end());
+                        MoviePath = path.parent_path() / data;
                         });
                     Exsubstr(lines[i], "SONGLINK:", [&](std::string_view data) {
                         if (data.empty()) { return; }
@@ -1645,7 +1645,7 @@ public:
                             DanSubtitles.push_back(std::string(sp[1]));
                             DanSubtitleStrlens.push_back(GetStrlen(sp[1], Skin.Base->Playing.Font.SubTitle.Handle));
                             DanIndexs.push_back(i);
-                            DanSongPaths.push_back(path.parent_path().u8string() + u8"\\" + std::u8string(sp[3].begin(), sp[3].end()));
+                            DanSongPaths.push_back(path.parent_path() / std::string(sp[3]));
                             });
                         Exsubstr(lines[i], "#END", [&](std::string_view data) {
                             DanTitle = DanTitles;
@@ -2288,7 +2288,7 @@ public:
                 }
 
                 Skin.Base->SongSelect.Font.Course.Draw({ Skin.Base->SongSelect.Config.CoursePos.X,Skin.Base->SongSelect.Config.CoursePos.Y + y }, GetColor(255, 255, 255), GetColor(0, 0, 0), magic_enum::enum_name((CourseType)i).data());
-                Skin.Base->SongSelect.Font.Level.Draw({ Skin.Base->SongSelect.Config.LevelPos.X,Skin.Base->SongSelect.Config.LevelPos.Y + y }, GetColor(255, 255, 255), GetColor(0, 0, 0), ToStr<std::u8string>(u8"★×") + std::to_string(BoxDatas[BoxDataIndex]->GetChart()->Courses[i].Level));
+                Skin.Base->SongSelect.Font.Level.Draw({ Skin.Base->SongSelect.Config.LevelPos.X,Skin.Base->SongSelect.Config.LevelPos.Y + y }, GetColor(255, 255, 255), GetColor(0, 0, 0), "★×" + std::to_string(BoxDatas[BoxDataIndex]->GetChart()->Courses[i].Level));
 
                 ScoreData Score = ScoreDataLoad(BoxDatas[BoxDataIndex]->GetChart()->ChartPath.string(), i);
 
@@ -2368,7 +2368,7 @@ public:
             }
             else if (DemoSongPlayBlank.GetElapsed().Second() > DemoSongPlayBlankTime() && !DemoSong.IsPlay()) {
                 SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
-                DemoSong.Load(ToStr(BoxDatas[BoxDataIndex]->GetChart()->SongPath.u8string()));
+                DemoSong.Load(BoxDatas[BoxDataIndex]->GetChart()->SongPath.string());
                 SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
                 DemoSong.SetCurrent(BoxDatas[BoxDataIndex]->GetChart()->DemoStart * 1000.0);
                 DemoSong.SetVolume(BoxDatas[BoxDataIndex]->GetChart()->SongVolume * (Config.SongVolume / 100));
@@ -2835,7 +2835,7 @@ public:
                 Skin.Base->MultiRoom.Config.LevelPos,
                 GetColor(255, 255, 255),
                 GetColor(0, 0, 0),
-                ToStr<std::u8string>(u8"★×") + std::to_string(Chart.OriginalData.Courses[Shared.CourseIndex].Level)
+                "★×" + std::to_string(Chart.OriginalData.Courses[Shared.CourseIndex].Level)
             );
         }
 
@@ -3020,8 +3020,7 @@ public:
 
 #ifndef __ANDROID__
         if (!Chart.OriginalData.MoviePath.empty()) {
-            Chart.Movie.Load(ToStr(Chart.OriginalData.MoviePath.u8string()), SongSpeed,
-                Chart.OriginalData.MovieOffset < 0 ? Chart.OriginalData.MovieOffset * -1000 : -Chart.SongBlankTime);
+            Chart.Movie.Load(Chart.OriginalData.MoviePath.string(), SongSpeed, Chart.OriginalData.MovieOffset < 0 ? Chart.OriginalData.MovieOffset * -1000 : -Chart.SongBlankTime);
             Chart.Movie.Resize(Skin.Info.Resolution.Y);
         }
 #endif
@@ -3480,6 +3479,8 @@ RollType = '\0'
         }
         if (NowSongCount == 0) {
             Chart.AllNoteCount = NoteCount;
+            ++NowSongCount;
+            return;
         }
         Chart.AllBarlineCount = BarlineCount;
         Chart.AddScore = LoadData.Courses[CourseIndex].AddScore;
@@ -3496,14 +3497,14 @@ RollType = '\0'
         SetCreateSoundDataType(DX_SOUNDDATATYPE_FILE);
         if (!Chart.IsDanMode()) {
             if (!IsMulti || IsHost()) {
-                Chart.SongData.Load(ToStr(LoadData.SongPath.u8string()));
+                Chart.SongData.Load(LoadData.SongPath.string());
             }
             else {
                 Chart.SongData.Load(WaveData.data(), WaveData.size());
             }
         }
         else {
-            Chart.SongData.Load(ToStr(LoadData.DanSongPath[NowSongCount].u8string()));
+            Chart.SongData.Load(LoadData.DanSongPath[NowSongCount].string());
         }
         SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
 
@@ -4587,8 +4588,9 @@ RollType = '\0'
             }
         }
 #endif
+
         if (Config.ViewDebug) {
-            DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.u8string().c_str());
+            DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.string().c_str());
         }
     }
     void HitAction(HitType type) {
@@ -4599,6 +4601,7 @@ RollType = '\0'
         }
     }
     void BranchChange(BranchData branchdata, IfBranchType ifbranchtype, double judge) {
+
         if (branchdata.Type == ifbranchtype) {
             if (branchdata.ExpertBranch > judge) {
                 Chart.NowBranchAnimation =
@@ -4872,6 +4875,7 @@ RollType = '\0'
 
             static auto BackInputProc = [&] {
                 Training.Init();
+				Chart.Init(true);
                 NowScene = PrevScene;
                 };
             static auto ReLoadInputProc = [&] {
