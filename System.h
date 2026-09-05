@@ -3533,9 +3533,12 @@ RollType = '\0'
 
         if (Chart.IsDanMode()) {
             Chart.DanBalloonIndex += BalloonIndex;
+            if (NowSongCount == 0) {
+                Chart.AllNoteCount = AllNoteCounter(lines);
+            }
         }
-        if (NowSongCount == 0) {
-            Chart.AllNoteCount = AllNoteCounter(lines);
+        else {
+			Chart.AllNoteCount = NoteCount;
         }
         Chart.AllBarlineCount = BarlineCount;
         Chart.AddScore = LoadData.Courses[CourseIndex].AddScore;
