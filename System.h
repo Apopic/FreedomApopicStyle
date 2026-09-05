@@ -3030,6 +3030,63 @@ public:
         Chart.SongData.SetFrequency(freq);
         Chart.SongSpeed = (double)freq / Chart.SongData.Frequency;
     }
+
+	uint64_t AllNoteCounter(std::vector<std::string_view>& lines) {
+		
+        bool StartFlag = false;
+        bool BarlineLoading = false;
+ 
+        size_t BarlineNoteCount = 0;
+        uint64_t count = 0;
+
+        for (size_t i = 0; i < lines.size(); ++i) {
+
+            Exsubstr(lines[i], "#START", [&](std::string_view data) {
+                StartFlag = true;
+                });
+            Exsubstr(lines[i], "#END", [&](std::string_view data) {
+                StartFlag = false;
+                });
+
+            if (lines[i].find("#") != std::string_view::npos) { continue; }
+            if (!StartFlag) { continue; }
+
+            if (!BarlineLoading) {
+                BarlineLoading = true;
+                for (size_t j = i; j < lines.size(); ++j) {
+                    if (lines[j].find("#") != std::string_view::npos) { continue; }
+                    for (size_t k = 0, strsize = lines[j].size(); k < strsize; ++k) {
+                        if (lines[j][k] == ',') {
+                            goto BARLINEREADEND;
+                        }
+                        else if (lines[j][k] >= '0' && lines[j][k] <= '9') {
+                            ++BarlineNoteCount;
+                        }
+                    }
+                }
+            BARLINEREADEND:;
+            }
+
+            for (size_t j = 0, strsize = lines[i].size(); j < strsize; ++j) {
+                bool ChartFlag = (lines[i][j] >= '0' && lines[i][j] <= '9');
+                bool EndFlag = lines[i][j] == ',';
+                bool EmptyFlag = BarlineNoteCount == 0;
+                if (ChartFlag || EndFlag || EmptyFlag) {
+                    if (EndFlag && !EmptyFlag) {
+                        BarlineLoading = false;
+                        BarlineNoteCount = 0;
+                        break;
+                    }
+                    if (lines[i][j] >= '1' && lines[i][j] <= '4') {
+                        ++count;
+                    }
+                }
+            }
+		}
+
+		return count;
+	}
+
     void LoadingDraw() {
         DrawFormatString(0, 8, GetColor(255, 255, 255), "ChartLoading...");
     }
@@ -3478,9 +3535,7 @@ RollType = '\0'
             Chart.DanBalloonIndex += BalloonIndex;
         }
         if (NowSongCount == 0) {
-            Chart.AllNoteCount = NoteCount;
-            ++NowSongCount;
-            return;
+            Chart.AllNoteCount = AllNoteCounter(lines);
         }
         Chart.AllBarlineCount = BarlineCount;
         Chart.AddScore = LoadData.Courses[CourseIndex].AddScore;
@@ -4590,7 +4645,7 @@ RollType = '\0'
 #endif
 
         if (Config.ViewDebug) {
-            DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.string().c_str());
+            DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.relative_path().string().c_str());
         }
     }
     void HitAction(HitType type) {
@@ -5262,6 +5317,7 @@ RollType = '\0'
         std::vector<uint8_t> v_bson = json::to_bson(data);
         std::ofstream ofs(filepath, std::ios::binary);
         ofs.write(reinterpret_cast<const char*>(v_bson.data()), v_bson.size());
+
     }
     ScoreData ScoreDataLoad(const std::string& chartpath, int courseindex) {
 
@@ -5282,6 +5338,7 @@ RollType = '\0'
             Score.Score = data[chartpath][CourseName]["Score"];
             Score.Crown = data[chartpath][CourseName]["Crown"];
         }
+
         return Score;
     }
     void ResultEnd() {
@@ -5310,7 +5367,6 @@ RollType = '\0'
 
         static auto ScoreDraw = [&](uint64_t num) {
             int digit = std::digit(num);
-
             float offset = 0;
             int i = 0;
             do {
@@ -5651,9 +5707,11 @@ RollType = '\0'
         if (i == j) {
             for (size_t c = 0; c < data.size(); c++) {
                 Skin.Base->ConfigMenu.Font.String.Draw({
-                                                               Skin.Base->ConfigMenu.Config.ValPos.X + (100 * c),
-                                                               Skin.Base->ConfigMenu.Config.ValPos.Y + GetConfigPos(i).Y }, (i == ConfigSelector) && (c == ConfigKeySelector) ? GetColor(255, 255, 0) : GetColor(255, 255, 255), GetColor(0, 0, 0), data[c]
-                                                               );
+                Skin.Base->ConfigMenu.Config.ValPos.X + (100 * c),
+                Skin.Base->ConfigMenu.Config.ValPos.Y + GetConfigPos(i).Y }, 
+                (i == ConfigSelector) && (c == ConfigKeySelector) ? GetColor(255, 255, 0) : GetColor(255, 255, 255), GetColor(0, 0, 0), 
+                data[c]
+                );
             }
         }
         j++;
