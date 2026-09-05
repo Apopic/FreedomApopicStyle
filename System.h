@@ -4645,7 +4645,7 @@ RollType = '\0'
 #endif
 
         if (Config.ViewDebug) {
-            DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf\nPath:%s", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed, Chart.OriginalData.ChartPath.relative_path().string().c_str());
+            DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed);
         }
     }
     void HitAction(HitType type) {
