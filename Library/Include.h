@@ -1,0 +1,17 @@
+﻿#pragma once
+#define NOMINMAX
+#include "Socket.h"
+#include "Net.hpp"
+#include "DxLib.h"
+#include "AddStruct.hpp"
+#include "Easing.hpp"
+#include "ExString.hpp"
+#include "ExMath.hpp"
+#include "Input.hpp"
+#include "DiscordRpc.hpp"
+#include "TjaDocument.hpp"
+#include "SoundDevice.hpp"
+#include "cppunzip.hpp"
+#include "libarrier/timer.hpp"
+#include "libarrier/textfile_reader.hpp"
+#include "magic_enum/magic_enum.hpp"

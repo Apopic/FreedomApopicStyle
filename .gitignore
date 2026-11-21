@@ -1,0 +1,22 @@
+# Visual Studio
+.vs/
+*.vcxproj.user
+*.aps
+
+# ビルド出力 / 中間ファイル
+x64/
+Debug/
+Release/
+FreedomA.*/
+*.obj
+*.pdb
+*.ilk
+*.ipdb
+*.iobj
+
+# 実行時に生成されるファイル
+Log.txt
+temp.tja
+
+# ビルドのログ
+build.log

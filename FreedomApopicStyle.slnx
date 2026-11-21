@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="FreedomApopicStyle.vcxproj" Id="09c5fe00-d314-4edf-b66f-4040fd4c6af7" />
+  <Project Path="MultiServer/MultiServer.vcxproj" Id="5b6d2f4e-8c1a-4e7b-9f3d-2a6c8e1b4d70" />
+</Solution>
