@@ -1,16 +1,6 @@
 # FreedomApopicStyle
 自己流太鼓シミュレーター
 
-## ビルド
-
-Windows 版は Visual Studio 18 の C++ デスクトップ開発環境と Windows SDK を使用します。外部依存の場所は `Build/WindowsDependencies.props` に示しています。既定と異なる場所に置く場合は、同名の環境変数か MSBuild の `/p:FasDxLib=…` などで指定してください。
-
-- 共通の外部依存は Socket.h、nlohmann/json、magic_enum、libarrier、cppunzip、fast_float です。
-- Windows 版には DxLib (VC x64)、zlib のヘッダー、ICU の x64 ライブラリも必要です。`FreedomApopicStyle.slnx` を x64 でビルドすると、ゲーム本体と MultiServer が `x64/<構成>/` に出力されます。
-- Android 版は Android Studio で `Android/` を開き、SDK 37、NDK 28.2.13676358、CMake 3.22.1 を使用します。ABI 別のディレクトリを含む DxLib の場所を `FasAndroidDxLib` で指定できます。共通依存も `Android/app/src/main/cpp/CMakeLists.txt` にある同名の環境変数で指定できます。場所を変更した後は CMake のキャッシュを再生成してください。
-- Default スキンの元データは `Android/app/src/main/assets/Default/` にあります。Windows 版のビルドは、出力先に Default スキンがない場合にこれをコピーします。任意の M PLUS 1p Medium を使う場合は `Skins/Default/Font/MPLUS1p-Medium.ttf` に配置します。Android ビルドへ含める場合は元データの `Font/` に配置します。
-- 基本テストは `Tests/RunCoreTests.cmd`、実行時の確認は `Tests/RunSplitLifecycleProbe.ps1` を使います。
-
 ## オンラインプレイ
 
 ### サーバー (MultiServer)
@@ -73,14 +63,6 @@ Discord のプロフィールに、メニュー・選曲中・演奏中の曲と
 - Discord クライアントのローカル接続 (公式 SDK と同じプロトコル) を使うため、SDK のファイルは不要です
 - 参加ボタンでゲームを起動できるよう、起動時に `HKEY_CURRENT_USER\Software\Classes\discord-<ID>` へ実行ファイルの場所を登録します
 - インターネット越しのフレンドが参加するには、サーバーに外部の接続先が必要です (上記の「インターネット越しに遊ぶ」)
-
-### 配布する人の準備 (1 回だけ)
-
-アプリケーション ID はゲームに組み込みます。`Library/DiscordRpc.hpp` の `ApplicationId` が空の間は Discord 連携は動きません。
-
-1. https://discord.com/developers/applications で「New Application」を作る (名前がステータスの「プレイ中」に表示されます)
-2. 「General Information」の **Application ID** を `DiscordRpc::ApplicationId` に書いてビルドする
-3. (任意) 「Rich Presence」→「Art Assets」に `logo` という名前で画像 (512×512 以上) を登録すると、ステータスにアイコンが出ます
 
 ## 選曲画面
 

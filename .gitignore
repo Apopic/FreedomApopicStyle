@@ -7,9 +7,7 @@ x64/
 Debug/
 Release/
 /FreedomA.*/
-/Tests/build/
-/Tests/lifecycle-bin/
-/Tests/lifecycle-obj/
+/Tests/
 *.apk
 *.aab
 *.obj
