@@ -39,7 +39,7 @@
 
 namespace fasnet {
 
-    inline constexpr uint32_t ProtocolVersion = 5;
+    inline constexpr uint32_t ProtocolVersion = 6;
     inline constexpr uint32_t HandshakeMagic = 0x33484146;          // "FAH3"
     inline constexpr uint32_t FrameMagic = 0x33534146;              // "FAS3"
     inline constexpr uint32_t MaxFrameSize = 1024 * 1024;           // 暗号化フレーム 1 つの上限
@@ -551,10 +551,11 @@ namespace fasnet {
         int8_t Lane = -1;
         int8_t Judge = -1;          // JudgeType (None=-1)
         char NoteType = '\0';
+        uint32_t RollCount = 0;     // 今の連打の打数 / 風船の残り打数 (0 = 連打中でない)
         ScoreState Score;
 
         void Write(Writer& w) const {
-            w.Put(PlayerId).Put(Lane).Put(Judge).Put(NoteType);
+            w.Put(PlayerId).Put(Lane).Put(Judge).Put(NoteType).Put(RollCount);
             Score.Write(w);
         }
         void Read(Reader& r) {
@@ -562,6 +563,7 @@ namespace fasnet {
             Lane = r.Get<int8_t>();
             Judge = r.Get<int8_t>();
             NoteType = r.Get<char>();
+            RollCount = r.Get<uint32_t>();
             Score.Read(r);
             if (Lane < -1 || Lane > 5 || Judge < -1 || Judge > 3) { r.Fail(); }
         }
@@ -705,8 +707,18 @@ namespace fasnet {
             m_Alive = true;
             m_Secured = false;
             m_Started = true;
-            m_RecvThread = std::thread([this] { RecvLoop(); });
-            m_SendThread = std::thread([this] { SendLoop(); });
+            auto failed = [this] {
+                m_Alive = false;
+                m_Sock.Shutdown();
+                m_SendCv.notify_all();
+            };
+            try {
+                m_RecvThread = std::thread([this, failed] { try { RecvLoop(); } catch (...) { failed(); } });
+                m_SendThread = std::thread([this, failed] { try { SendLoop(); } catch (...) { failed(); } });
+            } catch (...) {
+                Close(); // Release a receiver even if creating the sender failed.
+                throw;
+            }
         }
 
         bool IsStarted() const { return m_Started; }

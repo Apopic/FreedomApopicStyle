@@ -9,6 +9,21 @@
 #include <thread>
 
 #ifndef __ANDROID__
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib")
+
+inline bool ApplyDarkWindowMode(HWND window) {
+    const BOOL dark = TRUE;
+    HRESULT result = DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+    if (FAILED(result)) { result = DwmSetWindowAttribute(window, 19, &dark, sizeof(dark)); }
+    return SUCCEEDED(result);
+}
+inline LRESULT CaptionHitTest(HWND window, POINT point) {
+    LRESULT hit = 0;
+    const LPARAM position = MAKELPARAM((short)point.x, (short)point.y);
+    if (DwmDefWindowProc(window, WM_NCHITTEST, 0, position, &hit)) { return hit; }
+    return DefWindowProc(window, WM_NCHITTEST, 0, position);
+}
 
 inline byte __gotkeyboardinput[256]{};
 
@@ -35,10 +50,8 @@ inline bool IsPrimaryButtonDown() {
     return (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
 }
 // 離した位置がまだ同じボタンの上なら、そのボタンの操作を行う (既定の処理と同じ動き)
-inline void FinishCaptionButton(HWND hWnd, WPARAM button) {
-    POINT p{};
-    if (!GetCursorPos(&p)) { return; }
-    const LRESULT hit = SendMessage(hWnd, WM_NCHITTEST, 0, MAKELPARAM((short)p.x, (short)p.y));
+inline void FinishCaptionButton(HWND hWnd, WPARAM button, POINT released) {
+    const LRESULT hit = CaptionHitTest(hWnd, released);
     if ((WPARAM)hit != button) { return; }
     switch (button) {
     case HTCLOSE: PostMessage(hWnd, WM_SYSCOMMAND, SC_CLOSE, 0); break;
@@ -48,40 +61,50 @@ inline void FinishCaptionButton(HWND hWnd, WPARAM button) {
     }
 }
 
-// 押している最中のタイトルバーのボタンを離した: どの通知 (WM_LBUTTONUP / WM_NCLBUTTONUP / 離した後の WM_MOUSEMOVE /
-// キャプチャの解除) で気付いても、離した位置が同じボタンの上ならその操作を行う
-// (以前は WM_MOUSEMOVE や キャプチャの解除で先に気付くと、操作をせずに取り消していたため、押しても反応しないことがあった)
-inline void ReleaseCaptionButton(HWND hWnd) {
+// ボタンを離した通知の座標で確定する。移動やキャプチャの解除はクリックとみなさない。
+inline void ReleaseCaptionButton(HWND hWnd, POINT released) {
     const WPARAM button = __windowdrag.Button;
     if (button == 0) { return; }
     __windowdrag.Button = 0;
     if (GetCapture() == hWnd) { ReleaseCapture(); }
-    FinishCaptionButton(hWnd, button);
+    FinishCaptionButton(hWnd, button, released);
 }
 
 inline LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    // 前の通知で設定した「処理済み」を次の通知へ持ち越さない。
+    SetUseHookWinProcReturnValue(FALSE);
     auto Handled = [] {
         SetUseHookWinProcReturnValue(TRUE);     // DxLib・Windows の既定の処理 (モーダルループ) を行わせない
         return (LRESULT)0;
     };
     switch (msg) {
+    case WM_MOUSEACTIVATE:
+        if (LOWORD(lParam) == HTCLOSE || LOWORD(lParam) == HTMINBUTTON || LOWORD(lParam) == HTMAXBUTTON || LOWORD(lParam) == HTCAPTION) {
+            SetUseHookWinProcReturnValue(TRUE);
+            return MA_ACTIVATE;    // 非アクティブなウィンドウの最初の押下を捨てない。
+        }
+        break;
     case WM_NCHITTEST: {
         // 枠のサイズ変更 (モーダルループに入る) を無効にする: 枠の上は普通の枠として扱う
-        const LRESULT hit = DefWindowProc(hWnd, msg, wParam, lParam);
+        const POINT point{ (short)LOWORD(lParam), (short)HIWORD(lParam) };
+        const LRESULT hit = CaptionHitTest(hWnd, point);
         if (hit >= HTLEFT && hit <= HTBOTTOMRIGHT) {
             SetUseHookWinProcReturnValue(TRUE);
             return HTBORDER;
         }
-        break;
+        SetUseHookWinProcReturnValue(TRUE);
+        return hit;
     }
+    case WM_NCLBUTTONDBLCLK:    // 連続クリックの2回目もボタンの押下として受け取る。
     case WM_NCLBUTTONDOWN:
-        if (wParam == HTCAPTION && !IsZoomed(hWnd) && GetCursorPos(&__windowdrag.Start) && GetWindowRect(hWnd, &__windowdrag.Rect)) {
+        if (msg == WM_NCLBUTTONDOWN && wParam == HTCAPTION && !IsZoomed(hWnd) && GetCursorPos(&__windowdrag.Start) && GetWindowRect(hWnd, &__windowdrag.Rect)) {
             __windowdrag.Active = true;
             if (GetForegroundWindow() != hWnd) { SetForegroundWindow(hWnd); }
             SetCapture(hWnd);
             return Handled();
         }
         if (wParam == HTCLOSE || wParam == HTMINBUTTON || wParam == HTMAXBUTTON) {
+            if (GetForegroundWindow() != hWnd) { SetForegroundWindow(hWnd); }
             __windowdrag.Button = wParam;           // 離した時に処理する
             SetCapture(hWnd);
             return Handled();
@@ -122,20 +145,21 @@ inline LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
             return Handled();
         }
         if (__windowdrag.Button != 0) {
-            if (!IsPrimaryButtonDown()) { ReleaseCaptionButton(hWnd); }
             return Handled();
         }
         break;
     case WM_NCMOUSEMOVE:
-        if (__windowdrag.Button != 0 && !IsPrimaryButtonDown()) {
-            ReleaseCaptionButton(hWnd);
-            return Handled();
-        }
+    case WM_NCMOUSELEAVE: {
+        LRESULT result = 0;
+        DwmDefWindowProc(hWnd, msg, wParam, lParam, &result);
         break;
+    }
     case WM_NCLBUTTONUP:
     case WM_LBUTTONUP:
         if (__windowdrag.Button != 0) {
-            ReleaseCaptionButton(hWnd);
+            POINT released{ (short)LOWORD(lParam), (short)HIWORD(lParam) };
+            if (msg == WM_LBUTTONUP) { ClientToScreen(hWnd, &released); }
+            ReleaseCaptionButton(hWnd, released);
             return Handled();
         }
         if (__windowdrag.Active) {
@@ -146,10 +170,11 @@ inline LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_CAPTURECHANGED:
         if ((HWND)lParam != hWnd) {
             __windowdrag.Active = false;
-            // キャプチャを他に取られても、もう離していればボタンの操作を行う (押したままなら取り消す)
-            if (__windowdrag.Button != 0 && !IsPrimaryButtonDown()) { ReleaseCaptionButton(hWnd); }
             __windowdrag.Button = 0;
         }
+        break;
+    case WM_CANCELMODE:
+        EndWindowDrag(hWnd);
         break;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
@@ -498,5 +523,3 @@ public:
 };
 
 #endif
-
-#define Input Input::GetInstance()

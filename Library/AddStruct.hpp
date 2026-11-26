@@ -4,8 +4,11 @@
 #include <chrono>
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 #include "DxLib.h"
 #include "nlohmann/json.hpp"
+#include "Mp3Timing.hpp"
+#include "NumericCast.hpp"
 
 using json = nlohmann::json;
 
@@ -66,7 +69,39 @@ struct ScopedSyncLoad {
     ScopedSyncLoad& operator=(const ScopedSyncLoad&) = delete;
 };
 
+inline int LoadAlignedSoftSound(const char* path) {
+    ScopedSyncLoad sync;
+    const auto info = mp3timing::Read(path);
+    const int original = LoadSoftSound(path);
+    if (original == -1) return -1;
+    int ch = 0, bits = 0, rate = 0, floating = 0;
+    GetSoftSoundFormat(original, &ch, &bits, &rate, &floating);
+    const auto count = GetSoftSoundSampleNum(original);
+    const int head = info.Head(count, rate);
+    if (!head || ch <= 0 || bits % 8 || !GetSoftSoundDataImage(original)) return original;
+    const auto frames = info.Samples - info.Delay - info.Padding;
+    if (frames <= 0 || head + frames > count) return original;
+    const int trimmed = MakeSoftSoundCustom(ch, bits, rate, frames, floating);
+    if (trimmed == -1) return original;
+    void* destination = GetSoftSoundDataImage(trimmed);
+    if (!destination) { DeleteSoftSound(trimmed); return original; }
+    const size_t stride = (size_t)ch * (bits / 8);
+    std::memcpy(destination, static_cast<const uint8_t*>(GetSoftSoundDataImage(original)) + head * stride, (size_t)frames * stride);
+    DeleteSoftSound(original);
+    return trimmed;
+}
+
+struct ScopedSoftSound {
+    int Handle;
+    explicit ScopedSoftSound(int handle) noexcept : Handle(handle) {}
+    ~ScopedSoftSound() { if(Handle!=-1)DeleteSoftSound(Handle); }
+    ScopedSoftSound(const ScopedSoftSound&) = delete;
+    ScopedSoftSound& operator=(const ScopedSoftSound&) = delete;
+};
+
 struct GraphData {
+
+    std::string SourcePath;
 
     Pos2D<float> Pos;
     Size2D<float> Size;
@@ -86,17 +121,20 @@ struct GraphData {
         std::string FilePath = "";
 
         JSONPARSE(FilePath);
+        const bool nofile = FilePath.empty();
 
         FilePath = (dirpath + FilePath);
 
         int _w = 0, _h = 0;
-        GetImageSize_File(FilePath.c_str(), &_w, &_h);
+        if (!nofile) { GetImageSize_File(FilePath.c_str(), &_w, &_h); }
         Size = { (float)_w, (float)_h };
 
         JSONPARSE(Size);
         JSONPARSE(Pos);
         JSONPARSE(Div);
 
+        // スキンに無い画像 (FilePath が空) は読まない。フォルダを読むと「読めた・大きさ 0」になり、代わりの画像が使われなくなる
+        if (nofile) { this->Delete(); return; }
         LoadDiv(FilePath, _w, _h);
     }
     void Delete() {
@@ -104,6 +142,7 @@ struct GraphData {
             DeleteGraph(handle);
         }
         Handles.clear();
+        SourcePath.clear();
     }
     void Draw(Pos2D<float> pos, int index = 0) {
         if (index < 0 || Handles.size() <= static_cast<size_t>(index)) {
@@ -125,10 +164,10 @@ struct GraphData {
         DrawRectGraphF(
             Pos.X + pos.X - (Size.Width * 0.5f),
             Pos.Y + pos.Y - (Size.Height * 0.5f),
-            originpos.X,
-            originpos.Y,
-            size.Width,
-            size.Height,
+            numeric::Cast<int>(originpos.X),
+            numeric::Cast<int>(originpos.Y),
+            numeric::Cast<int>(size.Width),
+            numeric::Cast<int>(size.Height),
             Handles[index],
             TRUE
         );
@@ -145,19 +184,27 @@ private:
         if (Div.X <= 0 || Div.Y <= 0) {
             Div = { 1,1 };
         }
+        if (Div.X > 4096 || Div.Y > 4096 || (int64_t)Div.X * Div.Y > 16384) {
+            throw std::invalid_argument("画像の分割数が大きすぎます");
+        }
+        if (w <= 0 || h <= 0) return;
 
         const int num = Div.X * Div.Y;
+        std::string source = filepath;
         std::vector<int> handles(num, -1);
         if (LoadDivGraphF(filepath.c_str(), num, Div.X, Div.Y, (float)w / Div.X, (float)h / Div.Y, handles.data()) == -1) {
+            for (const int handle : handles) if (handle != -1) DeleteGraph(handle);
             return;
         }
         Handles = std::move(handles);
+        SourcePath = std::move(source);
     }
 };
 
 struct FontData {
 
     float Size = 0;
+    float WidthScale = 1;
     float Thick = 0;
     float Edge = 0;
     int Space = 0;
@@ -173,15 +220,16 @@ struct FontData {
         this->Delete();
 
 #ifndef __ANDROID__
-        MemHandle = AddFontFile(filepath.c_str());
+        MemHandle = filepath.empty() ? nullptr : AddFontFile(filepath.c_str());
 #endif
 
+        WidthScale = 1;
         Size = size;
         Thick = thick * 0.5f;
         Edge = edge;
         Space = space;
 
-        Handle = CreateFontToHandle(fontname.c_str(), Size, Thick, DX_FONTTYPE_ANTIALIASING_EDGE_16X16, DX_CHARSET_UTF8, Edge);
+        Handle = CreateFontToHandle(fontname.c_str(), numeric::Cast<int>(Size), numeric::Cast<int>(Thick), DX_FONTTYPE_ANTIALIASING_EDGE_16X16, DX_CHARSET_UTF8, numeric::Cast<int>(Edge));
         SetFontSpaceToHandle(Space, Handle);
     }
     void Load(const std::string& dirpath, const json& data) {
@@ -194,12 +242,11 @@ struct FontData {
 
         JSONPARSE(FilePath);
 
+        const bool nofile = FilePath.empty();
         FilePath = (dirpath + FilePath);
 
-#ifndef __ANDROID__
-        MemHandle = AddFontFile(FilePath.c_str());
-#endif
-
+        WidthScale = data.value("WidthScale",1.0f);
+        if(!std::isfinite(WidthScale)||WidthScale<=0)WidthScale=1;
         JSONPARSE(Size);
         JSONPARSE(Thick);
         Thick *= 0.5f;
@@ -209,7 +256,10 @@ struct FontData {
 
         JSONPARSE(FontName);
 
-        Handle = CreateFontToHandle(FontName.c_str(), Size, Thick, DX_FONTTYPE_ANTIALIASING_EDGE_16X16, DX_CHARSET_UTF8, Edge);
+#ifndef __ANDROID__
+        MemHandle = nofile ? nullptr : AddFontFile(FilePath.c_str());
+#endif
+        Handle = CreateFontToHandle(FontName.c_str(), numeric::Cast<int>(Size), numeric::Cast<int>(Thick), DX_FONTTYPE_ANTIALIASING_EDGE_16X16, DX_CHARSET_UTF8, numeric::Cast<int>(Edge));
         SetFontSpaceToHandle(Space, Handle);
     }
     void Delete() {
@@ -233,22 +283,23 @@ struct FontData {
         case Left:
             break;
         case Center:
-            offset = GetDrawStringWidthToHandle(str.c_str(), -1, Handle) * 0.5f;
+            offset = WidthScale * GetDrawStringWidthToHandle(str.c_str(), -1, Handle) * 0.5f;
             break;
         case Right:
-            offset = GetDrawStringWidthToHandle(str.c_str(), -1, Handle);
+            offset = WidthScale * GetDrawStringWidthToHandle(str.c_str(), -1, Handle);
             break;
         }
-        DrawStringFToHandle(
+        DrawExtendStringFToHandle(
             pos.X - offset,
             pos.Y - Size * 0.5f,
+            WidthScale, 1.0,
             str.c_str(),
             color,
             Handle,
             edgecolor
         );
     }
-    void Draw(Pos2D<float> pos, unsigned int color, unsigned int edgecolor, unsigned int strlen, const std::string& str) {
+    void Draw(Pos2D<float> pos, unsigned int color, unsigned int edgecolor, size_t strlen, const std::string& str) {
         if (Handle == -1) { return; }
         if (str.empty()) { return; }
         float offset = 0;
@@ -257,15 +308,16 @@ struct FontData {
         case Left:
             break;
         case Center:
-            offset = strlen * 0.5f;
+            offset = WidthScale * strlen * 0.5f;
             break;
         case Right:
-            offset = strlen;
+            offset = WidthScale * strlen;
             break;
         }
-        DrawStringFToHandle(
+        DrawExtendStringFToHandle(
             pos.X - offset,
             pos.Y - Size * 0.5f,
+            WidthScale, 1.0,
             str.c_str(),
             color,
             Handle,
@@ -284,14 +336,23 @@ struct SoundData {
     int BufferNum = 0;
     int Frequency = 0;
     int Volume = 0;
+    mp3timing::Info Timing;
+    double StartMilliseconds = 0;
+    void UpdateTiming() {
+        const int rate = GetFrequencySoundMem(Handle);
+        StartMilliseconds = rate > 0 ? Timing.Head(GetSoundTotalSample(Handle), rate) * 1000.0 / rate : 0;
+    }
     std::string FilePath;       // 読み込んだファイル (録画の音声を譜面から作る時に使う)
 
     void Load(const std::string& filepath, int buffernum = 1) {
         ScopedSyncLoad sync;
+        const auto timing = mp3timing::Read(filepath);
         this->Delete();
-        BufferNum = buffernum;
+        BufferNum = std::clamp(buffernum,1,64);
         FilePath = filepath;
         Handle = LoadSoundMem(filepath.c_str(), BufferNum);
+        Timing = timing;
+        UpdateTiming();
 
         Frequency = GetFrequencySoundMem(Handle);
         Volume = GetVolumeSoundMem(Handle);
@@ -304,23 +365,20 @@ struct SoundData {
         BufferNum = DefaultSEBufferNum;
         JSONPARSE(FilePath);
         JSONPARSE(BufferNum);
-        if (BufferNum < 1) { BufferNum = 1; }
+        BufferNum = std::clamp(BufferNum,1,64);
+        if (FilePath.empty()) { this->Delete(); return; }
 
         FilePath = (dirpath + FilePath);
 
-        ScopedSyncLoad sync;
-        this->Delete();
-        this->FilePath = FilePath;
-        Handle = LoadSoundMem(FilePath.c_str(), BufferNum);
-
-        Frequency = GetFrequencySoundMem(Handle);
-        Volume = GetVolumeSoundMem(Handle);
+        Load(FilePath, BufferNum);
     }
     void Load(const void* filedata, size_t filesize, int buffernum = 1) {
         ScopedSyncLoad sync;
         this->Delete();
         BufferNum = buffernum;
         Handle = LoadSoundMemByMemImage(filedata, filesize, BufferNum);
+        Timing = mp3timing::Parse(filedata, filesize);
+        UpdateTiming();
 
         Frequency = GetFrequencySoundMem(Handle);
         Volume = GetVolumeSoundMem(Handle);
@@ -332,6 +390,10 @@ struct SoundData {
         Handle = -1;
     }
     void Play(bool toppositionflag = true) const {
+        if (toppositionflag && StartMilliseconds > 0) {
+            SetCurrent(0);
+            toppositionflag = false;
+        }
         PlaySoundMem(Handle, DX_PLAYTYPE_BACK, toppositionflag);
     }
     void Stop() const {
@@ -339,14 +401,18 @@ struct SoundData {
     }
     // 非同期で読み込みを開始する (演奏を止めずに段位の次の曲を先読みするため)
     void LoadAsync(const std::string& filepath, int buffernum = 1) {
+        const auto timing = mp3timing::Read(filepath);
         this->Delete();
-        BufferNum = buffernum;
+        FilePath = filepath;
+        BufferNum = std::clamp(buffernum,1,64);
         const int prev = GetUseASyncLoadFlag();
         SetUseASyncLoadFlag(TRUE);
         Handle = LoadSoundMem(filepath.c_str(), BufferNum);
         SetUseASyncLoadFlag(prev);
         Frequency = 0;
         Volume = 0;
+        StartMilliseconds = 0;
+        Timing = timing;
     }
     // 非同期読み込みの完了を待ち、周波数などを取得する
     void FinishAsync() {
@@ -354,6 +420,7 @@ struct SoundData {
             return;
         }
         WaitHandleASyncLoad(Handle);
+        UpdateTiming();
         Frequency = GetFrequencySoundMem(Handle);
         Volume = GetVolumeSoundMem(Handle);
     }
@@ -367,7 +434,7 @@ struct SoundData {
         ChangeVolumeSoundMem(static_cast<int>((volume / 100.0) * 255.0), Handle);
     }
     void SetCurrent(double time) const {
-        SetSoundCurrentTime(time, Handle);
+        SetSoundCurrentTime(numeric::Cast<LONGLONG>(time + StartMilliseconds), Handle);
     }
 
     int Handle = -1;

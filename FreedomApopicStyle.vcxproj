@@ -42,6 +42,7 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
+  <Import Project="Build\WindowsDependencies.props" />
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>.\x64\Release\FreedomApopicStyle\</OutDir>
@@ -61,18 +62,18 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/execution-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>C:\DxLib_VC\プロジェクトに追加すべきファイル_VC用;C:\Socket_h-main\include;C:\magic_enum-v0.9.8\include;C:\vcpkg\packages\zlib_x64-windows\include;C:\libarrier-main\include;C:\cppunzip-main;C:\json\include;C:\fast_float</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(FasDxLib);$(FasSocketHeaders);$(FasMagicEnumHeaders);$(FasZlibHeaders);$(FasLibarrierHeaders);$(FasZipHeaders);$(FasJsonHeaders);$(FasFastFloatHeaders);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>C:\DxLib_VC\プロジェクトに追加すべきファイル_VC用;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>C:\ICU\lib64\icuuc.lib;C:\ICU\lib64\icudt.lib;C:\ICU\lib64\icuin.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(FasDxLib);$(FasIcuLibs);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>icuuc.lib;icudt.lib;icuin.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
-      <AdditionalManifestFiles>C:\manifest\ActiveCodePageUTF8.manifest</AdditionalManifestFiles>
+      <AdditionalManifestFiles>$(MSBuildProjectDirectory)\Build\ActiveCodePageUTF8.manifest</AdditionalManifestFiles>
     </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -85,31 +86,53 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/execution-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>C:\DxLib_VC\プロジェクトに追加すべきファイル_VC用;C:\Socket_h-main\include;C:\magic_enum-v0.9.8\include;C:\vcpkg\packages\zlib_x64-windows\include;C:\libarrier-main\include;C:\cppunzip-main;C:\json\include;C:\fast_float</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(FasDxLib);$(FasSocketHeaders);$(FasMagicEnumHeaders);$(FasZlibHeaders);$(FasLibarrierHeaders);$(FasZipHeaders);$(FasJsonHeaders);$(FasFastFloatHeaders);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>C:\DxLib_VC\プロジェクトに追加すべきファイル_VC用;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>C:\ICU\lib64\icuuc.lib;C:\ICU\lib64\icudt.lib;C:\ICU\lib64\icuin.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(FasDxLib);$(FasIcuLibs);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>icuuc.lib;icudt.lib;icuin.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
-      <AdditionalManifestFiles>C:\manifest\ActiveCodePageUTF8.manifest</AdditionalManifestFiles>
+      <AdditionalManifestFiles>$(MSBuildProjectDirectory)\Build\ActiveCodePageUTF8.manifest</AdditionalManifestFiles>
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Main.cpp" />
+    <ClCompile Include="SystemCommon.cpp" />
+    <ClCompile Include="System\CoreStart.cpp" />
+    <ClCompile Include="Scenes\Title.cpp" />
+    <ClCompile Include="Scenes\ModeSelect.cpp" />
+    <ClCompile Include="System\SongCatalog.cpp" />
+    <ClCompile Include="Scenes\SongSelect.cpp" />
+    <ClCompile Include="Scenes\DanSelect.cpp" />
+    <ClCompile Include="System\Online.cpp" />
+    <ClCompile Include="System\Discord.cpp" />
+    <ClCompile Include="Scenes\MultiRoom.cpp" />
+    <ClCompile Include="Scenes\Loading.cpp" />
+    <ClCompile Include="Scenes\Playing.cpp" />
+    <ClCompile Include="Scenes\Result.cpp" />
+    <ClCompile Include="System\HitStatistics.cpp" />
+    <ClCompile Include="System\ConfigRecommendations.cpp" />
+    <ClCompile Include="Scenes\ConfigMenu.cpp" />
+    <ClCompile Include="Scenes\Editor.cpp" />
+    <ClCompile Include="System\Recorder.cpp" />
+    <ClCompile Include="System\SongFilter.cpp" />
+    <ClCompile Include="System\CoreLoop.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Include.h" />
+    <ClInclude Include="GameDependencies.hpp" />
     <ClInclude Include="Library\AddStruct.hpp" />
     <ClInclude Include="Library\DiscordRpc.hpp" />
     <ClInclude Include="Library\Easing.hpp" />
     <ClInclude Include="Library\ExMath.hpp" />
+    <ClInclude Include="Library\NumericCast.hpp" />
+    <ClInclude Include="Library\EditorLayout.hpp" />
+    <ClInclude Include="Library\PreviewRoll.hpp" />
     <ClInclude Include="Library\ExString.hpp" />
-    <ClInclude Include="Library\Include.h" />
     <ClInclude Include="Library\Input.hpp" />
     <ClInclude Include="Library\Net.hpp" />
     <ClInclude Include="Library\NetCrypto.hpp" />
@@ -121,6 +144,27 @@
     <ClInclude Include="Library\TjaDocument.hpp" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="System.h" />
+    <ClInclude Include="SystemCommon.hpp" />
+    <ClInclude Include="Game.hpp" />
+    <ClInclude Include="System\CoreStart.hpp" />
+    <ClInclude Include="Scenes\Title.hpp" />
+    <ClInclude Include="Scenes\ModeSelect.hpp" />
+    <ClInclude Include="System\SongCatalog.hpp" />
+    <ClInclude Include="Scenes\SongSelect.hpp" />
+    <ClInclude Include="Scenes\DanSelect.hpp" />
+    <ClInclude Include="System\Online.hpp" />
+    <ClInclude Include="System\Discord.hpp" />
+    <ClInclude Include="Scenes\MultiRoom.hpp" />
+    <ClInclude Include="Scenes\Loading.hpp" />
+    <ClInclude Include="Scenes\Playing.hpp" />
+    <ClInclude Include="Scenes\Result.hpp" />
+    <ClInclude Include="System\HitStatistics.hpp" />
+    <ClInclude Include="System\ConfigRecommendations.hpp" />
+    <ClInclude Include="Scenes\ConfigMenu.hpp" />
+    <ClInclude Include="Scenes\Editor.hpp" />
+    <ClInclude Include="System\Recorder.hpp" />
+    <ClInclude Include="System\SongFilter.hpp" />
+    <ClInclude Include="System\CoreLoop.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="FreedomApopicStyle.rc" />
@@ -131,4 +175,10 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <Target Name="InstallDefaultSkin" AfterTargets="Build" Condition="!Exists('$(TargetDir)Skins/Default/skinconfig.json')">
+    <ItemGroup>
+      <DefaultSkinFile Include="$(MSBuildProjectDirectory)/Android/app/src/main/assets/Default/**/*" Exclude="$(MSBuildProjectDirectory)/Android/app/src/main/assets/Default/Font/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(DefaultSkinFile)" DestinationFiles="@(DefaultSkinFile->'$(TargetDir)Skins/Default/%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
 </Project>

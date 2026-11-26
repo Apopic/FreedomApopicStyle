@@ -6,7 +6,8 @@
 //   2. 発音の強さの自己相関から拍の周期を求め (50～240 BPM。120 BPM 付近を少し優先)、
 //      曲全体に拍の格子を当てはめて BPM と拍の位置を細かく合わせる
 //   3. 低音域の強さが周期的に強くなる拍から、拍子 (3 拍子 / 4 拍子) を決める
-//   4. 最初の音が鳴った位置に一番近い拍を「最初の小節の頭」にする
+//   4. 1ms のエネルギー変化で打音の立ち上がりを検出し、半分・倍などの候補を比較する
+//   5. 打音の時刻に回帰直線を当て、細かい BPM と最初の打音の位置を求め直す
 // 推定なので、結果は目安 (曲の作りによっては半分・倍の BPM になることがある)。
 
 #include <algorithm>
@@ -15,6 +16,7 @@
 #include <cstddef>
 #include <numeric>
 #include <vector>
+#include <utility>
 
 namespace tempo {
 
@@ -24,6 +26,7 @@ namespace tempo {
         double FirstDownbeat = 0.0;     // 最初の小節の頭 (秒)。TJA の OFFSET は -FirstDownbeat
         int BeatsPerMeasure = 4;        // 3 または 4
         double Confidence = 0.0;        // 0～1 (拍の周期のはっきりさ)
+        double DurationSeconds = 0.0;
     };
 
     namespace detail {
@@ -82,7 +85,7 @@ namespace tempo {
     }
 
     // mono: モノラルの音 (-1～1)、rate: サンプリングレート
-    inline Result Estimate(const float* mono, size_t count, int rate) {
+    inline Result EstimateCoarse(const float* mono, size_t count, int rate) {
         using namespace detail;
         Result result;
         if (mono == nullptr || rate <= 0 || count < (size_t)rate * 4) { return result; }    // 4 秒未満は推定しない
@@ -228,6 +231,206 @@ namespace tempo {
         result.Bpm = bpm;
         result.FirstDownbeat = head;
         result.BeatsPerMeasure = meter;
+        return result;
+    }
+
+    // 逆相のステレオを平均して打音を消してしまわないよう、必要なら最も強いチャンネルを使う。
+    template<class Sample>
+    inline std::vector<float> PrepareMono(size_t frames, int channels, Sample sample) {
+        if (!frames || channels <= 0 || channels > 32) { return {}; }
+        std::vector<float> mono(frames);
+        std::vector<double> energy(channels, 0);
+        double mixed = 0;
+        for (size_t i = 0; i < frames; ++i) {
+            double sum = 0;
+            for (int c = 0; c < channels; ++c) { const double v = sample(i, c); if (std::isfinite(v)) { sum += v; energy[c] += v * v; } }
+            mono[i] = (float)(sum / channels); mixed += mono[i] * mono[i];
+        }
+        const auto best = std::max_element(energy.begin(), energy.end());
+        if (mixed < *best * 0.1) {
+            const int channel = (int)(best - energy.begin());
+            for (size_t i = 0; i < frames; ++i) { const float value = sample(i, channel); mono[i] = std::isfinite(value) ? value : 0; }
+        }
+        return mono;
+    }
+    inline int MeasureCount(double seconds, double bpm, double offsetSeconds, double beats = 4) {
+        if (!std::isfinite(seconds) || !std::isfinite(bpm) || !std::isfinite(offsetSeconds) || !std::isfinite(beats) || seconds <= 0 || bpm <= 0 || beats <= 0) { return 0; }
+        const double measures = std::ceil(std::max(0.0, seconds + offsetSeconds) * bpm / (60 * beats) - 1e-9);
+        return (int)std::clamp(measures, 1.0, 100000.0);
+    }
+    inline Result Estimate(const float* input, size_t count, int rate) {
+        Result result;
+        if (!input || rate < 1000 || rate > 768000 || count < (size_t)rate * 4) { return result; }
+        const double duration = (double)count / rate;
+        result.DurationSeconds = duration;
+        // 解析用に帯域を平均して縮小する。元のサンプルレートに依存する FFT の位相差も抑える。
+        std::vector<float> down;
+        if (rate > 16000) {
+            const double step = rate / 16000.0;
+            down.resize((size_t)(count / step));
+            for (size_t i = 0; i < down.size(); ++i) {
+                const size_t a = (size_t)(i * step), b = std::min(count, (size_t)((i + 1) * step));
+                double sum = 0;
+                for (size_t j = a; j < b; ++j) { if (std::isfinite(input[j])) { sum += input[j]; } }
+                down[i] = (float)(sum / std::max<size_t>(1, b - a));
+            }
+            input = down.data(); count = down.size(); rate = 16000;
+        }
+        const auto coarse = EstimateCoarse(input, count, rate);
+        if (!coarse.Ok || !std::isfinite(coarse.Bpm) || coarse.Bpm <= 0) { return result; }
+        // FFT 窓の中央を発音位置とみなす代わりに、1ms のエネルギーから実際のアタックを探す。
+        const size_t frames = (size_t)(1000.0 * count / rate);
+        std::vector<double> rms(frames), bass(frames), prefix(frames + 1, 0), novelty(frames, 0);
+        double lowpass = 0;
+        const double alpha = 1 - std::exp(-2 * 3.14159265358979 * 200 / rate);
+        for (size_t i = 0; i < frames; ++i) {
+            const size_t a = i * (size_t)rate / 1000, b = std::min(count, (i + 1) * (size_t)rate / 1000);
+            double energy = 0, low = 0;
+            for (size_t j = a; j < b; ++j) {
+                const double value = std::isfinite(input[j]) ? input[j] : 0;
+                energy += value * value; lowpass += alpha * (value - lowpass); low += lowpass * lowpass;
+            }
+            bass[i] = std::sqrt(low / std::max<size_t>(1, b - a));
+            rms[i] = std::sqrt(energy / std::max<size_t>(1, b - a)); prefix[i + 1] = prefix[i] + rms[i];
+        }
+        std::vector<double> smooth(frames), smoothPrefix(frames + 1, 0);
+        for (size_t i = 0; i < frames; ++i) {
+            const size_t a = i > 4 ? i - 4 : 0, b = std::min(frames, i + 5);
+            smooth[i] = (prefix[b] - prefix[a]) / (b - a); smoothPrefix[i + 1] = smoothPrefix[i] + smooth[i];
+            const size_t start = i > 30 ? i - 30 : 0;
+            novelty[i] = std::max(0.0, smooth[i] - (smoothPrefix[i] - smoothPrefix[start]) / std::max<size_t>(1, i - start));
+        }
+        auto levels = novelty;
+        const size_t percentile = levels.size() * 95 / 100;
+        std::nth_element(levels.begin(), levels.begin() + percentile, levels.end());
+        const double maximum = *std::max_element(novelty.begin(), novelty.end());
+        if (maximum < 1e-7) { return result; }
+        const double scale = std::max(levels[percentile], maximum * 0.08);
+        struct Onset { double Time, Weight, LowRatio; };
+        std::vector<Onset> onsets;
+        for (size_t i = 1; i + 8 < frames; ++i) {
+            if (novelty[i] < std::max(scale * 0.25, prefix.back() / frames * 0.04) || novelty[i] < novelty[i - 1]) { continue; }
+            bool peak = true;
+            for (size_t k = i + 1; k <= i + 8; ++k) { if (novelty[k] > novelty[i]) { peak = false; break; } }
+            if (!peak) { continue; }
+            const size_t start = i > 30 ? i - 30 : 0;
+            const auto minimum = std::min_element(rms.begin() + start, rms.begin() + i + 1);
+            size_t attack = (size_t)(minimum - rms.begin());
+            const double threshold = *minimum + (rms[i] - *minimum) * 0.06;
+            while (attack < i && rms[attack] <= threshold) { ++attack; }
+            const double time = attack / 1000.0;
+            double fullEnergy = 0, lowEnergy = 0;
+            for (size_t j = attack; j < std::min(frames, i + 20); ++j) { fullEnergy += rms[j] * rms[j]; lowEnergy += bass[j] * bass[j]; }
+            const double lowRatio = fullEnergy > 0 ? std::clamp(std::sqrt(lowEnergy / fullEnergy), 0.0, 1.0) : 0;
+            const double weight = std::log1p(std::min(100.0, novelty[i] / scale)) * (0.1 + 0.9 * lowRatio);
+            if (!onsets.empty() && time - onsets.back().Time < 0.04) {
+                if (weight > onsets.back().Weight) { onsets.back() = { time, weight, lowRatio }; }
+            } else { onsets.push_back({ time, weight, lowRatio }); }
+            i += 8;
+        }
+        if (onsets.size() < 4) { return result; }
+        auto score = [&](double period, double phase) {
+            double sum = 0;
+            for (const auto& onset : onsets) {
+                const double error = std::remainder(onset.Time - phase, period);
+                sum += onset.Weight * std::exp(-0.5 * std::pow(error / 0.012, 2));
+            }
+            return sum / std::sqrt(std::max(1.0, duration / period));
+        };
+        double best = -1, period = 60 / coarse.Bpm, phase = coarse.FirstDownbeat;
+        auto strongest = onsets;
+        std::stable_sort(strongest.begin(), strongest.end(), [](const auto& a, const auto& b) { return a.Weight > b.Weight; });
+        std::vector<double> anchors{ coarse.FirstDownbeat };
+        for (size_t i = 0; i < std::min<size_t>(4, strongest.size()); ++i) { anchors.push_back(strongest[i].Time); }
+        for (double octave : { 0.5, 2.0 / 3.0, 1.0, 1.5, 2.0, 3.0 }) {
+            const double seed = coarse.Bpm * octave;
+            if (seed < 40 || seed > 360) { continue; }
+            for (int delta = -60; delta <= 60; ++delta) {
+                const double p = 60 / (seed * (1 + delta * 0.0005));
+                for (double anchor : anchors) {
+                for (int shift = -3; shift <= 3; ++shift) {
+                    const double ph = anchor + shift * 0.002;
+                    const double value = score(p, ph);
+                    if (value > best) { best = value; period = p; phase = ph; }
+                }
+                }
+            }
+        }
+        // 拍番号と発音時刻の回帰で、曲が進むほど増える BPM の丸め誤差を取り除く。
+        for (int iteration = 0; iteration < 3; ++iteration) {
+            double sw = 0, sk = 0, st = 0, skk = 0, skt = 0;
+            const double radius = iteration == 0 ? 0.04 : 0.02;
+            for (const auto& onset : onsets) {
+                const double k = std::round((onset.Time - phase) / period), error = onset.Time - phase - k * period;
+                if (std::abs(error) > radius) { continue; }
+                const double w = onset.Weight * std::exp(-0.5 * std::pow(error / radius, 2));
+                sw += w; sk += w * k; st += w * onset.Time; skk += w * k * k; skt += w * k * onset.Time;
+            }
+            const double denominator = sw * skk - sk * sk;
+            if (sw <= 0 || denominator <= 0) { break; }
+            const double fitted = (sw * skt - sk * st) / denominator;
+            if (fitted > 60.0 / 400 && fitted < 60.0 / 35) { period = fitted; phase = (st - period * sk) / sw; }
+        }
+        double weight = 0, matched = 0, first = duration;
+        for (const auto& onset : onsets) {
+            weight += onset.Weight;
+            if (std::abs(std::remainder(onset.Time - phase, period)) < 0.02) { matched += onset.Weight; first = std::min(first, onset.Time); }
+        }
+        if (first == duration || matched < weight * 0.15) { return result; }
+        result.Ok = true; result.Bpm = 60 / period;
+        auto accent = [&](int meter) {
+            std::vector<double> sums(meter, 0), counts(meter, 0);
+            const int firstBeat = (int)std::floor((0 - phase) / period), lastBeat = (int)std::ceil((duration - phase) / period);
+            for (int k = firstBeat; k <= lastBeat; ++k) { ++counts[(k % meter + meter) % meter]; }
+            for (const auto& onset : onsets) {
+                const int k = (int)std::round((onset.Time - phase) / period);
+                if (std::abs(onset.Time - phase - k * period) < 0.02) { sums[(k % meter + meter) % meter] += onset.Weight; }
+            }
+            const double average = matched / std::max(1, lastBeat - firstBeat + 1);
+            double best = 0; int residue = 0;
+            for (int k = 0; k < meter; ++k) {
+                const double score = sums[k] / std::max(1.0, counts[k]) / std::max(1e-9, average);
+                if (score > best) { best = score; residue = k; }
+            }
+            return std::pair<double, int>{ best, residue };
+        };
+        const auto triple = accent(3), quadruple = accent(4);
+        result.BeatsPerMeasure = triple.first > quadruple.first * 1.08 ? 3 : 4;
+        const auto chosen = result.BeatsPerMeasure == 3 ? triple : quadruple;
+        std::vector<double> beatWeights;
+        for (const auto& onset : onsets) {
+            if (onset.LowRatio >= 0.35 && std::abs(std::remainder(onset.Time - phase, period)) < 0.02) beatWeights.push_back(onset.Weight);
+        }
+        const bool hasBass = beatWeights.size() >= 4;
+        if (!hasBass) {
+            beatWeights.clear();
+            for (const auto& onset : onsets) if (std::abs(std::remainder(onset.Time - phase, period)) < 0.02) beatWeights.push_back(onset.Weight);
+        }
+        std::sort(beatWeights.begin(), beatWeights.end());
+        const double threshold = beatWeights.empty() ? 0 : beatWeights[beatWeights.size() / 2] * 0.5;
+        auto salient = [&](const Onset& onset) {
+            return onset.Weight >= threshold && (!hasBass || onset.LowRatio >= 0.35) && std::abs(std::remainder(onset.Time - phase, period)) < 0.02;
+        };
+        // 単発の弱起メロディではなく、アクセントの位置から安定して拍が続く小節頭を選ぶ。
+        double downbeat = duration;
+        for (const auto& onset : onsets) {
+            if (!salient(onset)) continue;
+            const int k = (int)std::round((onset.Time - phase) / period);
+            if (chosen.first >= 1.08 && (k % result.BeatsPerMeasure + result.BeatsPerMeasure) % result.BeatsPerMeasure != chosen.second) continue;
+            int following = 0, previousBeat = k - 1;
+            for (const auto& next : onsets) {
+                if (next.Time < onset.Time - 0.001 || next.Time > onset.Time + period * (result.BeatsPerMeasure - 0.5)) continue;
+                const int beat = (int)std::round((next.Time - phase) / period);
+                if (salient(next) && beat != previousBeat) { ++following; previousBeat = beat; }
+            }
+            if (following >= result.BeatsPerMeasure - 1) { downbeat = onset.Time; break; }
+        }
+        if (downbeat == duration) {
+            for (const auto& onset : onsets) if (salient(onset)) { downbeat = onset.Time; break; }
+        }
+        if (downbeat == duration) downbeat = first;
+        result.FirstDownbeat = std::max(0.0, phase + std::round((downbeat - phase) / period) * period);
+        result.Confidence = std::clamp(matched / weight, 0.0, 1.0);
         return result;
     }
 }

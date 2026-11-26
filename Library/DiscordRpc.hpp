@@ -46,7 +46,7 @@ public:
         if (clientid.empty()) { return; }
         if (RegisterProtocol) { RegisterLaunchCommand(clientid); }
         m_Stop = false;
-        m_Thread = std::thread([this] { ThreadMain(); });
+        m_Thread = std::thread([this] { try { ThreadMain(); } catch(...) { Disconnect(); } });
     }
     void Stop() {
         if (!m_Thread.joinable()) { return; }
@@ -127,7 +127,7 @@ private:
         m_Buffer.clear();
     }
     bool Write(uint32_t op, const nlohmann::json& body) {
-        const std::string text = body.dump();
+        const std::string text = body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);   // 曲名に正しくない UTF-8 があっても例外にしない
         std::vector<char> frame(8 + text.size());
         const uint32_t head[2] = { op, (uint32_t)text.size() };
         std::memcpy(frame.data(), head, 8);
@@ -159,7 +159,11 @@ private:
             m_Buffer.erase(m_Buffer.begin(), m_Buffer.begin() + 8 + head[1]);
             if (head[0] == Close) { return false; }
             if (head[0] == Ping) { Write(Pong, nlohmann::json::parse(text, nullptr, false)); continue; }
-            if (head[0] == Frame) { HandleFrame(nlohmann::json::parse(text, nullptr, false)); }
+            if (head[0] == Frame) {
+                // 値の型が想定と違っても、受信スレッドを止めない (スレッドの外へ例外が出ると異常終了する)
+                try { HandleFrame(nlohmann::json::parse(text, nullptr, false)); }
+                catch (const std::exception&) {}
+            }
         }
         return true;
     }

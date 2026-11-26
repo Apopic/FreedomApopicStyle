@@ -1,6 +1,16 @@
 # FreedomApopicStyle
 自己流太鼓シミュレーター
 
+## ビルド
+
+Windows 版は Visual Studio 18 の C++ デスクトップ開発環境と Windows SDK を使用します。外部依存の場所は `Build/WindowsDependencies.props` に示しています。既定と異なる場所に置く場合は、同名の環境変数か MSBuild の `/p:FasDxLib=…` などで指定してください。
+
+- 共通の外部依存は Socket.h、nlohmann/json、magic_enum、libarrier、cppunzip、fast_float です。
+- Windows 版には DxLib (VC x64)、zlib のヘッダー、ICU の x64 ライブラリも必要です。`FreedomApopicStyle.slnx` を x64 でビルドすると、ゲーム本体と MultiServer が `x64/<構成>/` に出力されます。
+- Android 版は Android Studio で `Android/` を開き、SDK 37、NDK 28.2.13676358、CMake 3.22.1 を使用します。ABI 別のディレクトリを含む DxLib の場所を `FasAndroidDxLib` で指定できます。共通依存も `Android/app/src/main/cpp/CMakeLists.txt` にある同名の環境変数で指定できます。場所を変更した後は CMake のキャッシュを再生成してください。
+- Default スキンの元データは `Android/app/src/main/assets/Default/` にあります。Windows 版のビルドは、出力先に Default スキンがない場合にこれをコピーします。任意の M PLUS 1p Medium を使う場合は `Skins/Default/Font/MPLUS1p-Medium.ttf` に配置します。Android ビルドへ含める場合は元データの `Font/` に配置します。
+- 基本テストは `Tests/RunCoreTests.cmd`、実行時の確認は `Tests/RunSplitLifecycleProbe.ps1` を使います。
+
 ## オンラインプレイ
 
 ### サーバー (MultiServer)
@@ -139,7 +149,7 @@ Discord のプロフィールに、メニュー・選曲中・演奏中の曲と
   (`#BPMCHANGE` は途中でも効き、`#DELAY` は時刻を飛ばし、`#MEASURE` は小節の頭で効きます。`OFFSET` に合わせて音源の位置を決めます)
 - 編集画面の文字は画面の高さに合わせた大きさで、ボタンは画面の幅に収まらなければ次の段に折り返します。ボタンにマウスを乗せると、画面下に説明が出ます
 - 音符・連打の帯・レーンは、スキンの画像 (`Playing` の `Note` / `Lane`) で描きます (無いスキンでは色の丸で描きます)
-- 疑似再生の速度は「速度」ボタンで 0.25～2 倍に変えられます (音源の周波数を変えるので音の高さも変わります)
+- 疑似再生の速度は「速度」ボタンで 0.25～2 倍に変えられます
 - **音源 (WAVE)**: 譜面からの相対パスで書きます。ゲームのフォルダの外にある音源を選んだ (または絶対パスを入力した) 時は、譜面のフォルダに複製します
 - **テストプレイ**: 編集中の譜面 (保存していなくてもよい) で演奏します。途中の小節から始める時はトレーニングモードと同じく開始を待つので、ドンで始めます。`F1` でオートプレイと通常のプレイをその場で切り替えられます。記録は残りません。`Esc` で編集画面に戻ります
 - **保存**: 元の文字コードのまま保存します (Shift_JIS の譜面は Shift_JIS。Shift_JIS で表せない文字がある時は UTF-8)。
@@ -268,10 +278,10 @@ EXAM3:c,100,150,m      // #NEXTSONG の後に書いた条件はその曲だけ�
 
 ## Android 版
 
-Android 版 (`AndroidStudioProjects/FreedomApopicStyle`) は PC 版と同じソースを NDK でビルドします。Android 専用の部分 (タッチ操作・入力ダイアログ・トースト) は
+Android 版 (`Android/`) は PC 版と同じソースを NDK でビルドします。Android 専用の部分 (タッチ操作・入力ダイアログ・トースト) は
 `#ifdef __ANDROID__` で分け、Windows 専用の機能 (Discord・録画・外部ツールの導入・Raw Input・MultiServer の起動) は Android では使いません。
 
-- PC 版のソースを変えたら `SyncAndroid.ps1` で Android 版のプロジェクトへコピーしてからビルドします (`Main.cpp` と `CMakeLists.txt` は Android 版のもの)
+- Android 版はリポジトリ内の共通 C++ ソースを直接参照します。
 - 次郎形式・譜面制作・ギミック・新しいオンラインの通信 (サーバーとポートを指定、暗号化、曲の配布) も PC 版と同じです
 - **SONGLINK のダウンロード**: [youtubedl-android](https://github.com/yausername/youtubedl-android) (yt-dlp・Python・ffmpeg を同梱。GPL-3.0) を使います。
   初回は準備と yt-dlp の更新に時間がかかります。背景動画 (MOVIELINK) は Android では再生しないので取得しません
@@ -281,29 +291,11 @@ Android 版 (`AndroidStudioProjects/FreedomApopicStyle`) は PC 版と同じソ�
 
 ## スキン
 
-### キャラクター (任意)
+### 演奏用の任意素材
 
-スキンの `Playing` に次の画像があれば表示します (Default スキンには入っていません)。
-
-| 項目 | 内容 |
-| --- | --- |
-| `Image.PlayerChar` | プレイヤーキャラ (横に並べたコマを `Config.PlayerCharFrameTime` ms ごとに繰り返す) |
-| `Image.PlayerCharGoGo` / `Image.PlayerCharClear` | ゴーゴータイム中 / クリアの目安 (精度 × 進み具合が 75% 以上) を超えている時 |
-| `Image.PlayerCharCombo` | 10 コンボごとに 1 回流す |
-| `Image.Runner` | 良・可で叩くたびに `RunnerFrom` から `RunnerTo` へ `RunnerTime` ms で走り抜ける (縦の段は種類。順番に使う。同時に `RunnerMax` 人まで) |
-| `Image.Dancer` | 踊り子 (縦の段が 1 人ずつ)。クリアの目安までに `DancerCount` 人が 1 人ずつ増え、`DancerDistance` ずつずらして並べる |
-| `SE.ComboVoice` | `[{ "Combo": 50, "FilePath": "Sound/Voice/50.wav" }, ...]` そのコンボ数になった時に鳴らす |
-
-### 太鼓さん次郎のスキンの変換
-
-設定の「ツール」→ `ConvertJiroSkin` で次郎のスキンのフォルダを選ぶと、Default スキンを土台に FAS のスキン (`Skins/Jiro_…` / `Skins/Jiro2_…`) を作ります。
-位置・大きさは Default スキンのままで、画像と音を差し替えます。
-
-- **次郎 1** (`img` フォルダ + `img/imgdet.ini`): 音符 (`notes`。並び順は FAS と同じ)・演奏画面の背景 (`bg`)・レーン (`sfieldbg`)・ゴーゴーの炎 (`fire`)・
-  プレイヤーキャラ (`playerchar_p1`)・踊り子 (`dancer_1～5` を 1 枚にまとめる)・選曲画面とリザルトの背景・効果音 (`snd/dong.wav` など)
-- **次郎 2** (`theme/<名前>/default.csv` または `<名前>.csv`。Shift_JIS の `#PARTS` の CSV): `NOTE` `BG` `SFIELD` `GOGOFIRE` `JUDGE` `NUMBER_COMBO` `PLAYERCHAR` `RUNNER` `DANCER`
-  `SONGSELECT_BG` `RESULT_BG_CLEAR` と、`snd/sound.csv` の `#SE` (`DONG` `KA` `BALLOON` `COMBOVOICE`)
-- 対応のはっきりしない部品 (小太鼓・爆発・判定の数字など) は Default のままです。変換したスキンは `SkinName` で選べます
+- `Playing.Image.PlayerChar` は `Div` で区切ったコマを使います。`Playing.Config` の `PlayerCharFrames`、`PlayerCharGoGoFrames`、`PlayerCharClearFrames`、`PlayerCharMissFrames`、`PlayerCharJumpFrames` で状態別の表示順を指定します。通常周期は `PlayerCharLoopBeats`、ゴーゴー周期は `PlayerCharGoGoLoopBeats`、ジャンプの長さは `PlayerCharJumpBeats` です。マルチプレイ時は非表示です。
+- `Playing.SE.ComboVoice` は `[{ "Combo": 50, "FilePath": "Sound/Voice/Combo_50.wav" }]` の形式で登録します。`FullComboVoice` にはフルコンボ時の音源を指定します。
+- `Playing.SE.DonBig` と `KaBig` には大音符専用の効果音を指定できます。`Playing.Image.KeyMapBox` は Windows でのキー表示に使います。
 
 ## 背景動画
 

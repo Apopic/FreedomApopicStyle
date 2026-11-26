@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <FasDxLib Condition="'$(FasDxLib)' == ''">C:\DxLib_VC\プロジェクトに追加すべきファイル_VC用</FasDxLib>
+    <FasSocketHeaders Condition="'$(FasSocketHeaders)' == ''">C:\Socket_h-main\include</FasSocketHeaders>
+    <FasJsonHeaders Condition="'$(FasJsonHeaders)' == ''">C:\json\include</FasJsonHeaders>
+    <FasMagicEnumHeaders Condition="'$(FasMagicEnumHeaders)' == ''">C:\magic_enum-v0.9.8\include</FasMagicEnumHeaders>
+    <FasLibarrierHeaders Condition="'$(FasLibarrierHeaders)' == ''">C:\libarrier-main\include</FasLibarrierHeaders>
+    <FasZipHeaders Condition="'$(FasZipHeaders)' == ''">C:\cppunzip-main</FasZipHeaders>
+    <FasZlibHeaders Condition="'$(FasZlibHeaders)' == ''">C:\vcpkg\packages\zlib_x64-windows\include</FasZlibHeaders>
+    <FasFastFloatHeaders Condition="'$(FasFastFloatHeaders)' == ''">C:\fast_float</FasFastFloatHeaders>
+    <FasIcuLibs Condition="'$(FasIcuLibs)' == ''">C:\ICU\lib64</FasIcuLibs>
+  </PropertyGroup>
+</Project>

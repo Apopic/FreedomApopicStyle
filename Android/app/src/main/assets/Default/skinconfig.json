@@ -1,0 +1,1374 @@
+{
+  "Info": {
+    "Name": "Default",
+    "Version": "1.0",
+    "Resolution": {
+      "X": 1280,
+      "Y": 720
+    },
+    "SimulationDistance": {
+      "X": 960,
+      "Y": 540
+    },
+    "ColorBit": 32
+  },
+  "Base": {
+    "Title": {
+      "Config": {},
+      "Image": {
+        "BackGround": {
+          "FilePath": "Image/Title/BackGround.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 1280,
+            "Height": 720
+          }
+        },
+        "Logo": {
+          "FilePath": "Image/Title/Logo.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 1080,
+            "Height": 144
+          }
+        }
+      },
+      "Font": {},
+      "SE": {
+        "Don": {
+          "FilePath": "Sound/SE/Don.wav",
+          "BufferNum": 1
+        },
+        "Ka": {
+          "FilePath": "Sound/SE/ka.wav",
+          "BufferNum": 1
+        }
+      },
+      "BGM": {}
+    },
+    "ModeSelect": {
+      "Config": {
+        "ModesPos": {
+          "X": 640,
+          "Y": 120
+        },
+        "BoxDistance": 120
+      },
+      "Image": {
+        "BackGround": {
+          "FilePath": "Image/ModeSelect/BackGround.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 1280,
+            "Height": 720
+          }
+        },
+        "Box": {
+          "FilePath": "Image/ModeSelect/Box.png",
+          "Pos": {
+            "X": 640,
+            "Y": 120
+          },
+          "Size": {
+            "Width": 900,
+            "Height": 80
+          }
+        }
+      },
+      "Font": {
+        "Modes": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 32,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": 0
+        }
+      },
+      "SE": {
+        "Don": {
+          "FilePath": "Sound/SE/Don.wav",
+          "BufferNum": 1
+        },
+        "Ka": {
+          "FilePath": "Sound/SE/ka.wav",
+          "BufferNum": 1
+        }
+      },
+      "BGM": {}
+    },
+    "SongSelect": {
+      "Config": {
+        "BoxDistance": {
+          "X": 40,
+          "Y": 80
+        },
+        "SongBoxListPos": {
+          "X": 640,
+          "Y": 360
+        },
+        "BoxTitlePos": {
+          "X": 640,
+          "Y": 140
+        },
+        "BoxSubTitlePos": {
+          "X": 640,
+          "Y": 200
+        },
+        "CoursePos": {
+          "X": 320,
+          "Y": 320
+        },
+        "LevelPos": {
+          "X": 440,
+          "Y": 320
+        },
+        "HighScorePos": {
+          "X": 960,
+          "Y": 320
+        },
+        "KeyWordPos": {
+          "X": 190,
+          "Y": 80
+        },
+        "CourseBoxDistance": 80
+      },
+      "Image": {
+        "BackGround": {
+          "FilePath": "Image/SongSelect/BackGround.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 1280,
+            "Height": 720
+          }
+        },
+        "Box": {
+          "FilePath": "Image/SongSelect/Box.png",
+          "Pos": {
+            "X": 640,
+            "Y": 0
+          },
+          "Size": {
+            "Width": 900,
+            "Height": 60
+          }
+        },
+        "TitleBox": {
+          "FilePath": "Image/SongSelect/Box.png",
+          "Pos": {
+            "X": 640,
+            "Y": 160
+          },
+          "Size": {
+            "Width": 900,
+            "Height": 180
+          }
+        },
+        "CourseBox": {
+          "FilePath": "Image/SongSelect/Box.png",
+          "Pos": {
+            "X": 640,
+            "Y": 320
+          },
+          "Size": {
+            "Width": 900,
+            "Height": 60
+          }
+        },
+        "SearchBox": {
+          "FilePath": "Image/SongSelect/SearchBox.png",
+          "Pos": {
+            "X": 640,
+            "Y": 100
+          },
+          "Size": {
+            "Width": 1000,
+            "Height": 100
+          }
+        },
+        "Crown": {
+          "FilePath": "Image/SongSelect/Crown.png",
+          "Pos": {
+            "X": 1020,
+            "Y": 320
+          },
+          "Div": {
+            "X": 5,
+            "Y": 1
+          },
+          "Size": {
+            "Width": 26,
+            "Height": 19
+          }
+        },
+        "Back": {
+          "FilePath": "Image/SongSelect/Back.png",
+          "Pos": {
+            "X": 80,
+            "Y": 80
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        },
+        "Search": {
+          "FilePath": "Image/SongSelect/Search.png",
+          "Pos": {
+            "X": 1200,
+            "Y": 80
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        },
+        "Random": {
+          "FilePath": "Image/SongSelect/Random.png",
+          "Pos": {
+            "X": 1200,
+            "Y": 180
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        },
+        "Config": {
+          "FilePath": "Image/SongSelect/Config.png",
+          "Pos": {
+            "X": 1200,
+            "Y": 280
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        }
+      },
+      "Font": {
+        "Title": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 28,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": 0
+        },
+        "SubTitle": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 21,
+          "Thick": 7,
+          "Edge": 0,
+          "Space": 0
+        },
+        "BoxTitle": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 42,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": -2
+        },
+        "BoxSubTitle": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 24,
+          "Thick": 6,
+          "Edge": 0,
+          "Space": 0
+        },
+        "Course": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 0,
+          "Size": 28,
+          "Thick": 8,
+          "Edge": 0,
+          "Space": 0
+        },
+        "Level": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 0,
+          "Size": 28,
+          "Thick": 8,
+          "Edge": 0,
+          "Space": 0
+        },
+        "HighScore": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 2,
+          "Size": 28,
+          "Thick": 8,
+          "Edge": 0,
+          "Space": 0
+        },
+        "KeyWord": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 0,
+          "Size": 40,
+          "Thick": 8,
+          "Edge": 0,
+          "Space": 0
+        }
+      },
+      "SE": {
+        "Don": {
+          "FilePath": "Sound/SE/Don.wav",
+          "BufferNum": 1
+        },
+        "Ka": {
+          "FilePath": "Sound/SE/ka.wav",
+          "BufferNum": 1
+        }
+      },
+      "BGM": {}
+    },
+    "DanSelect": {
+      "Config": {
+        "BoxDistance": {
+          "X": 40,
+          "Y": 80
+        },
+        "SongBoxListPos": {
+          "X": 640,
+          "Y": 360
+        },
+        "KeyWordPos": {
+          "X": 190,
+          "Y": 80
+        }
+      },
+      "Image": {
+        "BackGround": {
+          "FilePath": "Image/DanSelect/BackGround.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 1280,
+            "Height": 720
+          }
+        },
+        "Box": {
+          "FilePath": "Image/DanSelect/Box.png",
+          "Pos": {
+            "X": 640,
+            "Y": 0
+          },
+          "Size": {
+            "Width": 900,
+            "Height": 60
+          }
+        },
+        "SearchBox": {
+          "FilePath": "Image/DanSelect/SearchBox.png",
+          "Pos": {
+            "X": 640,
+            "Y": 100
+          },
+          "Size": {
+            "Width": 1000,
+            "Height": 100
+          }
+        },
+        "Crown": {
+          "FilePath": "Image/DanSelect/Crown.png",
+          "Pos": {
+            "X": 1020,
+            "Y": 320
+          },
+          "Div": {
+            "X": 5,
+            "Y": 1
+          },
+          "Size": {
+            "Width": 26,
+            "Height": 19
+          }
+        },
+        "Back": {
+          "FilePath": "Image/DanSelect/Back.png",
+          "Pos": {
+            "X": 80,
+            "Y": 80
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        },
+        "Search": {
+          "FilePath": "Image/DanSelect/Search.png",
+          "Pos": {
+            "X": 1200,
+            "Y": 80
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        },
+        "Random": {
+          "FilePath": "Image/DanSelect/Random.png",
+          "Pos": {
+            "X": 1200,
+            "Y": 180
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        },
+        "Config": {
+          "FilePath": "Image/DanSelect/Config.png",
+          "Pos": {
+            "X": 1200,
+            "Y": 280
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        }
+      },
+      "Font": {
+        "Title": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 28,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": 0
+        },
+        "SubTitle": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 21,
+          "Thick": 7,
+          "Edge": 0,
+          "Space": 0
+        },
+        "KeyWord": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 0,
+          "Size": 40,
+          "Thick": 8,
+          "Edge": 0,
+          "Space": 0
+        }
+      },
+      "SE": {
+        "Don": {
+          "FilePath": "Sound/SE/Don.wav",
+          "BufferNum": 1
+        },
+        "Ka": {
+          "FilePath": "Sound/SE/ka.wav",
+          "BufferNum": 1
+        }
+      },
+      "BGM": {}
+    },
+    "MultiRoom": {
+      "Config": {
+        "PlayerPos": {
+          "X": 640,
+          "Y": 320
+        },
+        "TitlePos": {
+          "X": 640,
+          "Y": 120
+        },
+        "SubTitlePos": {
+          "X": 640,
+          "Y": 180
+        },
+        "CoursePos": {
+          "X": 580,
+          "Y": 230
+        },
+        "LevelPos": {
+          "X": 660,
+          "Y": 230
+        },
+        "BoxDistance": 120
+      },
+      "Image": {
+        "BackGround": {
+          "FilePath": "Image/MultiRoom/BackGround.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 1280,
+            "Height": 720
+          }
+        },
+        "PlayerBox": {
+          "FilePath": "Image/MultiRoom/Box.png",
+          "Pos": {
+            "X": 640,
+            "Y": 320
+          },
+          "Size": {
+            "Width": 880,
+            "Height": 80
+          }
+        },
+        "TitleBox": {
+          "FilePath": "Image/MultiRoom/Box.png",
+          "Pos": {
+            "X": 640,
+            "Y": 160
+          },
+          "Size": {
+            "Width": 900,
+            "Height": 200
+          }
+        },
+        "Crown": {
+          "FilePath": "Image/MultiRoom/Crown.png",
+          "Pos": {
+            "X": 360,
+            "Y": 320
+          },
+          "Div": {
+            "X": 5,
+            "Y": 1
+          },
+          "Size": {
+            "Width": 26,
+            "Height": 19
+          }
+        },
+        "Back": {
+          "FilePath": "Image/MultiRoom/Back.png",
+          "Pos": {
+            "X": 1200,
+            "Y": 80
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        },
+        "Host": {
+          "FilePath": "Image/MultiRoom/Host.png",
+          "Pos": {
+            "X": 1200,
+            "Y": 180
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        },
+        "Config": {
+          "FilePath": "Image/MultiRoom/Config.png",
+          "Pos": {
+            "X": 1200,
+            "Y": 280
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        }
+      },
+      "Font": {
+        "String": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 0,
+          "Size": 24,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": 0
+        },
+        "Player": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 36,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": 0
+        },
+        "Title": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 36,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": 0
+        },
+        "SubTitle": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 20,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": 0
+        },
+        "Course": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 28,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": 0
+        },
+        "Level": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 28,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": 0
+        }
+      },
+      "SE": {
+        "Don": {
+          "FilePath": "Sound/SE/Don.wav",
+          "BufferNum": 1
+        },
+        "Ka": {
+          "FilePath": "Sound/SE/ka.wav",
+          "BufferNum": 1
+        }
+      },
+      "BGM": {}
+    },
+    "Playing": {
+      "Config": {
+        "TitlePos": {
+          "X": 1260,
+          "Y": 50
+        },
+        "SubTitlePos": {
+          "X": 1260,
+          "Y": 90
+        },
+        "PlayerNamePos": {
+          "X": 80,
+          "Y": 320
+        },
+        "ExamNamePos": {
+          "X": 160,
+          "Y": 380
+        },
+        "ExamValPos": {
+          "X": 160,
+          "Y": 420
+        },
+        "MultiPlayLaneDistance": 175,
+        "LaneExtendRate": 0.948,
+        "JudgeUpperExplosionFrameTime": 12,
+        "GoGoFireFrameTime": 60,
+        "FullComboVoiceDelay": 1000,
+        "PlayerCharFrameTime": 100,
+        "PlayerCharClearFrames": [],
+        "KeyMapDistance": 128,
+        "PlayerCharMissFrames": [],
+        "PlayerCharGoGoFrames": [],
+        "PlayerCharFrames": [],
+        "PlayerCharJumpFrames": [],
+        "PlayerCharJumpHeight": 0,
+        "PlayerCharJumpBeats": 2,
+        "PlayerCharLoopBeats": 0,
+        "PlayerCharColor": 16777215,
+        "PlayerCharGoGoLoopBeats": 0
+      },
+      "Image": {
+        "BackGround": {
+          "FilePath": "Image/Playing/BackGround.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 1280,
+            "Height": 720
+          }
+        },
+        "DanBackGround": {
+          "FilePath": "Image/Playing/Box.png",
+          "Pos": {
+            "X": 640,
+            "Y": 540
+          },
+          "Size": {
+            "Width": 1200,
+            "Height": 360
+          }
+        },
+        "LaneFrame": {
+          "FilePath": "Image/Playing/LaneFrame.png",
+          "Pos": {
+            "X": 640,
+            "Y": 257
+          },
+          "Size": {
+            "Width": 1290,
+            "Height": 216
+          }
+        },
+        "Lane": {
+          "FilePath": "Image/Playing/Lane.png",
+          "Pos": {
+            "X": 773.5,
+            "Y": 251
+          },
+          "Size": {
+            "Width": 1013,
+            "Height": 130
+          }
+        },
+        "NormalLane": {
+          "FilePath": "Image/Playing/NormalLane.png",
+          "Pos": {
+            "X": 773.5,
+            "Y": 251
+          },
+          "Size": {
+            "Width": 1013,
+            "Height": 130
+          }
+        },
+        "ExpertLane": {
+          "FilePath": "Image/Playing/ExpertLane.png",
+          "Pos": {
+            "X": 773.5,
+            "Y": 251
+          },
+          "Size": {
+            "Width": 1013,
+            "Height": 130
+          }
+        },
+        "MasterLane": {
+          "FilePath": "Image/Playing/MasterLane.png",
+          "Pos": {
+            "X": 773.5,
+            "Y": 251
+          },
+          "Size": {
+            "Width": 1013,
+            "Height": 130
+          }
+        },
+        "Base": {
+          "FilePath": "Image/Playing/Base.png",
+          "Pos": {
+            "X": 154,
+            "Y": 270
+          },
+          "Size": {
+            "Width": 340,
+            "Height": 208
+          }
+        },
+        "NamePlate": {
+          "FilePath": "Image/Playing/NamePlate.png",
+          "Pos": {
+            "X": 94,
+            "Y": 310
+          },
+          "Size": {
+            "Width": 180,
+            "Height": 58
+          }
+        },
+        "MiniTaiko": {
+          "FilePath": "Image/Playing/MiniTaiko.png",
+          "Pos": {
+            "X": 240,
+            "Y": 265
+          },
+          "Size": {
+            "Width": 120,
+            "Height": 120
+          }
+        },
+        "MiniTaiko_Don": {
+          "FilePath": "Image/Playing/MiniTaiko_Don.png",
+          "Pos": {
+            "X": 240,
+            "Y": 265
+          },
+          "Size": {
+            "Width": 60,
+            "Height": 120
+          },
+          "Div": {
+            "X": 2,
+            "Y": 1
+          }
+        },
+        "MiniTaiko_Ka": {
+          "FilePath": "Image/Playing/MiniTaiko_Ka.png",
+          "Pos": {
+            "X": 240,
+            "Y": 265
+          },
+          "Size": {
+            "Width": 60,
+            "Height": 120
+          },
+          "Div": {
+            "X": 2,
+            "Y": 1
+          }
+        },
+        "ComboNumber": {
+          "FilePath": "Image/Playing/Number.png",
+          "Pos": {
+            "X": 240,
+            "Y": 265
+          },
+          "Size": {
+            "Width": 15,
+            "Height": 30
+          },
+          "Div": {
+            "X": 1,
+            "Y": 13
+          }
+        },
+        "ScoreNumber": {
+          "FilePath": "Image/Playing/Number.png",
+          "Pos": {
+            "X": 140,
+            "Y": 205
+          },
+          "Size": {
+            "Width": 15,
+            "Height": 30
+          },
+          "Div": {
+            "X": 1,
+            "Y": 13
+          }
+        },
+        "RollNumber": {
+          "FilePath": "Image/Playing/Number.png",
+          "Pos": {
+            "X": 490,
+            "Y": 250
+          },
+          "Size": {
+            "Width": 15,
+            "Height": 30
+          },
+          "Div": {
+            "X": 1,
+            "Y": 13
+          }
+        },
+        "Note": {
+          "FilePath": "Image/Playing/Note.png",
+          "Pos": {
+            "X": 390,
+            "Y": 251
+          },
+          "Div": {
+            "X": 15,
+            "Y": 1
+          },
+          "Size": {
+            "Width": 128,
+            "Height": 128
+          }
+        },
+        "JudgeUnderExplosion": {
+          "FilePath": "Image/Playing/JudgeUnderExplosion.png",
+          "Pos": {
+            "X": 390,
+            "Y": 251
+          },
+          "Div": {
+            "X": 18,
+            "Y": 4
+          },
+          "Size": {
+            "Width": 142,
+            "Height": 142
+          }
+        },
+        "JudgeUpperExplosion": {
+          "FilePath": "",
+          "Pos": {
+            "X": 390,
+            "Y": 251
+          },
+          "Div": {
+            "X": 15,
+            "Y": 1
+          },
+          "Size": {
+            "Width": 142,
+            "Height": 142
+          }
+        },
+        "GoGoFire": {
+          "FilePath": "Image/Playing/GoGoFire.png",
+          "Pos": {
+            "X": 390,
+            "Y": 251
+          },
+          "Div": {
+            "X": 4,
+            "Y": 2
+          },
+          "Size": {
+            "Width": 450,
+            "Height": 450
+          }
+        },
+        "JudgeString": {
+          "FilePath": "Image/Playing/JudgeString.png",
+          "Pos": {
+            "X": 390,
+            "Y": 218
+          },
+          "Div": {
+            "X": 1,
+            "Y": 3
+          },
+          "Size": {
+            "Width": 90,
+            "Height": 110
+          }
+        },
+        "ProgressBar": {
+          "FilePath": "Image/Playing/ProgressBar.png",
+          "Pos": {
+            "X": 927,
+            "Y": 170
+          },
+          "Div": {
+            "X": 1,
+            "Y": 2
+          },
+          "Size": {
+            "Width": 700,
+            "Height": 21
+          }
+        },
+        "ExamProgressBar": {
+          "FilePath": "Image/Playing/ExamProgressBar.png",
+          "Pos": {
+            "X": 640,
+            "Y": 420
+          },
+          "Div": {
+            "X": 1,
+            "Y": 2
+          },
+          "Size": {
+            "Width": 1000,
+            "Height": 63
+          }
+        },
+        "Back": {
+          "FilePath": "Image/Playing/Back.png",
+          "Pos": {
+            "X": 80,
+            "Y": 80
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        },
+        "Pause": {
+          "FilePath": "Image/Playing/Pause.png",
+          "Pos": {
+            "X": 180,
+            "Y": 80
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        },
+        "KeyMapBox": {
+          "FilePath": "Image/Playing/KeyMapBox.png",
+          "Pos": {
+            "X": 640,
+            "Y": 660
+          },
+          "Size": {
+            "Width": 112,
+            "Height": 44
+          },
+          "Div": {
+            "X": 1,
+            "Y": 2
+          }
+        },
+        "PlayerChar": {
+          "FilePath": "",
+          "Pos": {
+            "X": 160,
+            "Y": 110
+          },
+          "Size": {
+            "Width": 128,
+            "Height": 128
+          },
+          "Div": {
+            "X": 1,
+            "Y": 1
+          }
+        }
+      },
+      "Font": {
+        "Title": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 2,
+          "Size": 40,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": -2
+        },
+        "SubTitle": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 2,
+          "Size": 20,
+          "Thick": 6,
+          "Edge": 0,
+          "Space": 0
+        },
+        "PlayerName": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 1,
+          "Size": 16,
+          "Thick": 6,
+          "Edge": 0,
+          "Space": 0
+        },
+        "ExamName": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 0,
+          "Size": 20,
+          "Thick": 6,
+          "Edge": 0,
+          "Space": 0
+        },
+        "ExamVal": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 0,
+          "Size": 40,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": -2
+        }
+      },
+      "SE": {
+        "Don": {
+          "FilePath": "Sound/SE/Don.wav",
+          "BufferNum": 1
+        },
+        "Ka": {
+          "FilePath": "Sound/SE/ka.wav",
+          "BufferNum": 1
+        },
+        "Balloon": {
+          "FilePath": "Sound/SE/Balloon.wav",
+          "BufferNum": 1
+        },
+        "DanFall": {
+          "FilePath": "Sound/SE/DanFall.wav",
+          "BufferNum": 1
+        },
+        "DonBig": {
+          "FilePath": "",
+          "BufferNum": 1
+        },
+        "KaBig": {
+          "FilePath": "",
+          "BufferNum": 1
+        },
+        "FullComboVoice": {
+          "FilePath": "",
+          "BufferNum": 1
+        },
+        "ComboVoice": []
+      },
+      "BGM": {}
+    },
+    "Result": {
+      "Config": {
+        "TitlePos": {
+          "X": 25,
+          "Y": 75
+        },
+        "SubTitlePos": {
+          "X": 25,
+          "Y": 125
+        },
+        "PlayerNamePos": {
+          "X": 760,
+          "Y": 360
+        },
+        "ScorePos": {
+          "X": 290,
+          "Y": 200
+        },
+        "AccracyPos": {
+          "X": 480,
+          "Y": 200
+        },
+        "GoodPos": {
+          "X": 230,
+          "Y": 311
+        },
+        "OkPos": {
+          "X": 230,
+          "Y": 370
+        },
+        "BadPos": {
+          "X": 230,
+          "Y": 429
+        },
+        "RollPos": {
+          "X": 230,
+          "Y": 524
+        },
+        "MaxComboPos": {
+          "X": 230,
+          "Y": 583
+        }
+      },
+      "Image": {
+        "BackGround": {
+          "FilePath": "Image/Result/Background.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 1280,
+            "Height": 720
+          }
+        },
+        "JudgeScore": {
+          "FilePath": "Image/Result/JudgeScore.png",
+          "Pos": {
+            "X": 266,
+            "Y": 447
+          },
+          "Size": {
+            "Width": 480,
+            "Height": 381
+          }
+        },
+        "Accuracy": {
+          "FilePath": "Image/Result/Accuracy.png",
+          "Pos": {
+            "X": 415,
+            "Y": 200
+          },
+          "Size": {
+            "Width": 183,
+            "Height": 66
+          }
+        },
+        "Score": {
+          "FilePath": "Image/Result/Score.png",
+          "Pos": {
+            "X": 170,
+            "Y": 200
+          },
+          "Size": {
+            "Width": 286,
+            "Height": 66
+          }
+        },
+        "Number": {
+          "FilePath": "Image/Result/Number.png",
+          "Div": {
+            "X": 1,
+            "Y": 13
+          },
+          "Size": {
+            "Width": 13,
+            "Height": 26
+          }
+        },
+        "Crown": {
+          "FilePath": "Image/Result/Crown.png",
+          "Pos": {
+            "X": 187,
+            "Y": 200
+          },
+          "Div": {
+            "X": 5,
+            "Y": 1
+          },
+          "Size": {
+            "Width": 26,
+            "Height": 19
+          }
+        },
+        "Back": {
+          "FilePath": "Image/Result/Back.png",
+          "Pos": {
+            "X": 1200,
+            "Y": 80
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        }
+      },
+      "Font": {
+        "Title": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 0,
+          "Size": 50,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": -2
+        },
+        "SubTitle": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 0,
+          "Size": 20,
+          "Thick": 6,
+          "Edge": 0,
+          "Space": 0
+        },
+        "PlayerName": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 0,
+          "Size": 64,
+          "Thick": 6,
+          "Edge": 0,
+          "Space": 0
+        }
+      },
+      "SE": {
+        "Don": {
+          "FilePath": "Sound/SE/Don.wav",
+          "BufferNum": 1
+        },
+        "Ka": {
+          "FilePath": "Sound/SE/ka.wav",
+          "BufferNum": 1
+        }
+      },
+      "BGM": {}
+    },
+    "ConfigMenu": {
+      "Config": {
+        "StringPos": {
+          "X": 240,
+          "Y": 360
+        },
+        "ValPos": {
+          "X": 640,
+          "Y": 360
+        },
+        "BoxDistance": 80
+      },
+      "Image": {
+        "BackGround": {
+          "FilePath": "Image/ConfigMenu/BackGround.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 1280,
+            "Height": 720
+          }
+        },
+        "Box": {
+          "FilePath": "Image/ConfigMenu/Box.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 900,
+            "Height": 60
+          }
+        },
+        "Back": {
+          "FilePath": "Image/ConfigMenu/Back.png",
+          "Pos": {
+            "X": 80,
+            "Y": 80
+          },
+          "Size": {
+            "Width": 80,
+            "Height": 80
+          }
+        }
+      },
+      "Font": {
+        "String": {
+          "FilePath": "Font/MPLUS1p-Medium.ttf",
+          "FontName": "M PLUS 1p Medium",
+          "Position": 0,
+          "Size": 32,
+          "Thick": 10,
+          "Edge": 0,
+          "Space": -2
+        }
+      },
+      "SE": {
+        "Don": {
+          "FilePath": "Sound/SE/Don.wav",
+          "BufferNum": 1
+        },
+        "Ka": {
+          "FilePath": "Sound/SE/ka.wav",
+          "BufferNum": 1
+        }
+      }
+    }
+  }
+}

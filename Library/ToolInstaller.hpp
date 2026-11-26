@@ -297,12 +297,17 @@ namespace tools {
             m_Progress.Total = 0;
             m_Progress.SetText("準備しています");
             m_Progress.State = Progress::Phase::Running;
-            m_Thread = std::thread([this, job = std::move(job), donetext = std::move(donetext)] {
+            try { m_Thread = std::thread([this, job = std::move(job), donetext = std::move(donetext)] {
+                try {
                 std::string error;
-                const bool ok = job(m_Progress, error);
+                bool ok = false;
+                try { ok = job(m_Progress, error); }
+                catch (const std::exception& e) { error = e.what(); }
+                catch (...) { error = "外部ツールの準備中に不明なエラーが発生しました"; }
                 m_Progress.SetText(ok ? donetext : error);
                 m_Progress.State = ok ? Progress::Phase::Done : Progress::Phase::Failed;
-            });
+                } catch(...) { m_Progress.State = Progress::Phase::Failed; }
+            }); } catch(...) { m_Progress.State = Progress::Phase::Failed; throw; }
         }
         void Cancel() { m_Progress.Cancel = true; }
         void Join() {

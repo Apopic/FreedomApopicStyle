@@ -1,10 +1,9 @@
 ﻿// FreedomApopicStyle MultiServer
 // 1 ルーム (最大 4 人) を管理するオンラインプレイ用サーバー (GUI)。
 //
-// 使い方: MultiServer.exe [ポート番号] [--public <IPv4 アドレス>] [--no-upnp] [--autostart] [--minimized] [--parent <プロセス ID>]
+// 使い方: MultiServer.exe [ポート番号] [--public <IPv4 アドレス>] [--autostart] [--minimized] [--parent <プロセス ID>]
 //   ポート番号   : 待ち受けポート (省略時は前回の設定)
 //   --public     : 外部 (インターネット) から参加してもらう時のアドレス (接続先の一覧に表示する)
-//   --no-upnp    : ルーターのポートを UPnP で自動的に開けない (既定では開け、外部アドレスもルーターから取得する)
 //   --autostart  : 起動と同時に待ち受けを開始する
 //   --minimized  : 最小化して起動する
 //   --parent     : 指定したプロセス (ゲーム本体) が終了し、ルームが空になったら自動で終了する
@@ -24,11 +23,9 @@
 #include <windowsx.h>
 #include <commctrl.h>
 #include <shellapi.h>
-#include <natupnp.h>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "ole32.lib")
-#pragma comment(lib, "oleaut32.lib")
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 using namespace fasnet;
@@ -69,7 +66,6 @@ namespace {
 
     struct ServerOptions {
         uint16_t Port = DefaultPort;
-        bool Upnp = true;
         std::optional<std::array<uint8_t, 4>> PublicIp;
     };
 
@@ -154,124 +150,6 @@ namespace {
     bool IsPrivateIp(const std::array<uint8_t, 4>& ip) {
         return ip[0] == 10 || (ip[0] == 192 && ip[1] == 168) || (ip[0] == 172 && ip[1] >= 16 && ip[1] <= 31);
     }
-    // プロバイダ側の NAT (CGNAT, 100.64.0.0/10)
-    bool IsSharedIp(const std::array<uint8_t, 4>& ip) {
-        return ip[0] == 100 && ip[1] >= 64 && ip[1] <= 127;
-    }
-
-    // インターネットへ出る時に使う自分のアドレス (UDP の connect は通信しない。Hyper-V・WSL などの仮想アダプターを選ばないため)
-    std::optional<std::array<uint8_t, 4>> DefaultRouteAddress() {
-        const SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (sock == INVALID_SOCKET) { return std::nullopt; }
-        sockaddr_in remote{};
-        remote.sin_family = AF_INET;
-        remote.sin_port = htons(53);
-        remote.sin_addr.s_addr = htonl(0x08080808);     // 8.8.8.8 (経路を決めるだけで送信はしない)
-        std::optional<std::array<uint8_t, 4>> result;
-        sockaddr_in local{};
-        int len = sizeof(local);
-        if (connect(sock, (const sockaddr*)&remote, sizeof(remote)) == 0 && getsockname(sock, (sockaddr*)&local, &len) == 0) {
-            std::array<uint8_t, 4> ip{};
-            std::memcpy(ip.data(), &local.sin_addr, 4);
-            result = ip;
-        }
-        closesocket(sock);
-        return result;
-    }
-    // 接続先に使えない外部アドレス (0.x・ループバック・リンクローカル・ブロードキャスト)
-    bool IsUnusableIp(const std::array<uint8_t, 4>& ip) {
-        return ip[0] == 0 || ip[0] == 127 || (ip[0] == 169 && ip[1] == 254) || ip[0] >= 224;
-    }
-
-    // ---- UPnP: ルーターのポートを自動で開ける (手動のポート開放の代わり) ----
-    // Windows の NAT 機能 (NATUPnP) を使う。ルーターの UPnP が無効・未対応なら失敗する
-    struct UpnpResult {
-        bool Ok = false;
-        std::optional<std::array<uint8_t, 4>> External;     // ルーターの外側のアドレス
-        std::string Message;
-    };
-    class UpnpMapping {
-    public:
-        // 別スレッドで呼ぶ (数秒かかることがある)
-        static UpnpResult Add(uint16_t port) {
-            UpnpResult result;
-            std::array<uint8_t, 4> internal{};
-            bool found = false;
-            if (auto route = DefaultRouteAddress(); route && IsPrivateIp(*route)) {
-                internal = *route;
-                found = true;
-            }
-            for (const auto& ip : LocalAddresses()) {
-                if (found) { break; }
-                if (IsPrivateIp(ip)) { internal = ip; found = true; }
-            }
-            if (!found) {
-                result.Message = "ルーターの内側のアドレスが見つかりません (UPnP は使えません)";
-                return result;
-            }
-            Com com;
-            IStaticPortMappingCollection* mappings = Collection();
-            if (mappings == nullptr) {
-                result.Message = "ルーターの UPnP が見つかりません (ルーターの設定で UPnP を有効にするか、手動でポートを開放してください)";
-                return result;
-            }
-            BSTR protocol = SysAllocString(L"TCP");
-            const std::string internaltext = IpText(internal);
-            BSTR client = SysAllocString(std::wstring(internaltext.begin(), internaltext.end()).c_str());
-            BSTR description = SysAllocString(L"FreedomApopicStyle MultiServer");
-            IStaticPortMapping* mapping = nullptr;
-            const HRESULT hr = mappings->Add(port, protocol, port, client, VARIANT_TRUE, description, &mapping);
-            if (SUCCEEDED(hr) && mapping != nullptr) {
-                result.Ok = true;
-                BSTR external = nullptr;
-                if (SUCCEEDED(mapping->get_ExternalIPAddress(&external)) && external != nullptr) {
-                    const std::wstring w(external);
-                    result.External = ParseIPv4(std::string(w.begin(), w.end()));
-                    SysFreeString(external);
-                }
-                mapping->Release();
-                result.Message = std::format("UPnP でルーターのポート {} を開けました", port);
-            }
-            else {
-                result.Message = std::format("UPnP でポートを開けられませんでした (エラー 0x{:08X})。手動でポートを開放してください", (uint32_t)hr);
-            }
-            SysFreeString(protocol);
-            SysFreeString(client);
-            SysFreeString(description);
-            mappings->Release();
-            return result;
-        }
-        static void Remove(uint16_t port) {
-            Com com;
-            if (IStaticPortMappingCollection* mappings = Collection()) {
-                BSTR protocol = SysAllocString(L"TCP");
-                mappings->Remove(port, protocol);
-                SysFreeString(protocol);
-                mappings->Release();
-            }
-        }
-    private:
-        struct Com {
-            HRESULT Init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-            ~Com() { if (SUCCEEDED(Init)) { CoUninitialize(); } }
-        };
-        static IStaticPortMappingCollection* Collection() {
-            IUPnPNAT* nat = nullptr;
-            if (FAILED(CoCreateInstance(__uuidof(UPnPNAT), nullptr, CLSCTX_ALL, __uuidof(IUPnPNAT), (void**)&nat)) || nat == nullptr) {
-                return nullptr;
-            }
-            IStaticPortMappingCollection* mappings = nullptr;
-            // ルーターの検出に時間がかかると最初は nullptr が返ることがあるので、少し待ってやり直す
-            for (int i = 0; i < 6 && mappings == nullptr; ++i) {
-                if (FAILED(nat->get_StaticPortMappingCollection(&mappings)) || mappings == nullptr) {
-                    mappings = nullptr;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                }
-            }
-            nat->Release();
-            return mappings;
-        }
-    };
 
     class Server {
     public:
@@ -293,7 +171,6 @@ namespace {
         void Run() {
             std::vector<Connection::Message> messages;
             while (!m_Stop.load()) {
-                TakePosts();
                 AcceptClients();
 
                 for (auto& client : m_Clients) {
@@ -323,13 +200,6 @@ namespace {
         }
         void Stop() { m_Stop = true; }
 
-        // 別スレッド (UPnP) から: ログと、ルーターから分かった外部アドレス
-        void Post(std::string log, std::optional<std::array<uint8_t, 4>> publicip = std::nullopt) {
-            std::lock_guard lock(m_PostMutex);
-            m_PostLogs.push_back(std::move(log));
-            if (publicip) { m_PostIp = publicip; }
-        }
-
         Snapshot GetSnapshot() const {
             std::lock_guard lock(m_SnapshotMutex);
             return m_Snapshot;
@@ -340,34 +210,6 @@ namespace {
         }
 
     private:
-        void TakePosts() {
-            std::vector<std::string> logs;
-            std::optional<std::array<uint8_t, 4>> ip;
-            {
-                std::lock_guard lock(m_PostMutex);
-                logs.swap(m_PostLogs);
-                ip.swap(m_PostIp);
-            }
-            for (auto& log : logs) { Log(log); }
-            if (ip && !m_Options.PublicIp) {
-                if (IsUnusableIp(*ip)) {
-                    Log("ルーターから外部アドレスを取得できませんでした (" + IpText(*ip) + ")");
-                    return;
-                }
-                if (IsPrivateIp(*ip) || IsSharedIp(*ip)) {
-                    Log("ルーターの外側にもう 1 段 NAT があるため (" + IpText(*ip) + ")、インターネットからは参加できません (同じ LAN からは参加できます)");
-                    return;
-                }
-                m_Options.PublicIp = ip;
-                BuildAddresses();
-                Log("外部アドレス: " + IpText(*ip) + ":" + std::to_string(m_Options.Port));
-                // 参加済みの人にも新しい接続先を送る (Welcome を送り直す。PlayerId は同じ)
-                for (auto& client : m_Clients) {
-                    if (client.Id != 0 && !client.CloseAt) { client.Conn->Send(Msg::Welcome, MakeWelcome(client.Id)); }
-                }
-                m_PublishDirty = true;
-            }
-        }
         Welcome MakeWelcome(uint32_t id) const {
             Welcome welcome;
             welcome.PlayerId = id;
@@ -838,15 +680,12 @@ namespace {
         Clock::time_point m_LastPublish{};
         mutable std::mutex m_SnapshotMutex;
         Snapshot m_Snapshot;
-        std::mutex m_PostMutex;
-        std::vector<std::string> m_PostLogs;
-        std::optional<std::array<uint8_t, 4>> m_PostIp;
     };
 
     // ------------------------------------------------------------ 画面 (Win32)
 
     enum ControlId : int {
-        IdPort = 100, IdUpnp, IdPublic, IdStartStop, IdCodes, IdCopy, IdPlayers, IdLogs, IdStatus,
+        IdPort = 100, IdPublic, IdStartStop, IdCodes, IdCopy, IdPlayers, IdLogs, IdStatus,
         IdLabelPort, IdLabelPublic, IdLabelCodes, IdLabelPlayers, IdLabelLogs, IdHint,
     };
     constexpr UINT_PTR RefreshTimer = 1;
@@ -864,8 +703,6 @@ namespace {
         HANDLE Parent = nullptr;            // --parent のプロセス
         bool ParentGone = false;
         std::wstring IniPath;
-        uint16_t MappedPort = 0;            // UPnP で開けたポート (停止時に閉じる)
-        std::thread UpnpThread;
     } g;
 
     HWND Ctrl(int id) { return GetDlgItem(g.Window, id); }
@@ -924,7 +761,6 @@ namespace {
         int x = m;
         place(IdLabelPort, x, y + Scale(4), Scale(48), h); x += Scale(50);
         place(IdPort, x, y, Scale(70), h); x += Scale(80);
-        place(IdUpnp, x, y, Scale(170), h); x += Scale(174);
         place(IdLabelPublic, x, y + Scale(4), Scale(80), h); x += Scale(82);
         place(IdPublic, x, y, Scale(130), h); x += Scale(140);
         place(IdStartStop, std::max<int>(x, (int)rc.right - m - Scale(100)), y, Scale(100), h);
@@ -954,18 +790,12 @@ namespace {
 
     void SaveSettings() {
         WritePrivateProfileStringW(L"Server", L"Port", GetText(IdPort).c_str(), g.IniPath.c_str());
-        WritePrivateProfileStringW(L"Server", L"Upnp", Button_GetCheck(Ctrl(IdUpnp)) == BST_CHECKED ? L"1" : L"0", g.IniPath.c_str());
         WritePrivateProfileStringW(L"Server", L"Public", GetText(IdPublic).c_str(), g.IniPath.c_str());
     }
 
     bool IsRunning() { return g.Srv != nullptr; }
 
     void StopServer() {
-        if (g.UpnpThread.joinable()) { g.UpnpThread.join(); }
-        if (g.MappedPort != 0) {
-            UpnpMapping::Remove(g.MappedPort);      // 開けたポートを閉じる
-            g.MappedPort = 0;
-        }
         if (!g.Srv) { return; }
         g.Srv->Stop();
         if (g.Thread.joinable()) { g.Thread.join(); }
@@ -982,7 +812,6 @@ namespace {
             return;
         }
         options.Port = *port;
-        options.Upnp = Button_GetCheck(Ctrl(IdUpnp)) == BST_CHECKED;
         const std::string pub = Narrow(GetText(IdPublic));
         if (!pub.empty()) {
             options.PublicIp = ParseIPv4(pub);
@@ -1001,15 +830,6 @@ namespace {
         SaveSettings();
         g.Srv = std::move(server);
         g.Thread = std::thread([srv = g.Srv.get()] { srv->Run(); });
-        if (options.Upnp) {
-            // ルーターとのやり取りは時間がかかるので別スレッドで行い、結果をサーバーに渡す
-            g.Srv->Post("UPnP でルーターのポートを開けています...");
-            g.UpnpThread = std::thread([srv = g.Srv.get(), port = options.Port] {
-                UpnpResult result = UpnpMapping::Add(port);
-                if (result.Ok) { g.MappedPort = port; }
-                srv->Post(result.Message, result.External);
-            });
-        }
     }
 
     void Refresh() {
@@ -1050,10 +870,10 @@ namespace {
         }
         SetText(IdStatus, status);
         SetText(IdHint, running && !g.Shown.HasPublic
-            ? L"インターネットから参加してもらう時は、ルーターの UPnP を有効にするか、手動でポートを開放して外部アドレスを入れてください"
+            ? L"インターネットから参加してもらう時は、ルーターでポートを開放して外部アドレスを入れてください"
             : L"接続先を選んで「コピー」し、参加する人に伝えてください (ゲームのオンライン画面で入力します)");
         SetText(IdStartStop, running ? L"停止" : L"開始");
-        for (int id : { IdPort, IdUpnp, IdPublic }) {
+        for (int id : { IdPort, IdPublic }) {
             EnableWindow(Ctrl(id), !running);
         }
         EnableWindow(Ctrl(IdCopy), running && !g.Shown.Addresses.empty());
@@ -1103,7 +923,6 @@ namespace {
             };
             make(L"STATIC", L"ポート", 0, IdLabelPort);
             make(L"EDIT", L"", WS_TABSTOP | ES_NUMBER | ES_AUTOHSCROLL, IdPort, WS_EX_CLIENTEDGE);
-            make(L"BUTTON", L"UPnP で自動ポート開放", WS_TABSTOP | BS_AUTOCHECKBOX, IdUpnp);
             make(L"STATIC", L"外部アドレス", 0, IdLabelPublic);
             make(L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, IdPublic, WS_EX_CLIENTEDGE);
             make(L"BUTTON", L"開始", WS_TABSTOP | BS_PUSHBUTTON, IdStartStop);
@@ -1196,7 +1015,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
     wchar_t buf[256]{};
     GetPrivateProfileStringW(L"Server", L"Port", std::to_wstring(DefaultPort).c_str(), buf, 256, g.IniPath.c_str());
     std::wstring port = buf;
-    bool upnp = GetPrivateProfileIntW(L"Server", L"Upnp", 1, g.IniPath.c_str()) != 0;
     GetPrivateProfileStringW(L"Server", L"Public", L"", buf, 256, g.IniPath.c_str());
     std::wstring publicip = buf;
     bool autostart = false, minimized = false;
@@ -1206,7 +1024,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
     for (int i = 1; argv != nullptr && i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--public" && i + 1 < argc) { publicip = argv[++i]; }
-        else if (arg == L"--no-upnp") { upnp = false; }
         else if (arg == L"--autostart") { autostart = true; }
         else if (arg == L"--minimized") { minimized = true; }
         else if (arg == L"--parent" && i + 1 < argc) {
@@ -1236,7 +1053,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int show) {
     SetWindowPos(hwnd, nullptr, 0, 0, Scale(900), Scale(620), SWP_NOMOVE | SWP_NOZORDER);
 
     SetWindowTextW(Ctrl(IdPort), port.c_str());
-    Button_SetCheck(Ctrl(IdUpnp), upnp ? BST_CHECKED : BST_UNCHECKED);
     SetWindowTextW(Ctrl(IdPublic), publicip.c_str());
 
     ShowWindow(hwnd, minimized ? SW_SHOWMINNOACTIVE : show);

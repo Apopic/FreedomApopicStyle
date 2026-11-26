@@ -4,13 +4,14 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace tstretch {
 
     // in: インターリーブの float (channels チャンネル)。speed 倍の速さ (長さは 1/speed) にした音を返す。cancel が立ったら途中でやめて空を返す
     inline std::vector<float> Wsola(const std::vector<float>& in, int channels, int rate, double speed, const std::atomic_bool* cancel = nullptr) {
-        if (channels <= 0 || rate <= 0 || speed <= 0) { return {}; }
+        if (channels <= 0 || channels > 32 || rate < 1000 || rate > 768000 || !std::isfinite(speed) || speed <= 0) { return {}; }
         const size_t frames = in.size() / (size_t)channels;
         if (std::abs(speed - 1.0) < 1e-9) { return in; }
         int n = (int)(rate * 0.046);          // 1 枠 約 46ms
@@ -27,7 +28,9 @@ namespace tstretch {
             for (int c = 0; c < channels; ++c) { sum += in[f * channels + c]; }
             mono[f] = sum / channels;
         }
-        const size_t outframes = (size_t)(frames / speed) + n;
+        const double targetframes = frames / speed;
+        if (!std::isfinite(targetframes) || targetframes >= (double)(std::numeric_limits<size_t>::max() / channels - n)) { return {}; }
+        const size_t outframes = (size_t)targetframes + n;
         std::vector<float> out(outframes * channels, 0.0f), weight(outframes, 0.0f);
         long long prev = 0;     // 前の枠を取り出した入力の位置
         for (size_t k = 0;; ++k) {

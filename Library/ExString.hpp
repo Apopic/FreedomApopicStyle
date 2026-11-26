@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <unordered_map>
+#include "OsuTaiko.hpp"
 #include "DxLib.h"
 #include "fast_float.h"
 
@@ -39,7 +40,8 @@ inline std::string ToLower(std::string_view str) {
 
 inline size_t GetStrlen(std::string_view data, int handle) {
     std::string str(data);
-    return GetDrawStringWidthToHandle(str.c_str(), strlenDx(str.c_str()), handle);
+    const int width = GetDrawStringWidthToHandle(str.c_str(), (int)str.size(), handle);
+    return width > 0 ? (size_t)width : 0;
 }
 
 // 毎フレーム同じ文字列の幅を測る描画処理向けのキャッシュ (メインスレッド専用)
@@ -62,7 +64,9 @@ inline size_t GetStrlenCached(std::string_view data, int handle) {
     if (auto it = cache.find(key); it != cache.end()) {
         return it->second;
     }
-    return cache.emplace(std::move(key), GetStrlen(data, handle)).first->second;
+    const auto width = GetStrlen(data, handle);
+    if (width == 0) { return 0; } // フォントの準備前の失敗はキャッシュしない
+    return cache.emplace(std::move(key), width).first->second;
 }
 
 template<typename func>
@@ -193,7 +197,7 @@ struct TextLines {
     std::string data;
     std::vector<std::string_view> lines;
 
-    bool Load(const std::filesystem::path& path) {
+    bool Load(const std::filesystem::path& path, bool osuMetadataOnly = false) {
         data.clear();
         lines.clear();
 
@@ -202,16 +206,16 @@ struct TextLines {
             return false;
         }
         const auto size = ifs.tellg();
-        if (size < 0) {
+        if (size < 0 || size > 64 * 1024 * 1024) {
             return false;
         }
         data.resize(static_cast<size_t>(size));
         ifs.seekg(0, std::ios::beg);
-        ifs.read(data.data(), size);
+        if (!ifs.read(data.data(), size)) { data.clear(); return false; }
         ifs.close();
 
-        Parse();
-        return true;
+        Parse(osuMetadataOnly);
+        return !lines.empty();
     }
 
     // ネットワーク経由で受け取った譜面など、ファイルを介さずに読み込む
@@ -223,7 +227,7 @@ struct TextLines {
 
 private:
 
-    void Parse() {
+    void Parse(bool osuMetadataOnly = false) {
         // UTF-8 BOM があると 1 行目 (TITLE: など) が一致しなくなるため除去する
         if (data.starts_with("\xEF\xBB\xBF")) {
             data.erase(0, 3);
@@ -231,6 +235,18 @@ private:
 #ifndef __ANDROID__
         data = SjisToUtf8(data);
 #endif
+        if (data.starts_with("osu file format v")) {
+            if (osuMetadataOnly) {
+                const auto metadata = osutaiko::Metadata(data);
+                if (!metadata) { data.clear(); return; }
+                data = *metadata;
+            }
+            else {
+                const auto converted = osutaiko::Parse(data);
+                if (!converted) { data.clear(); return; }
+                data = converted->Write();
+            }
+        }
 
         lines.reserve(std::count(data.begin(), data.end(), '\n') + 1);
         std::string_view view(data);

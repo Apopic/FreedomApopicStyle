@@ -51,5 +51,3 @@ public:
     }
 #endif
 };
-
-#define SoundDevice SoundDevice::GetInstance()

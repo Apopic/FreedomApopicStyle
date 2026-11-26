@@ -6,9 +6,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cctype>
 #include <numeric>
 #include <string>
 #include <string_view>
+#include <stdexcept>
 #include <vector>
 
 namespace tja {
@@ -42,8 +44,8 @@ namespace tja {
         return l < r ? -1 : (l > r ? 1 : 0);
     }
     inline void Reduce(int64_t& num, int64_t& den) {
-        if (den <= 0) { num = 0; den = 1; return; }
-        const int64_t g = std::gcd(num < 0 ? -num : num, den);
+        if (den <= 0 || num < 0) { num = 0; den = 1; return; }
+        const int64_t g = std::gcd(num, den);
         if (g > 1) { num /= g; den /= g; }
         if (num == 0) { den = 1; }
     }
@@ -170,6 +172,8 @@ namespace tja {
                     if (!Trim(line).empty()) { doc.Header.push_back(std::move(line)); }
                 }
             }
+            NormalizeURLHeaders(doc.Header);
+            for (auto& c : doc.Courses) { NormalizeURLHeaders(c.Header); }
             return doc;
         }
 
@@ -189,6 +193,33 @@ namespace tja {
         }
 
         // ---------------------------------------------------------------- ヘッダー
+        // 旧名称を読み込み、新名称に統一する。両方ある場合は空でない新名称を優先。
+        static void NormalizeURLHeaders(std::vector<std::string>& lines) {
+            auto normalize = [&](std::string_view oldKey, std::string_view newKey) {
+                const std::string oldPrefix = std::string(oldKey) + ":", newPrefix = std::string(newKey) + ":";
+                std::string oldValue, newValue;
+                bool found = false;
+                for (const auto& line : lines) {
+                    const auto trimmed = Trim(line);
+                    if (StartsWithKey(trimmed, newPrefix)) {
+                        found = true;
+                        if (auto v = Trim(trimmed.substr(newPrefix.size())); !v.empty()) newValue = v;
+                    } else if (StartsWithKey(trimmed, oldPrefix)) {
+                        found = true;
+                        if (auto v = Trim(trimmed.substr(oldPrefix.size())); !v.empty()) oldValue = v;
+                    }
+                }
+                if (!found) return;
+                bool written = false;
+                for (auto it = lines.begin(); it != lines.end();) {
+                    if (!StartsWithKey(*it, oldPrefix) && !StartsWithKey(*it, newPrefix)) { ++it; continue; }
+                    if (!written) { *it = newPrefix + (newValue.empty() ? oldValue : newValue); written = true; ++it; }
+                    else { it = lines.erase(it); }
+                }
+            };
+            normalize("SONGLINK", "SONGURL");
+            normalize("MOVIELINK", "MOVIEURL");
+        }
         static std::string GetValue(const std::vector<std::string>& lines, std::string_view key) {
             const std::string k = std::string(key) + ":";
             for (const auto& l : lines) {
@@ -247,10 +278,22 @@ namespace tja {
     private:
         template<class Line>
         static void WriteMeasure(const Measure& m, Line& line) {
+            constexpr int64_t maxResolution = 1024 * 1024;
+            auto lcm = [](int64_t a, int64_t b) {
+                if (a <= 0 || b <= 0 || b > maxResolution || a / std::gcd(a, b) > maxResolution / b) {
+                    throw std::length_error("小節の分割数が大きすぎます (上限 1048576)");
+                }
+                return a / std::gcd(a, b) * b;
+            };
             int64_t den = m.Notes.empty() ? 1 : std::max<int64_t>(m.Resolution, 1);
-            for (const auto& n : m.Notes) { den = std::lcm(den, n.Den); }
+            if (den > maxResolution) { throw std::length_error("小節の分割数が大きすぎます"); }
+            for (const auto& n : m.Notes) {
+                if (n.Num < 0 || n.Den <= 0 || n.Num >= n.Den) { throw std::invalid_argument("音符の位置が範囲外です"); }
+                den = lcm(den, n.Den);
+            }
             for (const auto& c : m.Commands) {
-                if (c.Num < c.Den) { den = std::lcm(den, c.Den); }
+                if (c.Num < 0 || c.Den <= 0 || c.Num > c.Den) { throw std::invalid_argument("命令の位置が範囲外です"); }
+                if (c.Num < c.Den) { den = lcm(den, c.Den); }
             }
             const bool has_notes = !m.Notes.empty();
             std::string notes(has_notes ? (size_t)den : 0, '0');
