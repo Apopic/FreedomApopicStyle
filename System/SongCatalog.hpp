@@ -599,6 +599,9 @@
     struct ScoreData {
         uint64_t Score = 0;
         int Crown = 0;
+        uint64_t Good = 0, Ok = 0, Bad = 0, Roll = 0, MaxCombo = 0;
+        double Accuracy = 0;
+        bool HasResult = false;
     };
 
     SoundData DemoSong = SoundData();

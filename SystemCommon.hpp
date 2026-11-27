@@ -54,6 +54,7 @@ public:
         JSONDATA(PlayerName);
         JSONDATA(TitleName);
         JSONDATA(AutoPlay);
+        JSONDATA(PauseDisplay);
         JSONDATA(ServerAddress);
         JSONDATA(ServerPort);
         JSONDATA(DiscordRPC);
@@ -136,6 +137,7 @@ public:
                 JSONDATA(PlayerName),
                 JSONDATA(TitleName),
                 JSONDATA(AutoPlay),
+                JSONDATA(PauseDisplay),
                 JSONDATA(ServerAddress),
                 JSONDATA(ServerPort),
                 JSONDATA(DiscordRPC),
@@ -260,6 +262,7 @@ public:
     bool DiscordRPC = true;             // Discord にステータスを表示する (アプリケーション ID はゲームに組み込み)
 
     bool AutoPlay = false;
+    bool PauseDisplay = false;
     bool TrainingMode = false;
     bool HitNoteDisp = true;
     int FrameRate = 0;                 // 0: 従来の描画間隔、1～1000: FPS 上限
@@ -630,6 +633,7 @@ public:
 #pragma region DanSelect
 
         ValLoad(DanSelect, Config, BoxDistance);
+        ValLoad(DanSelect, Config, BoxSlice);
         ValLoad(DanSelect, Config, SongBoxListPos);
         ValLoad(DanSelect, Config, KeyWordPos);
 
@@ -717,6 +721,28 @@ public:
         DataLoad(Playing, Image, ExamProgressBar);
         DataLoad(Playing, Image, Back);
         DataLoad(Playing, Image, Pause);
+        DataLoad(Playing, Image, PauseShade);
+        DataLoad(Playing, Image, PausePanel);
+        DataLoad(Playing, Image, PauseResume);
+        DataLoad(Playing, Image, PauseRestart);
+        DataLoad(Playing, Image, PauseExit);
+        DataLoad(Playing, Image, PauseCursor);
+        auto pauseFallback = [&](GraphData& image, const char* name, float x, float y, float w, float h) {
+            if (!image.Handles.empty()) { return; }
+            fs::path path = skinDirectory.parent_path()/"Default"/"Image"/"Playing"/"PauseMenu"/name;
+            std::error_code ec;
+            if (!fs::is_regular_file(path, ec)) { path = GetExecutablePath()/"Skins"/"Default"/"Image"/"Playing"/"PauseMenu"/name; }
+            const auto utf8 = path.generic_u8string();
+            image.Load(std::string(utf8.begin(), utf8.end()));
+            const float sx = Info.Resolution.X/1280.0f, sy = Info.Resolution.Y/720.0f;
+            image.Pos = {x*sx, y*sy}; image.Size = {w*sx, h*sy};
+        };
+        pauseFallback(Base->Playing.Image.PauseShade,"Shade.png",640,360,1280,720);
+        pauseFallback(Base->Playing.Image.PausePanel,"Panel.png",640,360,720,480);
+        pauseFallback(Base->Playing.Image.PauseResume,"Resume.png",640,326,420,64);
+        pauseFallback(Base->Playing.Image.PauseRestart,"Restart.png",640,410,420,64);
+        pauseFallback(Base->Playing.Image.PauseExit,"Exit.png",640,494,420,64);
+        pauseFallback(Base->Playing.Image.PauseCursor,"Cursor.png",640,326,444,80);
         DataLoad(Playing, Image, KeyMapBox);
         DataLoad(Playing, Image, PlayerChar);
         ValLoad(Playing, Config, KeyMapDistance);
@@ -937,6 +963,7 @@ public:
         } SongSelect;
         struct _DanSelect {
             struct _Config {
+                float BoxSlice = 16;
                 Pos2D<float> BoxDistance;
                 Pos2D<float> SongBoxListPos;
                 Pos2D<float> KeyWordPos;
@@ -1045,6 +1072,7 @@ public:
                 GraphData ExamProgressBar;
                 GraphData Back;
                 GraphData Pause;
+                GraphData PauseShade, PausePanel, PauseResume, PauseRestart, PauseExit, PauseCursor;
                 GraphData KeyMapBox;
                 GraphData PlayerChar;
             } Image;

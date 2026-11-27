@@ -181,9 +181,20 @@ namespace tja {
         std::string Write() const {
             std::string out;
             auto line = [&](std::string_view s) { out.append(s); out.append("\r\n"); };
-            for (const auto& h : Header) { line(h); }
+            auto header = [&](const std::vector<std::string>& lines) {
+                size_t begin = 0, end = lines.size();
+                while (begin < end && Trim(lines[begin]).empty()) { ++begin; }
+                while (end > begin && Trim(lines[end - 1]).empty()) { --end; }
+                for (size_t i = begin; i < end; ++i) { line(lines[i]); }
+            };
+            auto separate = [&] {
+                if (!out.empty() && !out.ends_with("\r\n\r\n")) { line(""); }
+            };
+            header(Header);
             for (const auto& c : Courses) {
-                for (const auto& h : c.Header) { line(h); }
+                separate();
+                header(c.Header);
+                separate();
                 line(c.StartLine);
                 for (const auto& m : c.Measures) { WriteMeasure(m, line); }
                 for (const auto& t : c.Trailing) { line(t); }
@@ -267,7 +278,7 @@ namespace tja {
         // 新しい譜面 (1 コース、空の小節 count 個)
         static Document NewChart(const std::string& title, const std::string& wave, int measures = 16) {
             Document doc;
-            doc.Header = { "TITLE:" + title, "SUBTITLE:", "BPM:120", "WAVE:" + wave, "OFFSET:0", "DEMOSTART:0" };
+            doc.Header = { "TITLE:" + title, "SUBTITLE:", "BPM:120", "WAVE:" + wave, "OFFSET:0", "DEMOSTART:0", "SONGVOL:100", "SEVOL:100" };
             Course c;
             c.Header = { "COURSE:Oni", "LEVEL:1", "BALLOON:" };
             c.Measures.resize((size_t)std::max(measures, 1));

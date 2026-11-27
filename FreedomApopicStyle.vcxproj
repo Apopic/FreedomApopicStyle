@@ -175,6 +175,12 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <Target Name="InstallPauseSkin" AfterTargets="Build">
+    <ItemGroup>
+      <DefaultPauseSkinFile Include="$(MSBuildProjectDirectory)/Android/app/src/main/assets/Default/Image/Playing/PauseMenu/*.png" />
+    </ItemGroup>
+    <Copy SourceFiles="%(DefaultPauseSkinFile.Identity)" DestinationFiles="$(TargetDir)Skins/Default/Image/Playing/PauseMenu/%(DefaultPauseSkinFile.Filename)%(DefaultPauseSkinFile.Extension)" Condition="!Exists('$(TargetDir)Skins/Default/Image/Playing/PauseMenu/%(DefaultPauseSkinFile.Filename)%(DefaultPauseSkinFile.Extension)')" />
+  </Target>
   <Target Name="InstallDefaultSkin" AfterTargets="Build" Condition="!Exists('$(TargetDir)Skins/Default/skinconfig.json')">
     <ItemGroup>
       <DefaultSkinFile Include="$(MSBuildProjectDirectory)/Android/app/src/main/assets/Default/**/*" Exclude="$(MSBuildProjectDirectory)/Android/app/src/main/assets/Default/Font/**/*" />

@@ -10,7 +10,7 @@
 
     // 編集画面のボタンの絵 (None は文字のボタン)
     Scene EditorReturnScene=Scene::ModeSelect;
-    enum class EditorIcon { None, Save, Test, Close, Play, Stop, Undo, Redo, Insert, Delete, Fold, Unfold, AudioLength, DemoStart, WaveAlign, Header, Command, Gimmick, Estimate, Left, Right, Note, Select, Copy, Cut, Paste, SpeedDown, SpeedUp, SpeedValue, JiroPreview, TaikoSound };
+    enum class EditorIcon { None, Save, Test, Close, Play, Stop, Undo, Redo, Insert, Delete, Fold, Unfold, AudioLength, DemoStart, WaveAlign, Header, Command, Gimmick, Estimate, Left, Right, Note, Select, Copy, Cut, Paste, SpeedDown, SpeedUp, SpeedValue, JiroPreview, TaikoSound, Visible, Hidden };
     struct EditorButton {
         UIRect Rect;
         std::string Label;              // 絵のボタンでは名前 (マウスを乗せると出す)
@@ -410,6 +410,8 @@
     UIRect EditorEditButton(int i) const;
     UIRect EditorStartButton(int i) const;
     UIRect EditorWaveButton(int row) const;
+    UIRect EditorHeaderVisibilityButton(int row) const;
+    void EditorToggleHeaderVisibility(const char* key);
     UIRect EditorHeaderButton(int i) const;
 
     static unsigned int EditorNoteColor(char type);

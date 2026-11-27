@@ -10,7 +10,7 @@
     bool IsScoreCacheLoaded = false;
 
     const json& GetScoreCache();
-    void ScoreDataSave(uint64_t score, int crown);
+    void ScoreDataSave(uint64_t score, int crown, const JudgeData* result = nullptr);
     ScoreData ScoreDataLoad(const std::string& chartpath, int courseindex);
     void ResultEnd();
     void ResultDraw();

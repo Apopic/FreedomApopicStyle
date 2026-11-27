@@ -1641,6 +1641,7 @@ auto Game::EditorGimmicks() -> const std::vector<EditorGimmick>& {
         { "背面逆走", "長さ(小節)", "1/1", "逆走中に SCROLL -1 の音符を流す" },
         { "連打背景", "なし (Enter)", "", "1 つ前の小節に黄色連打を重ねる (マイナス #MEASURE 式)" },
         { "ダミーノーツ (逆走式)", "なし (Enter)", "", "カーソルの小節の音符を、譜面の最後に書いたダミーとして同じ場所に重ねて見せる" },
+        { "慣性移動", "開始BPM 開始拍子 段数 減速倍率", "400 1/8 4 1/2", "BPM と拍子を段階ごとに同じ倍率で小さくし、慣性で減速する動きを作る。最後に元の BPM・拍子へ戻す" },
     };
     return list;
 }
@@ -1809,6 +1810,27 @@ std::optional<std::vector<std::string>> Game::EditorBuildGimmick(int index, cons
         place = 2;
         out = { "#BPMCHANGE " + EditorNum(-end.Bpm), "#MEASURE " + EditorFracText(-distance * 1000.0, 1000.0), "0,",
             "#BPMCHANGE " + bpm, "#MEASURE " + EditorFracText(t.Measure.Num, t.Measure.Den), notes + "," };
+        break;
+    }
+    case 16: { // 慣性移動
+        const auto start = frac(0, "400"), measure = frac(1, "1/8"), steps = frac(2, "4"), ratio = frac(3, "1/2");
+        if (!start || !measure || !steps || !ratio || start->Value() <= 0 || measure->Num <= 0 || measure->Den <= 0
+            || steps->Value() < 1 || steps->Value() > 16 || std::floor(steps->Value()) != steps->Value()
+            || ratio->Num <= 0 || ratio->Den <= 0 || ratio->Value() >= 1) {
+            return bad("開始BPM・拍子を正の値、段数を 1～16、減速倍率を 0 より大きく 1 より小さくしてください (例: 400 1/8 4 1/2)");
+        }
+        double speed = start->Value(), num = measure->Num, den = measure->Den;
+        for (int step = 0; step < (int)steps->Value(); ++step) {
+            if (!std::isfinite(speed) || speed < 0.001 || speed >= 120000 || !std::isfinite(num) || !std::isfinite(den)
+                || num < 0.000001 || den < 0.000001 || num > 1000000000 || den > 1000000000) {
+                return bad("BPM または拍子が範囲外になります。開始値・段数・減速倍率を調整してください");
+            }
+            out.insert(out.end(), { "#BPMCHANGE " + EditorNum(speed), "#MEASURE " + EditorFracText(num, den), "," });
+            speed *= ratio->Value();
+            num *= ratio->Num;
+            den *= ratio->Den;
+        }
+        restore();
         break;
     }
     default:
@@ -2271,7 +2293,7 @@ auto Game::EditorCommandSections() -> const std::vector<EditorPanelSection>& {
 
 auto Game::EditorGimmickSections() -> const std::vector<EditorPanelSection>& {
     static const std::vector<EditorPanelSection> list = {
-        { "速度・逆走", { 0, 1, 8 } }, { "停止", { 2, 3, 11, 12 } }, { "瞬間移動", { 4, 5, 6 } },
+        { "速度・逆走", { 0, 1, 8, 16 } }, { "停止", { 2, 3, 11, 12 } }, { "瞬間移動", { 4, 5, 6 } },
         { "出現・点滅", { 7, 9, 10 } }, { "背面・その他", { 13, 14, 15 } },
     };
     return list;
@@ -2307,7 +2329,7 @@ auto Game::EditorGimmickLayout() const -> EditorPanelLayout { return EditorSecti
 
 auto Game::EditorHeaderFields() -> const std::vector<EditorHeaderField>& {
     static const std::vector<EditorHeaderField> fields = {
-        { "TITLE", false, "曲名" }, { "SUBTITLE", false, "サブタイトル (--で非表示)" }, { "BPM", false, "最初の BPM" },
+        { "TITLE", false, "曲名" }, { "SUBTITLE", false, "サブタイトル" }, { "BPM", false, "最初の BPM" },
         { "WAVE", false, "音源ファイル (譜面からの相対パス)" }, { "SONGURL", false, "音源の URL" },
         { "BGMOVIE", false, "背景動画 (譜面からの相対パス)" }, { "MOVIEURL", false, "動画の URL" },
         { "MOVIEOFFSET", false, "動画の開始位置のずれ (秒。正で遅く)" },
@@ -2533,7 +2555,7 @@ void Game::EditorDraw() {
             }
         }
         else {
-            UIText(sfont, p.L + 16, p.T + lh, FitText("ヘッダー (クリックで編集。コースの項目は今のコースだけ)", sfont.Handle, p.R - p.L - 32, false), white);
+            UIText(sfont, p.L + 16, p.T + lh, FitText("ヘッダー (クリックで編集 / 目: 演奏画面の表示切替 / コース項目は今のコースだけ)", sfont.Handle, p.R - p.L - 32, false), white);
             const auto& fields = EditorHeaderFields();
             // 値の欄は、いちばん長い項目名のすぐ右から (説明が省略されにくいよう、名前の欄を必要な幅だけにする)
             float keyw = 0;
@@ -2541,17 +2563,29 @@ void Game::EditorDraw() {
             for (int i = 0; i < (int)fields.size(); ++i) {
                 const UIRect r = EditorPanelRow(i, 2);
                 const auto& f = fields[i];
-                const std::string value = tja::Document::GetValue(f.CourseField ? EditorCourse()->Header : Editor.Doc.Header, f.Key);
+                std::string value = tja::Document::GetValue(f.CourseField ? EditorCourse()->Header : Editor.Doc.Header, f.Key);
+                if (value.empty() && (std::string_view(f.Key) == "SONGVOL" || std::string_view(f.Key) == "SEVOL")) { value = "100"; }
                 UIBox(r, GetColor(36, 40, 54), 230);
-                UIText(EditorPanelFont(), r.L + 8, (r.T + r.B) * 0.5f, f.Key, f.CourseField ? GetColor(160, 210, 255) : white);
-                const float vx = std::min(r.L + 8.0f + keyw + 20.0f, r.L + (r.R - r.L) * 0.28f);
                 const bool button = std::string(f.Key) == "WAVE" || std::string(f.Key) == "BGMOVIE" || std::string(f.Key) == "SONGURL" || std::string(f.Key) == "MOVIEURL";
-                const float vr = button ? r.R - EditorTextWidth("参照…") - 28.0f : r.R - 8.0f;
-                UIText(EditorPanelFont(), vx, (r.T + r.B) * 0.5f, FitText(value.empty() ? std::string(f.Help) : value, EditorPanelFont().Handle, vr - vx, false), value.empty() ? gray : white);
+                const bool visibility = std::string_view(f.Key) == "TITLE" || std::string_view(f.Key) == "SUBTITLE";
+                const float vr = visibility ? EditorHeaderVisibilityButton(i).L - 8.0f : button ? r.R - EditorTextWidth("参照…") - 28.0f : r.R - 8.0f;
+                const float labelWidth = std::min(keyw, std::max(1.0f, (vr - r.L - 28.0f) * 0.5f));
+                UIText(EditorPanelFont(), r.L + 8, (r.T + r.B) * 0.5f,
+                    FitText(f.Key, EditorPanelFont().Handle, labelWidth, false), f.CourseField ? GetColor(160, 210, 255) : white);
+                const float vx = r.L + 8.0f + labelWidth + 20.0f;
+                UIText(EditorPanelFont(), vx, (r.T + r.B) * 0.5f, FitText(value.empty() ? std::string(f.Help) : value, EditorPanelFont().Handle, std::max(1.0f, vr - vx), false), value.empty() ? gray : white);
                 if (button) {
                     const UIRect b = EditorWaveButton(i);
                     UIBox(b, GetColor(60, 64, 84), 230);
                     UIText(sfont, (b.L + b.R) * 0.5f, (b.T + b.B) * 0.5f, std::string(f.Key) == "WAVE" || std::string(f.Key) == "BGMOVIE" ? "参照…" : "取得", white, 1);
+                }
+                if (visibility) {
+                    const bool hidden = value.starts_with("--");
+                    EditorButton icon;
+                    icon.Rect = EditorHeaderVisibilityButton(i);
+                    icon.Icon = hidden ? EditorIcon::Hidden : EditorIcon::Visible;
+                    UIBox(icon.Rect, hidden ? GetColor(78, 104, 150) : GetColor(60, 64, 84), 255);
+                    EditorDrawIcon(icon, white);
                 }
             }
             const char* labels[] = { "コースを追加", "このコースを削除" };
@@ -2729,6 +2763,24 @@ auto Game::EditorStartButton(int i) const -> UIRect {
     return { cx - w * 0.5f, y, cx + w * 0.5f, y + h };
 }
 
+auto Game::EditorHeaderVisibilityButton(int row) const -> UIRect {
+    const UIRect r = EditorPanelRow(row, 2);
+    const float side = std::min(r.B - r.T - 8.0f, EditorPanelFont().Size * 1.35f);
+    const float cy = (r.T + r.B) * 0.5f;
+    return { r.R - 6.0f - side, cy - side * 0.5f, r.R - 6.0f, cy + side * 0.5f };
+}
+
+void Game::EditorToggleHeaderVisibility(const char* key) {
+    if (!Editor.Open || (std::string_view(key) != "TITLE" && std::string_view(key) != "SUBTITLE")) { return; }
+    std::string value = tja::Document::GetValue(Editor.Doc.Header, key);
+    const bool hidden = value.starts_with("--");
+    if (hidden) { value.erase(0, 2); }
+    else { value.insert(0, "--"); }
+    EditorChange();
+    tja::Document::SetValue(Editor.Doc.Header, key, value);
+    EditorMessage(std::string(key) + (hidden ? ": 演奏画面に表示" : ": 演奏画面では非表示"));
+}
+
 auto Game::EditorWaveButton(int row) const -> UIRect {
     const UIRect r = EditorPanelRow(row, 2);
     return { r.R - EditorTextWidth("参照…") - 24.0f, r.T + 2, r.R - 4, r.B - 2 };
@@ -2791,6 +2843,18 @@ void Game::EditorDrawIcon(const EditorButton& b, unsigned int color) {
         DrawTriangleAA(x, y, x - dx * len + nx * len * 0.6f, y - dy * len + ny * len * 0.6f, x - dx * len - nx * len * 0.6f, y - dy * len - ny * len * 0.6f, color, TRUE);
     };
     switch (b.Icon) {
+    case EditorIcon::Visible:
+    case EditorIcon::Hidden: {
+        for (int i = 0; i < 12; ++i) {
+            const float x0 = cx - s + 2 * s * i / 12.0f, x1 = cx - s + 2 * s * (i + 1) / 12.0f;
+            const float y0 = s * 0.55f * std::sin(3.14159265f * i / 12.0f), y1 = s * 0.55f * std::sin(3.14159265f * (i + 1) / 12.0f);
+            line(x0, cy - y0, x1, cy - y1);
+            line(x0, cy + y0, x1, cy + y1);
+        }
+        DrawCircleAA(cx, cy, s * 0.25f, 16, color, TRUE);
+        if (b.Icon == EditorIcon::Hidden) { line(cx - s * 0.9f, cy + s * 0.9f, cx + s * 0.9f, cy - s * 0.9f); }
+        break;
+    }
     case EditorIcon::DemoStart:
         line(cx - s * 0.8f, cy - s, cx - s * 0.8f, cy + s);
         DrawTriangleAA(cx - s * 0.4f, cy - s * 0.8f, cx - s * 0.4f, cy + s * 0.8f, cx + s * 0.8f, cy, color, TRUE);
@@ -3479,6 +3543,11 @@ void Game::EditorProc() {
             const auto& fields = EditorHeaderFields();
             for (int i = 0; i < (int)fields.size(); ++i) {
                 const auto f = fields[i];
+                if (pt.LeftPressed && (std::string_view(f.Key) == "TITLE" || std::string_view(f.Key) == "SUBTITLE")
+                    && EditorHeaderVisibilityButton(i).Contains(pt.X, pt.Y)) {
+                    EditorToggleHeaderVisibility(f.Key);
+                    return;
+                }
                 if (pt.LeftPressed && std::string(f.Key) == "WAVE" && EditorWaveButton(i).Contains(pt.X, pt.Y)) {
                     EditorPick(4, false, true, Editor.Path.parent_path(), L"");
                     return;
@@ -3497,7 +3566,9 @@ void Game::EditorProc() {
                 }
                 if (pt.LeftPressed && EditorPanelRow(i, 2).Contains(pt.X, pt.Y)) {
                     auto& lines = f.CourseField ? course->Header : Editor.Doc.Header;
-                    EditorBeginEdit(f.Key, tja::Document::GetValue(lines, f.Key), [this, f](const std::string& s) {
+                    std::string initial = tja::Document::GetValue(lines, f.Key);
+                    if (initial.empty() && (std::string_view(f.Key) == "SONGVOL" || std::string_view(f.Key) == "SEVOL")) { initial = "100"; }
+                    EditorBeginEdit(f.Key, initial, [this, f](const std::string& s) {
                         EditorChange();
                         auto& target = f.CourseField ? EditorCourse()->Header : Editor.Doc.Header;
                         std::string value(strtrim(s));

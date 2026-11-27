@@ -81,6 +81,11 @@ uint64_t Game::AllNoteCounter(std::vector<std::string_view>& lines) {
 }
 
 void Game::LoadingDraw() {
+    if (PlayingBlackout.HideLoading) {
+        SetDrawBlendMode(0, 0);
+        DrawFillBox(0, 0, Skin.Info.Resolution.X, Skin.Info.Resolution.Y, GetColor(0, 0, 0));
+        return;
+    }
     DrawFormatString(0, 8, GetColor(255, 255, 255), "ChartLoading...");
 }
 

@@ -2,7 +2,8 @@
 
 #ifndef __ANDROID__
 double Game::RecorderSeconds() const {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now() - Recorder.StartedAt).count();
+    const auto now = PlayingPause.Active ? PlayingPause.StartedAt : std::chrono::steady_clock::now();
+    return std::chrono::duration<double>(now - Recorder.StartedAt).count();
 }
 
 void Game::PlayHitSe(int kind,bool emphasized) {
@@ -140,7 +141,7 @@ void Game::RecorderReadPending() {
 }
 
 void Game::RecorderCapture() {
-    if (!Recorder.Active) { return; }
+    if (!Recorder.Active || PlayingPause.Active) { return; }
     const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - Recorder.StartedAt).count();
     const uint64_t target = (uint64_t)(elapsed * Recorder.Fps) + 1;
     if (target <= Recorder.Scheduled) { return; }

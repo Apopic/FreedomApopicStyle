@@ -94,6 +94,27 @@ bool Game::Init() {
     return true;
 }
 
+void Game::UpdateSceneFade() {
+    const auto now = std::chrono::steady_clock::now();
+    if (Fade.PendingScene) {
+        NowScene = MemScene;
+        if (Fade.FullBlackAt && now - *Fade.FullBlackAt >= std::chrono::milliseconds(100)) {
+            NowScene = *Fade.PendingScene;
+            Fade.PendingScene.reset();
+            Fade.FullBlackAt.reset();
+        }
+    }
+    else if (NowScene != MemScene && MemScene != Scene::Null && MemScene != Scene::Loading
+        && !(NowScene == Scene::Loading && PlayingBlackout.HideLoading)) {
+        Fade.PendingScene = NowScene;
+        Fade.StartedAt = now;
+        Fade.FullBlackAt.reset();
+        Fade.Timer.Reset();
+        NowScene = MemScene;
+        if (MemScene == Scene::Playing) { Chart.NowTime.Stop(); Chart.SongData.Stop(); }
+    }
+}
+
 void Game::Draw() {
 
 #ifndef __ANDROID__
@@ -104,9 +125,19 @@ void Game::Draw() {
     FPSTimer.Start();
     DrawTimer.Start();
 
+    UpdateSceneFade();
+    if (Fade.PendingScene) {
+        // Scene actions may already have cleared chart/editor data. Fade the
+        // last presented frame instead of drawing an invalid previous scene.
+        Fade.DrawPrevious(Skin);
+        Fade.Draw(Skin);
+        return;
+    }
     if (NowScene != MemScene) {
+        if (MemScene == Scene::Loading && NowScene != Scene::Playing) { PlayingBlackout = {}; }
 
-        Fade.Timer.Start();
+        if (NowScene == Scene::Loading) { Fade.Timer.Reset(); }
+        else { Fade.Timer.Start(); }
 
         switch (MemScene) {
         case Scene::SongSelect:
@@ -201,12 +232,8 @@ void Game::Draw() {
     }
 
 #ifdef __ANDROID__
-    if (NowScene != Scene::Editor) { Touch.Geometry.Draw(); }
+    if (NowScene != Scene::Editor && NowScene != Scene::SongSelect && NowScene != Scene::DanSelect) { Touch.Geometry.Draw(); }
 #endif
-
-    if (Fade.Timer.IsRunning()) {
-        Fade.Draw(Skin);
-    }
 
 #ifndef __ANDROID__
     DrawTextCandidates(GetIMEInputData());
@@ -223,6 +250,20 @@ void Game::Draw() {
         DrawFormatString(0, 0, GetColor(255, 255, 255), "FPS:%llu (max %.1fms)\nTPS:%.0f\nDrawTime:%.12lf",
             NowFPS, FpsCounter.LastMaxGapMs, NowTPS, NowDrawTime);
     }
+    if (NowScene == Scene::Playing) { DrawPlayingBlackout(); }
+    else if (NowScene == Scene::Loading) {
+        SetDrawBlendMode(0, 0);
+        DrawFillBox(0, 0, Skin.Info.Resolution.X, Skin.Info.Resolution.Y, GetColor(0, 0, 0));
+    }
+    if (NowScene == Scene::SongSelect && SongSelectTransitionStart >= 0) {
+        const float elapsed = static_cast<float>(GetNowCount() - SongSelectTransitionStart);
+        const float opacity = elapsed < 350 ? elapsed / 250.0f : (600 - elapsed) / 250.0f;
+        SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255 * std::clamp(opacity, 0.0f, 1.0f)));
+        DrawFillBox(0, 0, Skin.Info.Resolution.X, Skin.Info.Resolution.Y, GetColor(0, 0, 0));
+        SetDrawBlendMode(0, 0);
+    }
+    Fade.Draw(Skin);
+    Fade.Capture(Skin);
 }
 
 #ifndef __ANDROID__
@@ -314,6 +355,8 @@ void Game::Proc() {
     Touch.Num = GetTouchInputDownLog(Touch.List, TOUCHINPUTPOINT_MAX);
 #endif
 
+    // A requested scene is committed only after a fully black frame and its hold.
+    if (Fade.PendingScene || NowScene != MemScene) { return; }
     switch (NowScene) {
     case Scene::Title:
         TitleProc();
@@ -471,6 +514,7 @@ void Game::Cleanup() noexcept {
     CleanupDone=true;
     EndFlag=true;
     const auto attempt=[](auto&& action) noexcept { try { action(); } catch(...) {} };
+    attempt([&]{ if(Fade.FrameGraph!=-1) { DeleteGraph(Fade.FrameGraph); Fade.FrameGraph=-1; } });
     attempt([&]{ OnlineDisconnect(); });
     // Workers must finish while all referenced game state still exists.
     if(Editor.StretchCancel) *Editor.StretchCancel=true;

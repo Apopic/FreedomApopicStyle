@@ -229,7 +229,7 @@ struct FontData {
         Edge = edge;
         Space = space;
 
-        Handle = CreateFontToHandle(fontname.c_str(), numeric::Cast<int>(Size), numeric::Cast<int>(Thick), DX_FONTTYPE_ANTIALIASING_EDGE_16X16, DX_CHARSET_UTF8, numeric::Cast<int>(Edge));
+        Handle = CreateFontToHandle(fontname.c_str(), numeric::Cast<int>(Size), numeric::Cast<int>(Thick), Edge > 0 ? DX_FONTTYPE_ANTIALIASING_EDGE_16X16 : DX_FONTTYPE_ANTIALIASING_16X16, DX_CHARSET_UTF8, numeric::Cast<int>(Edge));
         SetFontSpaceToHandle(Space, Handle);
     }
     void Load(const std::string& dirpath, const json& data) {
@@ -259,7 +259,7 @@ struct FontData {
 #ifndef __ANDROID__
         MemHandle = nofile ? nullptr : AddFontFile(FilePath.c_str());
 #endif
-        Handle = CreateFontToHandle(FontName.c_str(), numeric::Cast<int>(Size), numeric::Cast<int>(Thick), DX_FONTTYPE_ANTIALIASING_EDGE_16X16, DX_CHARSET_UTF8, numeric::Cast<int>(Edge));
+        Handle = CreateFontToHandle(FontName.c_str(), numeric::Cast<int>(Size), numeric::Cast<int>(Thick), Edge > 0 ? DX_FONTTYPE_ANTIALIASING_EDGE_16X16 : DX_FONTTYPE_ANTIALIASING_16X16, DX_CHARSET_UTF8, numeric::Cast<int>(Edge));
         SetFontSpaceToHandle(Space, Handle);
     }
     void Delete() {

@@ -45,17 +45,42 @@
 
     struct FadeData {
         libarrier::Timer Timer;
-        const double Time = 0.35;
+        static constexpr double Time = 0.25;
+        std::optional<Scene> PendingScene;
+        std::chrono::steady_clock::time_point StartedAt{};
+        std::optional<std::chrono::steady_clock::time_point> FullBlackAt;
+        int FrameGraph = -1;
+        void Capture(const _Skin& skin) {
+            int width = 0, height = 0;
+            if (FrameGraph == -1 || GetGraphSize(FrameGraph, &width, &height) < 0
+                || width != skin.Info.Resolution.X || height != skin.Info.Resolution.Y) {
+                if (FrameGraph != -1) { DeleteGraph(FrameGraph); }
+                FrameGraph = MakeGraph(skin.Info.Resolution.X, skin.Info.Resolution.Y);
+            }
+            if (FrameGraph != -1) { GetDrawScreenGraph(0, 0, skin.Info.Resolution.X, skin.Info.Resolution.Y, FrameGraph); }
+        }
+        void DrawPrevious(const _Skin& skin) {
+            SetDrawBlendMode(0, 0);
+            DrawFillBox(0, 0, skin.Info.Resolution.X, skin.Info.Resolution.Y, GetColor(0, 0, 0));
+            if (FrameGraph != -1) { DrawExtendGraph(0, 0, skin.Info.Resolution.X, skin.Info.Resolution.Y, FrameGraph, FALSE); }
+        }
         void Draw(const _Skin& skin) {
-            if (Timer.GetElapsed().Second() > Time) {
+            const auto now = std::chrono::steady_clock::now();
+            if (!PendingScene && (!Timer.IsRunning() || Timer.GetElapsed().Second() > Time)) {
                 Timer.Reset();
                 return;
             }
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, numeric::Cast<int>(255 * (1 - GetEasingRate(Timer.GetElapsed().Second() / Time, ease::Base::In, ease::Line::Linear))));
+            const double opacity = PendingScene
+                ? std::clamp(std::chrono::duration<double>(now - StartedAt).count() / Time, 0.0, 1.0)
+                : std::clamp(1 - Timer.GetElapsed().Second() / Time, 0.0, 1.0);
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255 * opacity));
             DrawFillBox(0, 0, skin.Info.Resolution.X, skin.Info.Resolution.Y, GetColor(0, 0, 0));
             SetDrawBlendMode(0, 0);
+            if (PendingScene && opacity >= 1 && !FullBlackAt) { FullBlackAt = now; }
         }
     } Fade;
+
+    void UpdateSceneFade();
 
     bool Init();
 

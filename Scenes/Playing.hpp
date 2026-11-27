@@ -47,6 +47,9 @@
         uint64_t BalloonCount = 0;
         bool BarlineDisplay = false;
         bool HitFlag = false;
+        bool FullComboTarget = false;
+        bool FullComboNormal = false;
+        bool FullComboHit = false;
     };
 
     struct HitNoteData {
@@ -738,9 +741,6 @@
     // 0: 不合格, 2: 合格, 3: 金合格 (王冠画像の番号)
     int DanCrown() const;
 
-    // 段位選択画面: 選択中の段位の課題曲と条件を表示する
-    void DrawDanInfo(const ChartData& chart) const;
-
     void SetDrawBranchArea(Pos2D<float> DelayPos) const;
     playerchar::Clock PlayerCharAnim;
     struct SkinVoiceState {
@@ -760,6 +760,32 @@
     // 角を伸ばさずに 9 分割で伸ばして描く (slice <= 0 なら普通に伸ばす)
     static void DrawSliced(const GraphData& g, Pos2D<float> pos, float slice, int index = 0);
     void PlayingInit();
+    struct PlayingPauseState {
+        bool Active = false;
+        bool SongWasPlaying = false;
+        double SongPosition = 0;
+        int Selection = 0;
+        std::chrono::steady_clock::time_point StartedAt{};
+        std::vector<libarrier::Timer*> Timers;
+    } PlayingPause;
+    std::chrono::steady_clock::time_point PlayingPauseNextAllowed{};
+    bool EnterPlayingPause();
+    void ResumePlayingPause();
+    void PlayingPauseAction(int action);
+    void PlayingPauseSelect(int selection);
+    bool PlayingPauseProc();
+    void PlayingPauseDraw();
+    const GraphData& PlayingPauseButton(int index) const;
+    enum class PlayingBlackoutKind { None, Retry, DanNext };
+    struct PlayingBlackoutState {
+        PlayingBlackoutKind Kind = PlayingBlackoutKind::None;
+        std::chrono::steady_clock::time_point StartedAt{};
+        std::optional<std::chrono::steady_clock::time_point> FullBlackAt;
+        bool HideLoading = false;
+    } PlayingBlackout;
+    void BeginPlayingBlackout(PlayingBlackoutKind kind);
+    bool UpdatePlayingBlackout();
+    void DrawPlayingBlackout();
     void PlayingEnd();
     void PlayingDraw();
     // 自分の打撃を他プレイヤーへ送る (判定とスコアも一緒に送り、受信側は再計算しない)

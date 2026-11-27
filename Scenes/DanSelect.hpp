@@ -7,4 +7,5 @@
     void DanSelectEnd();
     void DanSelectDraw();
     void DanSelectProc();
+    std::vector<std::string> DanSelectDetails(const ChartData& chart) const;
 #endif // FAS_GAME_MEMBER_DECLARATIONS

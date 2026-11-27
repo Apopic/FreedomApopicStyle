@@ -16,11 +16,12 @@ const json& Game::GetScoreCache() {
     return ScoreCache;
 }
 
-void Game::ScoreDataSave(uint64_t score, int crown) {
+void Game::ScoreDataSave(uint64_t score, int crown, const JudgeData* result) {
     if (Editor.Testing) { return; }     // 譜面制作のテストプレイは記録しない
 
     std::string ChartPath = Chart.OriginalData.ChartPath.string();
     std::string CourseName = magic_enum::enum_name((CourseType)CourseIndex).data();
+    const ScoreData previous = ScoreDataLoad(ChartPath, numeric::Cast<int>(CourseIndex));
 
     GetScoreCache();
     // 壊れた記録 (オブジェクトでない値) があっても例外にしないよう、作り直してから書く
@@ -28,6 +29,18 @@ void Game::ScoreDataSave(uint64_t score, int crown) {
     if (!ScoreCache[ChartPath][CourseName].is_object()) { ScoreCache[ChartPath][CourseName] = json::object(); }
     ScoreCache[ChartPath][CourseName]["Score"] = score;
     ScoreCache[ChartPath][CourseName]["Crown"] = crown;
+    auto& record = ScoreCache[ChartPath][CourseName];
+    // 判定数はベストスコアを出した演奏と組にする。王冠だけの更新では置き換えない。
+    if (result && result->Score == score && (score > previous.Score || !previous.HasResult)) {
+        record["Good"] = result->Good;
+        record["Ok"] = result->Ok;
+        record["Bad"] = result->Bad;
+        record["Roll"] = result->Roll;
+        record["MaxCombo"] = result->MaxCombo;
+        record["Accuracy"] = result->Accuracy;
+        record["HasResult"] = true;
+    }
+    else if (score != previous.Score) { record["HasResult"] = false; }
 
     std::vector<uint8_t> v_bson = json::to_bson(ScoreCache);
     std::ofstream ofs(GetExecutablePath() / "scoredata.json", std::ios::binary);
@@ -51,6 +64,21 @@ auto Game::ScoreDataLoad(const std::string& chartpath, int courseindex) -> Score
     // 値の型が違う (壊れた記録) 時は読まない
     if (auto it = course->find("Score"); it != course->end() && it->is_number()) { Score.Score = it->get<decltype(Score.Score)>(); }
     if (auto it = course->find("Crown"); it != course->end() && it->is_number()) { Score.Crown = it->get<decltype(Score.Crown)>(); }
+    auto count = [&](const char* name, uint64_t& value) {
+        const auto it = course->find(name);
+        if (it == course->end() || !it->is_number_integer() || (!it->is_number_unsigned() && it->get<int64_t>() < 0)) { return false; }
+        value = it->get<uint64_t>();
+        return true;
+    };
+    const auto has = course->find("HasResult"), accuracy = course->find("Accuracy");
+    Score.HasResult = has != course->end() && has->is_boolean() && has->get<bool>()
+        && count("Good", Score.Good) && count("Ok", Score.Ok) && count("Bad", Score.Bad)
+        && count("Roll", Score.Roll) && count("MaxCombo", Score.MaxCombo)
+        && accuracy != course->end() && accuracy->is_number();
+    if (Score.HasResult) {
+        Score.Accuracy = accuracy->get<double>();
+        Score.HasResult = std::isfinite(Score.Accuracy) && Score.Accuracy >= 0 && Score.Accuracy <= 100;
+    }
     return Score;
 }
 
@@ -69,9 +97,9 @@ void Game::ResultEnd() {
     // オートプレイ (途中で切り替えた場合も) の結果は記録に残さない
     else if (Chart.AutoUsed || Config.AutoPlay) {}
     else if (const ScoreData saved = ScoreDataLoad(Chart.OriginalData.ChartPath.string(), numeric::Cast<int>(CourseIndex));
-        Chart.Judge[0].Score > saved.Score || CrownIndex > saved.Crown) {
+        Chart.Judge[0].Score > saved.Score || CrownIndex > saved.Crown || (!saved.HasResult && Chart.Judge[0].Score == saved.Score)) {
         // スコアと王冠はそれぞれ最高記録を残す (王冠だけ更新した場合も保存する)
-        ScoreDataSave(std::max(Chart.Judge[0].Score, saved.Score), std::max(CrownIndex, saved.Crown));
+        ScoreDataSave(std::max(Chart.Judge[0].Score, saved.Score), std::max(CrownIndex, saved.Crown), &Chart.Judge[0]);
     }
 
     CrownIndex = 0;

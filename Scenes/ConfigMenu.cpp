@@ -251,6 +251,7 @@ void Game::BuildConfigItems() {
     }
     auto& play = game;      // 演奏の設定も同じカテゴリ
     play.Items.push_back(Bool("AutoPlay", "譜面を自動で演奏する", Config.AutoPlay));
+    play.Items.push_back(Bool("PauseDisplay", "オフライン演奏中に TAB / Esc でポーズ画面を開く (オンラインでは無効)", Config.PauseDisplay));
     play.Items.push_back(Bool("TrainingMode", "小節単位で移動しながら練習する", Config.TrainingMode));
     play.Items.push_back(Number("RandomRate", "音符の色を入れ替える割合 (%)", Config.RandomRate, 0, 100, 5, 0));
     play.Items.push_back(Number("ChartSpeed", "譜面のスクロール速度", Config.ChartSpeed, 0.1, 10.0, 0.1, 1));
@@ -869,7 +870,9 @@ auto Game::ReadPointer() -> PointerState {
         const int slop = std::max(16, Skin.Info.Resolution.Y / 40);
         if (std::abs(pt.X - t.StartX) > slop || std::abs(pt.Y - t.StartY) > slop) { t.Dragged = true; }
         if (t.Dragged && NowScene != Scene::ConfigMenu) {
-            const int step = std::max(24, Skin.Info.Resolution.Y / 18);
+            const int step = NowScene == Scene::SongSelect || NowScene == Scene::DanSelect
+                ? std::max(24, (int)std::lround(std::abs(NowScene == Scene::DanSelect ? Skin.Base->DanSelect.Config.BoxDistance.Y : IsCourseSelect ? Skin.Base->SongSelect.Config.CourseBoxDistance : Skin.Base->SongSelect.Config.BoxDistance.Y)))
+                : std::max(24, Skin.Info.Resolution.Y / 18);
             t.Accum += pt.Y - t.LastY;
             t.LastY = pt.Y;
             while (t.Accum >= step) { ++pt.Wheel; t.Accum -= step; }      // 下へ動かす = 上へ戻る

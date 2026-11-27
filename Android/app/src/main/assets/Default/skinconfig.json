@@ -111,7 +111,7 @@
       "Config": {
         "BoxDistance": {
           "X": 40,
-          "Y": 80
+          "Y": 96
         },
         "SongBoxListPos": {
           "X": 640,
@@ -126,11 +126,11 @@
           "Y": 200
         },
         "CoursePos": {
-          "X": 320,
+          "X": 260,
           "Y": 320
         },
         "LevelPos": {
-          "X": 440,
+          "X": 380,
           "Y": 320
         },
         "HighScorePos": {
@@ -264,8 +264,8 @@
           "FilePath": "Font/MPLUS1p-Medium.ttf",
           "FontName": "M PLUS 1p Medium",
           "Position": 1,
-          "Size": 28,
-          "Thick": 10,
+          "Size": 32,
+          "Thick": 14,
           "Edge": 0,
           "Space": 0
         },
@@ -273,8 +273,8 @@
           "FilePath": "Font/MPLUS1p-Medium.ttf",
           "FontName": "M PLUS 1p Medium",
           "Position": 1,
-          "Size": 21,
-          "Thick": 7,
+          "Size": 24,
+          "Thick": 12,
           "Edge": 0,
           "Space": 0
         },
@@ -282,8 +282,8 @@
           "FilePath": "Font/MPLUS1p-Medium.ttf",
           "FontName": "M PLUS 1p Medium",
           "Position": 1,
-          "Size": 42,
-          "Thick": 10,
+          "Size": 46,
+          "Thick": 14,
           "Edge": 0,
           "Space": -2
         },
@@ -291,8 +291,8 @@
           "FilePath": "Font/MPLUS1p-Medium.ttf",
           "FontName": "M PLUS 1p Medium",
           "Position": 1,
-          "Size": 24,
-          "Thick": 6,
+          "Size": 28,
+          "Thick": 10,
           "Edge": 0,
           "Space": 0
         },
@@ -301,7 +301,7 @@
           "FontName": "M PLUS 1p Medium",
           "Position": 0,
           "Size": 28,
-          "Thick": 8,
+          "Thick": 12,
           "Edge": 0,
           "Space": 0
         },
@@ -310,7 +310,7 @@
           "FontName": "M PLUS 1p Medium",
           "Position": 0,
           "Size": 28,
-          "Thick": 8,
+          "Thick": 12,
           "Edge": 0,
           "Space": 0
         },
@@ -319,7 +319,7 @@
           "FontName": "M PLUS 1p Medium",
           "Position": 2,
           "Size": 28,
-          "Thick": 8,
+          "Thick": 12,
           "Edge": 0,
           "Space": 0
         },
@@ -328,7 +328,7 @@
           "FontName": "M PLUS 1p Medium",
           "Position": 0,
           "Size": 40,
-          "Thick": 8,
+          "Thick": 12,
           "Edge": 0,
           "Space": 0
         }
@@ -349,7 +349,7 @@
       "Config": {
         "BoxDistance": {
           "X": 40,
-          "Y": 80
+          "Y": 96
         },
         "SongBoxListPos": {
           "X": 640,
@@ -413,7 +413,7 @@
           "FilePath": "Image/DanSelect/Back.png",
           "Pos": {
             "X": 80,
-            "Y": 80
+            "Y": 96
           },
           "Size": {
             "Width": 80,
@@ -424,7 +424,7 @@
           "FilePath": "Image/DanSelect/Search.png",
           "Pos": {
             "X": 1200,
-            "Y": 80
+            "Y": 96
           },
           "Size": {
             "Width": 80,
@@ -459,7 +459,7 @@
           "FilePath": "Font/MPLUS1p-Medium.ttf",
           "FontName": "M PLUS 1p Medium",
           "Position": 1,
-          "Size": 28,
+          "Size": 32,
           "Thick": 10,
           "Edge": 0,
           "Space": 0
@@ -468,8 +468,8 @@
           "FilePath": "Font/MPLUS1p-Medium.ttf",
           "FontName": "M PLUS 1p Medium",
           "Position": 1,
-          "Size": 21,
-          "Thick": 7,
+          "Size": 24,
+          "Thick": 10,
           "Edge": 0,
           "Space": 0
         },
@@ -1051,6 +1051,72 @@
           "Div": {
             "X": 1,
             "Y": 1
+          }
+        },
+        "PauseShade": {
+          "FilePath": "Image/Playing/PauseMenu/Shade.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 1280,
+            "Height": 720
+          }
+        },
+        "PausePanel": {
+          "FilePath": "Image/Playing/PauseMenu/Panel.png",
+          "Pos": {
+            "X": 640,
+            "Y": 360
+          },
+          "Size": {
+            "Width": 720,
+            "Height": 480
+          }
+        },
+        "PauseResume": {
+          "FilePath": "Image/Playing/PauseMenu/Resume.png",
+          "Pos": {
+            "X": 640,
+            "Y": 326
+          },
+          "Size": {
+            "Width": 420,
+            "Height": 64
+          }
+        },
+        "PauseRestart": {
+          "FilePath": "Image/Playing/PauseMenu/Restart.png",
+          "Pos": {
+            "X": 640,
+            "Y": 410
+          },
+          "Size": {
+            "Width": 420,
+            "Height": 64
+          }
+        },
+        "PauseExit": {
+          "FilePath": "Image/Playing/PauseMenu/Exit.png",
+          "Pos": {
+            "X": 640,
+            "Y": 494
+          },
+          "Size": {
+            "Width": 420,
+            "Height": 64
+          }
+        },
+        "PauseCursor": {
+          "FilePath": "Image/Playing/PauseMenu/Cursor.png",
+          "Pos": {
+            "X": 640,
+            "Y": 326
+          },
+          "Size": {
+            "Width": 444,
+            "Height": 80
           }
         }
       },

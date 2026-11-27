@@ -138,38 +138,6 @@ int Game::DanCrown() const {
     return gold ? 3 : 2;
 }
 
-void Game::DrawDanInfo(const ChartData& chart) const {
-    if (!chart.IsDan) {
-        return;
-    }
-    std::vector<std::pair<std::string, unsigned int>> lines;
-    const unsigned int white = GetColor(255, 255, 255);
-    const unsigned int gray = GetColor(190, 190, 190);
-    lines.push_back({ "■ 課題曲", white });
-    for (size_t i = 0; i < chart.DanSongs.size(); ++i) {
-        const auto& song = chart.DanSongs[i];
-        lines.push_back({ std::to_string(i + 1) + ". " + song.Title + (song.Level ? "  ★" + std::to_string(song.Level) : ""), white });
-        for (const auto& exam : song.Exams) {
-            lines.push_back({ "    " + ExamConditionText(exam), gray });
-        }
-    }
-    lines.push_back({ "", white });
-    lines.push_back({ "■ 合格条件", white });
-    for (const auto& exam : chart.ExamDatas) {
-        lines.push_back({ "  " + ExamConditionText(exam), white });
-    }
-
-    const int lineheight = GetFontSize() + 8;
-    const int x = Skin.Info.Resolution.X / 2 + 40;
-    const int y = 80;
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 160);
-    DrawBox(x - 16, y - 16, Skin.Info.Resolution.X - 24, y + lineheight * (int)lines.size() + 8, GetColor(0, 0, 0), TRUE);
-    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-    for (size_t i = 0; i < lines.size(); ++i) {
-        DrawString(x, y + lineheight * (int)i, lines[i].first.c_str(), lines[i].second);
-    }
-}
-
 void Game::SetDrawBranchArea(Pos2D<float> DelayPos) const {
     if (Chart.IsBranchChart()) {
         SetDrawArea(
@@ -187,13 +155,38 @@ bool Game::HasImage(const GraphData& g) { return !g.Handles.empty() && g.Handles
 void Game::SkinVoiceReset() {
     SkinVoice = SkinVoiceState();
     PlayerCharAnim = {};
+    // Keep the judgement targets before hit processing clears NoteType. In Jiro
+    // charts, notes written behind a later judgement time are visual dummies.
+    double furthest[3] = {-std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
+    for (auto& note : Chart.RawNoteDatas) {
+        note.FullComboNormal = note.NoteType >= '1' && note.NoteType <= '4';
+        const bool target = note.FullComboNormal || (note.NoteType >= '5' && note.NoteType <= '7') || note.NoteType == '9';
+        note.FullComboTarget = false;
+        note.FullComboHit = false;
+        if (!target || note.IsBranch == BranchType::NotDisplay) { continue; }
+        for (int lane = 0; lane < 3; ++lane) {
+            if (note.IsBranch != BranchType::Null && Chart.JiroLaneOf(note.IsBranch) != lane) { continue; }
+            if (!Config.JiroChartMode || note.AbsTime + Config.JudgeBad >= furthest[lane]) { note.FullComboTarget = true; }
+            furthest[lane] = std::max(furthest[lane], note.AbsTime);
+        }
+    }
 }
 
 void Game::UpdateFullComboVoice(std::chrono::steady_clock::time_point now) {
     if(Chart.Judge.empty())return;
     auto& pl=Skin.Base->Playing;
-    const auto& judge=Chart.Judge[0];
-    if(!SkinVoice.FullComboAt && Chart.AllNoteCount>0 && judge.Bad==0 && judge.Good+judge.Ok>=Chart.AllNoteCount) SkinVoice.FullComboAt=now;
+    if (SkinVoice.FullComboPlayed || !Chart.NowTime.IsRunning()) { return; }
+    bool complete = true, hasNormal = false;
+    double end = -std::numeric_limits<double>::infinity();
+    for (const auto& note : Chart.RawNoteDatas) {
+        if (!note.FullComboTarget || note.IsBranch == BranchType::NotDisplay) { continue; }
+        if (note.IsBranch != BranchType::Null && note.IsBranch != Chart.NowBranchFlag) { continue; }
+        end = std::max(end, std::max(note.AbsTime, note.RollEndTime));
+        if (note.FullComboNormal) { hasNormal = true; complete = complete && note.FullComboHit; }
+    }
+    complete = complete && hasNormal && ChartNowTime(1000) + Training.Offset >= end;
+    if (!complete) { SkinVoice.FullComboAt.reset(); return; }
+    if (!SkinVoice.FullComboAt) { SkinVoice.FullComboAt = now; }
     if(!SkinVoice.FullComboPlayed && SkinVoice.FullComboAt && std::chrono::duration<double,std::milli>(now-*SkinVoice.FullComboAt).count()>=pl.Config.FullComboVoiceDelay) {
         pl.SE.FullComboVoice.SetVolume(numeric::Cast<float>(Chart.OriginalData.SeVolume*(Config.SEVolume/100.0)));
         pl.SE.FullComboVoice.Play();SkinVoice.FullComboPlayed=true;
@@ -203,7 +196,6 @@ void Game::UpdateFullComboVoice(std::chrono::steady_clock::time_point now) {
 void Game::SkinVoiceUpdate() {
     if (Chart.Judge.empty()) return;
     const auto combo = Chart.Judge[0].Combo;
-    if(combo<SkinVoice.LastCombo){SkinVoice.FullComboAt.reset();SkinVoice.FullComboPlayed=false;}
     for (const auto& [at,voice] : Skin.Base->Playing.SE.ComboVoice) {
         if (SkinVoice.LastCombo < at && at <= combo && voice) {
             voice->SetVolume(numeric::Cast<float>(Chart.OriginalData.SeVolume*(Config.SEVolume/100.0)));
@@ -311,6 +303,9 @@ void Game::DrawSliced(const GraphData& g, Pos2D<float> pos, float slice, int ind
 
 
 void Game::PlayingInit() {
+    PlayingPause = {};
+    PlayingPauseNextAllowed = {};
+    PlayingBlackout = {};
     SkinVoiceReset();
     BeginPlayStats();
 #ifndef __ANDROID__
@@ -352,6 +347,172 @@ void Game::PlayingEnd() {
     if (NowScene == Scene::Result) {
         FinishPlayStats();
     }
+    PlayingPause = {};
+}
+
+const GraphData& Game::PlayingPauseButton(int index) const {
+    const auto& images = Skin.Base->Playing.Image;
+    return index == 0 ? images.PauseResume : index == 1 ? images.PauseRestart : images.PauseExit;
+}
+
+bool Game::EnterPlayingPause() {
+    const auto now = std::chrono::steady_clock::now();
+    if (!Config.PauseDisplay || IsMulti || PlayingPause.Active || NowScene != Scene::Playing || now < PlayingPauseNextAllowed) { return false; }
+    PlayingPause = {};
+    PlayingPause.Active = true;
+    PlayingPause.StartedAt = now;
+    auto stop = [&](libarrier::Timer& timer) {
+        if (timer.IsRunning()) { PlayingPause.Timers.push_back(&timer); timer.Stop(); }
+    };
+    stop(Chart.NowTime); stop(Chart.BranchAnimationTimer); stop(Chart.WaitRollTime); stop(Chart.RollViewEndTimer);
+    stop(Training.BarlineMoveTimer);
+    for (auto& timer : MiniTaikoFlash) { stop(timer); }
+    PlayingPause.SongWasPlaying = Chart.SongData.IsPlay();
+    if (PlayingPause.SongWasPlaying) {
+        PlayingPause.SongPosition = GetSoundCurrentTime(Chart.SongData.Handle) - Chart.SongData.StartMilliseconds;
+        Chart.SongData.Stop();
+    }
+    return true;
+}
+
+void Game::ResumePlayingPause() {
+    if (!PlayingPause.Active) { return; }
+    const auto now = std::chrono::steady_clock::now();
+    const auto duration = now - PlayingPause.StartedAt;
+    for (auto* timer : PlayingPause.Timers) { timer->Start(); }
+    if (PlayingPause.SongWasPlaying) {
+        Chart.SongData.SetCurrent(PlayingPause.SongPosition);
+        Chart.SongData.Play(FALSE);
+    }
+    if (SkinVoice.FullComboAt) { *SkinVoice.FullComboAt += duration; }
+#ifndef __ANDROID__
+    if (Recorder.Active) { Recorder.StartedAt += duration; }
+    LastHitTick = RawKeyboard::Now();
+#endif
+    PlayingPause = {};
+    PlayingPauseNextAllowed = now + std::chrono::seconds(3);
+}
+
+void Game::PlayingPauseSelect(int selection) {
+    if (!PlayingPause.Active || PlayingBlackout.Kind != PlayingBlackoutKind::None) { return; }
+    selection = (selection % 3 + 3) % 3;
+    if (selection == PlayingPause.Selection) { return; }
+    PlayingPause.Selection = selection;
+    Skin.Base->SongSelect.SE.Ka.SetVolume(Config.SEVolume);
+    Skin.Base->SongSelect.SE.Ka.Play();
+}
+
+void Game::BeginPlayingBlackout(PlayingBlackoutKind kind) {
+    if (kind == PlayingBlackoutKind::None || PlayingBlackout.Kind != PlayingBlackoutKind::None || NowScene != Scene::Playing) { return; }
+    PlayingBlackout = {};
+    PlayingBlackout.Kind = kind;
+    PlayingBlackout.StartedAt = std::chrono::steady_clock::now();
+    if (Chart.NowTime.IsRunning()) { Chart.NowTime.Stop(); }
+    Chart.SongData.Stop();
+}
+
+bool Game::UpdatePlayingBlackout() {
+    if (PlayingBlackout.Kind == PlayingBlackoutKind::None) { return false; }
+    // A completely black frame must actually be drawn before loading begins.
+    if (!PlayingBlackout.FullBlackAt || std::chrono::steady_clock::now() - *PlayingBlackout.FullBlackAt < std::chrono::milliseconds(100)) { return true; }
+    const auto kind = PlayingBlackout.Kind;
+    PlayingBlackout.Kind = PlayingBlackoutKind::None;
+    PlayingBlackout.HideLoading = true;
+    PlayingPause = {};
+    PlayingPauseNextAllowed = {};
+    if (kind == PlayingBlackoutKind::Retry) {
+        RecorderAbort();
+        Training.Init();
+        Dan.Reset();
+        Chart.Init(true);
+    }
+    else { ++Dan.SongIndex; }
+    NowScene = Scene::Loading;
+    return true;
+}
+
+void Game::DrawPlayingBlackout() {
+    if (PlayingBlackout.Kind == PlayingBlackoutKind::None) { return; }
+    const float opacity = std::clamp(std::chrono::duration<float>(std::chrono::steady_clock::now() - PlayingBlackout.StartedAt).count() / 0.25f, 0.0f, 1.0f);
+    SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(opacity * 255));
+    DrawFillBox(0, 0, Skin.Info.Resolution.X, Skin.Info.Resolution.Y, GetColor(0, 0, 0));
+    SetDrawBlendMode(0, 0);
+    if (opacity >= 1 && !PlayingBlackout.FullBlackAt) { PlayingBlackout.FullBlackAt = std::chrono::steady_clock::now(); }
+}
+
+void Game::PlayingPauseAction(int action) {
+    if (!PlayingPause.Active || PlayingBlackout.Kind != PlayingBlackoutKind::None || action < 0 || action > 2) { return; }
+    Skin.Base->SongSelect.SE.Don.SetVolume(Config.SEVolume);
+    Skin.Base->SongSelect.SE.Don.Play();
+    if (action == 0) { ResumePlayingPause(); return; }
+    if (action == 1) { BeginPlayingBlackout(PlayingBlackoutKind::Retry); return; }
+    RecorderAbort();
+    PlayingPause = {};
+    PlayingPauseNextAllowed = {};
+    Training.Init();
+    Dan.Reset();
+    Chart.Init(true);
+    NowScene = PrevScene;
+}
+
+bool Game::PlayingPauseProc() {
+    if (IsMulti) {
+        if (PlayingPause.Active) { ResumePlayingPause(); }
+        return false;
+    }
+    if (PlayingPause.Active) {
+#ifndef __ANDROID__
+        auto& input = Input::GetInstance();
+        input.HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] { PlayingPauseAction(0); });
+        input.HitKeyProcess(VK_TAB, KeyState::Down, [&] { PlayingPauseAction(0); });
+        input.HitKeyProcess(VK_UP, KeyState::Down, [&] { PlayingPauseSelect(PlayingPause.Selection - 1); }, 0.15);
+        input.HitKeyProcess(VK_DOWN, KeyState::Down, [&] { PlayingPauseSelect(PlayingPause.Selection + 1); }, 0.15);
+        input.HitKeyProcess(VK_RETURN, KeyState::Down, [&] { PlayingPauseAction(PlayingPause.Selection); });
+        auto consume = [&](const std::vector<int>& keys) {
+            for (int key : keys) {
+                if (key != VK_ESCAPE && key != VK_TAB && key != VK_UP && key != VK_DOWN && key != VK_RETURN) {
+                    input.HitKeyProcess(key, KeyState::Down, [] {});
+                }
+            }
+        };
+        consume(Config.DonInputLeft); consume(Config.DonInputRight); consume(Config.KaInputLeft); consume(Config.KaInputRight);
+        LastHitTick = RawKeyboard::Now();
+#endif
+        if (PlayingPause.Active) {
+            const auto pointer = ReadPointer();
+            for (int i = 0; i < 3; ++i) {
+                const auto& image = PlayingPauseButton(i);
+                const UIRect r{ image.Pos.X - image.Size.Width * 0.5f, image.Pos.Y - image.Size.Height * 0.5f,
+                    image.Pos.X + image.Size.Width * 0.5f, image.Pos.Y + image.Size.Height * 0.5f };
+                if (r.Contains(pointer.X, pointer.Y)) {
+                    if (pointer.Moved || pointer.LeftPressed) { PlayingPauseSelect(i); }
+                    if (pointer.LeftPressed) { PlayingPauseAction(i); break; }
+                }
+            }
+        }
+        return true;
+    }
+    if (!Config.PauseDisplay) { return false; }
+#ifndef __ANDROID__
+    Input::GetInstance().HitKeyProcess(VK_TAB, KeyState::Down, [&] { EnterPlayingPause(); });
+    Input::GetInstance().HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] { EnterPlayingPause(); });
+#else
+    Touch.Process(TouchType::Other, [&] { EnterPlayingPause(); }, Skin.Base->Playing.Image.Pause);
+#endif
+    return PlayingPause.Active;
+}
+
+void Game::PlayingPauseDraw() {
+    if (!PlayingPause.Active || IsMulti) { return; }
+    auto& images = Skin.Base->Playing.Image;
+    const float opacity = std::clamp(std::chrono::duration<float>(std::chrono::steady_clock::now() - PlayingPause.StartedAt).count() / 0.18f, 0.0f, 1.0f);
+    SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(opacity * 255));
+    images.PauseShade.Draw({});
+    images.PausePanel.Draw({});
+    images.PauseResume.Draw({}); images.PauseRestart.Draw({}); images.PauseExit.Draw({});
+    const auto& button = PlayingPauseButton(PlayingPause.Selection);
+    images.PauseCursor.Draw({button.Pos.X - images.PauseResume.Pos.X, button.Pos.Y - images.PauseResume.Pos.Y});
+    SetDrawBlendMode(0, 0);
 }
 
 void Game::PlayingDraw() {
@@ -376,7 +537,7 @@ void Game::PlayingDraw() {
     }
 #endif
     // ローカルプレイヤーのコンボボイスを更新する。
-    if (!IsMulti) {
+    if (!IsMulti && !PlayingPause.Active) {
         SkinVoiceUpdate();
 
     }
@@ -1127,7 +1288,7 @@ void Game::PlayingDraw() {
 #ifdef __ANDROID__
     if (!IsMulti) {
         Skin.Base->Playing.Image.Back.Draw({});
-        if (Config.TrainingMode && !Chart.IsDanMode()) {
+        if ((Config.TrainingMode && !Chart.IsDanMode()) || Config.PauseDisplay) {
             Skin.Base->Playing.Image.Pause.Draw({});
         }
     }
@@ -1163,6 +1324,7 @@ void Game::PlayingDraw() {
     if (Config.ViewDebug) {
         DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed);
     }
+    PlayingPauseDraw();
 }
 
 void Game::HitAction(HitType type) {
@@ -1372,6 +1534,8 @@ void Game::BranchChange(const BranchData& branchdata) {
 }
 
 void Game::PlayingProc() {
+    if (UpdatePlayingBlackout()) { return; }
+    if (PlayingPauseProc()) { return; }
     if (Config.AutoPlay) { Chart.AutoUsed = true; }
 
     // オンライン: サーバーが決めた時刻 (往復遅延を補正済み) になったら全員同時に開始する
@@ -1406,8 +1570,7 @@ void Game::PlayingProc() {
                 // 曲の終わり: この曲の個別条件 (最終曲なら全体条件も) を確定し、次の曲かリザルトへ
                 UpdateDanExams(true);
                 if (!Dan.Failed && Dan.SongIndex + 1 < Dan.Course.DanSongs.size()) {
-                    ++Dan.SongIndex;
-                    NowScene = Scene::Loading;
+                    BeginPlayingBlackout(PlayingBlackoutKind::DanNext);
                 }
                 else {
                     NowScene = Scene::Result;
@@ -1621,8 +1784,10 @@ void Game::PlayingProc() {
             };
 
 #ifndef __ANDROID__
-        Input::GetInstance().HitKeyProcess(VK_ESCAPE, KeyState::Down, BackInputProc);
-        Input::GetInstance().HitKeyProcess(VK_TAB, KeyState::Down, ReLoadInputProc);
+        if (!Config.PauseDisplay) {
+            Input::GetInstance().HitKeyProcess(VK_ESCAPE, KeyState::Down, BackInputProc);
+            Input::GetInstance().HitKeyProcess(VK_TAB, KeyState::Down, ReLoadInputProc);
+        }
         // 譜面制作のテストプレイ: F1 でオートプレイと通常のプレイをその場で切り替える
         if (Editor.Testing && !Calib.Active) {
             Input::GetInstance().HitKeyProcess(VK_F1, KeyState::Down, [&] {
@@ -1632,7 +1797,7 @@ void Game::PlayingProc() {
         }
 #else
         Touch.Process(TouchType::Other, BackInputProc, Skin.Base->Playing.Image.Back);
-        Touch.Process(TouchType::Other, ReLoadInputProc, Skin.Base->Playing.Image.Pause);
+        if (!Config.PauseDisplay) { Touch.Process(TouchType::Other, ReLoadInputProc, Skin.Base->Playing.Image.Pause); }
 #endif
     }
 
@@ -1719,6 +1884,7 @@ void Game::PlayingProc() {
             RecordHitError(-_HitError);     // _HitError は「早いほど正」なので符号を逆にして「遅いほど正」にする
 
             data.HitFlag = true;
+            data.FullComboHit = GoodHit || OkHit;
             data.NoteType = '\0';
 
             return;
@@ -1889,6 +2055,7 @@ void Game::PlayingProc() {
                 }
 
                 if (HitFlag && !data.HitFlag && IsHitNote) {
+                    data.FullComboHit = true;
                     HitNote[0].Add(HitNoteData(data.NoteType, JudgeType::Good));
                     Chart.Judge[0].Hit(JudgeType::Good, 0, data.NoteType);
                     switch (data.NoteType) {
