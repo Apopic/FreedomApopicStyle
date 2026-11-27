@@ -226,8 +226,6 @@
     // ---- オフセット自動調整: 音声の出力遅延の目安から判定オフセットを決める ----
     // 叩く人は聞こえた音に合わせるので、音が遅れて出る分だけ判定を遅らせる (正の判定オフセット)。
     // 遅延 = ゲームの出力バッファ + デバイスの周期 (出力方式ごとの目安)
-    static double EstimateOutputLatencyMs(int type, bool exclusive, int buffer, int rate, const DeviceInfo& dev);
-    double RecommendedJudgeOffset(const DeviceInfo& dev, int type, bool exclusive, int buffer, int rate) const;
     // ---- オフセット自動調整: テスト譜面 (拍ごとにクリック音が鳴る) を演奏画面で叩き、ずれの平均だけ判定オフセットを動かす ----
     struct CalibrationState {
         bool Active = false;        // 調整の演奏中

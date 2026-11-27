@@ -66,9 +66,12 @@ void Game::OnlineConnectByAddress() {
 #ifndef __ANDROID__
 std::optional<fs::path> Game::FindMultiServer() {
     const fs::path exe = GetExecutablePath();
-    for (const fs::path& path : { exe / "MultiServer.exe", exe / "MultiServer" / "MultiServer.exe", exe.parent_path() / "MultiServer" / "MultiServer.exe" }) {
-        std::error_code ec;
-        if (fs::is_regular_file(path, ec)) { return path.lexically_normal(); }
+    // ゲームと同じフォルダ → ビルド出力の MultiServer フォルダ。古い名前 (MultiServer.exe) も探す
+    for (const fs::path& dir : { exe, exe / "MultiServer", exe.parent_path() / "MultiServer" }) {
+        for (const char* name : { "FreedomApopicStyleServer.exe", "MultiServer.exe" }) {
+            std::error_code ec;
+            if (const fs::path path = dir / name; fs::is_regular_file(path, ec)) { return path.lexically_normal(); }
+        }
     }
     return std::nullopt;
 }
@@ -77,7 +80,7 @@ void Game::OnlineHostLocal() {
     const auto server = FindMultiServer();
     if (!server) {
         OnlineDisconnect();
-        Online.Status = "MultiServer.exe が見つかりません (ゲームと同じフォルダに置いてください)";
+        Online.Status = "FreedomApopicStyleServer.exe が見つかりません (ゲームと同じフォルダに置いてください)";
         return;
     }
     OnlineDisconnect();

@@ -49,7 +49,7 @@ set(FAS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 include_directories("${FAS_ROOT}")
 file(GLOB FAS_LIBRARY_HEADERS CONFIGURE_DEPENDS "${FAS_ROOT}/Library/*.hpp" "${FAS_ROOT}/Library/*.h")
 file(GLOB FAS_GAME_SOURCES CONFIGURE_DEPENDS "${FAS_ROOT}/Scenes/*.cpp" "${FAS_ROOT}/System/*.cpp")
-add_library(native-lib
+add_library(FreedomApopicStyle
         SHARED
         "${FAS_ROOT}/Main.cpp"
         "${FAS_ROOT}/System.h"
@@ -60,15 +60,15 @@ add_library(native-lib
         ${FAS_GAME_SOURCES}
         ${FAS_LIBRARY_HEADERS})
 
-target_include_directories(native-lib PRIVATE
+target_include_directories(FreedomApopicStyle PRIVATE
         "${FasAndroidDxLib}/${ANDROID_ABI}" "${FasSocketHeaders}" "${FasJsonHeaders}"
         "${FasZipHeaders}" "${FasLibarrierHeaders}" "${FasMagicEnumHeaders}" "${FasFastFloatHeaders}")
-target_link_directories(native-lib PRIVATE "${FasAndroidDxLib}/${ANDROID_ABI}")
+target_link_directories(FreedomApopicStyle PRIVATE "${FasAndroidDxLib}/${ANDROID_ABI}")
 
 # Specifies libraries CMake should link to your target library. You
 # can link libraries from various origins, such as libraries defined in this
 # build script, prebuilt third-party libraries, or Android system libraries.
-target_link_libraries(native-lib
+target_link_libraries(FreedomApopicStyle
         # List libraries link to the target library
         log
         android
@@ -89,4 +89,4 @@ target_link_libraries(native-lib
         ogg_static
         bullet
         opus)
-target_compile_options(native-lib PRIVATE -ferror-limit=0)
+target_compile_options(FreedomApopicStyle PRIVATE -ferror-limit=0)

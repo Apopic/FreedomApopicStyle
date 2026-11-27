@@ -60,7 +60,7 @@
     void OnlineConnect(const std::string& address, uint16_t port);
     void OnlineConnectByAddress();
 #ifndef __ANDROID__
-    // MultiServer.exe の場所: ゲームと同じフォルダ、またはビルド出力の MultiServer フォルダ
+    // サーバー (FreedomApopicStyleServer.exe。古い名前は MultiServer.exe) の場所: ゲームと同じフォルダ、またはビルド出力の MultiServer フォルダ
     static std::optional<fs::path> FindMultiServer();
     // この PC でサーバーを起動 (起動済みならそのまま) して接続し、ホストになる。
     // サーバーはゲームが終了してルームが空になると自動で終了する

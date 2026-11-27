@@ -1,7 +1,7 @@
 ﻿// FreedomApopicStyle MultiServer
 // 1 ルーム (最大 4 人) を管理するオンラインプレイ用サーバー (GUI)。
 //
-// 使い方: MultiServer.exe [ポート番号] [--public <IPv4 アドレス>] [--autostart] [--minimized] [--parent <プロセス ID>]
+// 使い方: FreedomApopicStyleServer.exe [ポート番号] [--public <IPv4 アドレス>] [--autostart] [--minimized] [--parent <プロセス ID>]
 //   ポート番号   : 待ち受けポート (省略時は前回の設定)
 //   --public     : 外部 (インターネット) から参加してもらう時のアドレス (接続先の一覧に表示する)
 //   --autostart  : 起動と同時に待ち受けを開始する

@@ -66,6 +66,8 @@ public:
         JSONDATA(JudgeBad);
         JSONDATA(SongOffset);
         JSONDATA(JudgeOffset);
+        JSONDATA(PersonalOffset);
+        JSONDATA(PersonalOffsetCount);
         JSONDATA(ChartOffset);
         JSONDATA(JiroChartMode);
         JSONDATA(EditorGrids);
@@ -150,6 +152,8 @@ public:
                 JSONDATA(JudgeBad),
                 JSONDATA(SongOffset),
                 JSONDATA(JudgeOffset),
+                JSONDATA(PersonalOffset),
+                JSONDATA(PersonalOffsetCount),
                 JSONDATA(ChartOffset),
                 JSONDATA(JiroChartMode),
                 JSONDATA(EditorGrids),
@@ -288,6 +292,8 @@ public:
     double JudgeOk = 75;
     double JudgeBad = 100;
     double JudgeOffset = 0.0;
+    double PersonalOffset = 0.0;        // 演奏で測ったずれを打ち消す判定オフセットの平均 (おすすめ設定で使う)
+    int PersonalOffsetCount = 0;        // その打撃の数 (古い分は重みを抑える)
     double ChartOffset = 0.0;           // 譜面 (音符・小節線) の時刻をずらす (ミリ秒。正で遅く)
     bool JiroChartMode = false;         // 太鼓さん次郎と同じ時刻・判定順・表示位置・分岐のタイミング
     std::optional<bool> JiroChartModeSaved;     // 譜面を読む時に一時的に次郎形式にした時の元の値 (保存しない)

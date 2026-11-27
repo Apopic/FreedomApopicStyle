@@ -278,7 +278,7 @@ public class MainActivity extends NativeActivity {
     }
 
     static {
-        System.loadLibrary("native-lib");
+        System.loadLibrary("FreedomApopicStyle");
     }
 
     private final ExecutorService executorService = Executors.newSingleThreadExecutor();

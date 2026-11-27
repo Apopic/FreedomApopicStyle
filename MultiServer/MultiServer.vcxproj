@@ -39,7 +39,7 @@
   <PropertyGroup>
     <OutDir>$(SolutionDir)x64\$(Configuration)\MultiServer\</OutDir>
     <IntDir>$(SolutionDir)x64\$(Configuration)\MultiServer\obj\</IntDir>
-    <TargetName>MultiServer</TargetName>
+    <TargetName>FreedomApopicStyleServer</TargetName>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
     <VcpkgEnabled>false</VcpkgEnabled>

@@ -42,6 +42,11 @@ void Game::BeginPlayStats() {
 
 void Game::FinishPlayStats() {
     HitStats.LastPlay = SummarizeHitErrors(HitStats.Play, HitErrorLimit());
+    // ずれ = 叩いた時刻 - 音符の時刻 - 判定オフセット なので、打ち消す判定オフセットは 今の値 + 平均。
+    // 外れた打撃の多い演奏 (ばらつきが大きい) は癖ではなく叩き損ねなので使わない
+    if (!Config.AutoPlay && !Editor.Testing && !Calib.Active && !IsMulti && HitStats.LastPlay.Count >= 30 && HitStats.LastPlay.StdDev <= 40.0) {
+        AddPersonalOffsetSample(Config.JudgeOffset + HitStats.LastPlay.Mean, HitStats.LastPlay.Count);
+    }
 }
 
 void Game::DrawHitErrorMeter(float cx, float cy, float width, const HitErrorSummary* summary, bool recent, const FontData* font) {

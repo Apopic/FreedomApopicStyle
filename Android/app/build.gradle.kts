@@ -46,6 +46,11 @@ android {
     }
 }
 
+// 出力する APK の名前 (FreedomApopicStyle-debug.apk / FreedomApopicStyle-release.apk)
+base {
+    archivesName = "FreedomApopicStyle"
+}
+
 dependencies {
     // SONGLINK のダウンロード (yt-dlp の Android 版。GPL-3.0: https://github.com/yausername/youtubedl-android)
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")

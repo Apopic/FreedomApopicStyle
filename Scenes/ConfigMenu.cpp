@@ -297,7 +297,7 @@ void Game::BuildConfigItems() {
     {
         ConfigItem recommend;
         recommend.Name = "Recommended";
-        recommend.Help = "この端末に合わせて表示とサウンドを設定する";
+        recommend.Help = "この端末に合わせて表示・サウンド・録画を設定し、演奏で測ったずれから判定オフセットを決める";
         recommend.Type = ConfigItemType::Action;
         recommend.Get = [] { return std::string("この端末に合わせて設定…"); };
         recommend.Step = [this](int) { OpenRecommendPanel(); };
@@ -1089,23 +1089,6 @@ std::vector<int> Game::NewlyPressedKeys(byte (&prev)[256]) {
 }
 
 #endif
-double Game::EstimateOutputLatencyMs(int type, bool exclusive, int buffer, int rate, const DeviceInfo& dev) {
-    if (rate <= 0) { rate = 48000; }
-    const double buffer_ms = std::max(buffer, 0) * 1000.0 / rate;
-    const double period_ms = dev.AudioOk && dev.MixRate > 0 && dev.PeriodSamples > 0 ? dev.PeriodSamples * 1000.0 / dev.MixRate : 10.0;
-    switch (type) {
-    case 0:                                                           // 既定 (SoundDevice::SetDevice では WASAPI)
-    case 1: return exclusive ? buffer_ms : buffer_ms + period_ms;     // WASAPI (共有モードはミキサーの周期が加わる)
-    case 4: return buffer_ms;                                         // ASIO
-    case 3: return buffer_ms * 2.0;                                   // MME (2 つのバッファを交互に使う)
-    default: return period_ms * 2.0;                                  // XAudio2
-    }
-}
-
-double Game::RecommendedJudgeOffset(const DeviceInfo& dev, int type, bool exclusive, int buffer, int rate) const {
-    return std::clamp(std::round(EstimateOutputLatencyMs(type, exclusive, buffer, rate, dev)), 0.0, 500.0);
-}
-
 bool Game::WriteCalibrationWav(const fs::path& path) {
     constexpr int rate = 48000;
     const double beatms = 500.0;
@@ -1171,6 +1154,7 @@ void Game::FinishCalibration() {
     if (!Calib.Finished) { ShowConfigMessage("オフセット調整をやめました"); return; }
     if (Calib.Result.Count < 12) { ShowConfigMessage("叩いた数が少ないため、判定オフセットを変えませんでした (" + std::to_string(Calib.Result.Count) + " 回)"); return; }
     const double before = Config.JudgeOffset;
+    AddPersonalOffsetSample(before + Calib.Result.Mean, Calib.Result.Count);
     Config.JudgeOffset = std::clamp(std::round(before + Calib.Result.Mean), -500.0, 500.0);
     ConfigChanged();
     Calib.LastResult = "判定 " + FormatSigned(before, 0) + " → " + FormatSigned(Config.JudgeOffset, 0) + "ms";
