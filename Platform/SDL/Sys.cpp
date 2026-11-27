@@ -2,6 +2,7 @@
 #include "SdlInternal.hpp"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <map>
 #include <random>
 #include <vector>
 #ifdef _WIN32
@@ -34,6 +35,14 @@ namespace sys {
             int Serial = 0;
         } Input;
         int InputFont = -1;
+        // 入力欄は複数持てる。キーが届くのは Input (選んでいる欄) だけで、ほかの欄はここに置いておく
+        std::map<int, TextInput> OtherInputs;
+        int NextSerial = 0;
+        const TextInput* FindInput(int handle) {
+            if (handle == Input.Serial && Input.Active) { return &Input; }
+            auto it = OtherInputs.find(handle);
+            return it != OtherInputs.end() ? &it->second : nullptr;
+        }
 
 #ifdef _WIN32
         WNDPROC SdlProc = nullptr;
@@ -154,6 +163,8 @@ namespace sys {
     }
 
     int BeginTextInput(const std::string& initial, size_t maxBytes, bool numberOnly) {
+        if (Input.Active) { Input.Composition.clear(); OtherInputs[Input.Serial] = Input; }
+        Input = TextInput{};
         Input.Active = true;
         Input.Text = initial.substr(0, maxBytes);
         Input.Cursor = Input.Text.size();
@@ -161,25 +172,39 @@ namespace sys {
         Input.MaxBytes = maxBytes;
         Input.NumberOnly = numberOnly;
         Input.State = 0;
-        ++Input.Serial;
+        Input.Serial = ++NextSerial;
         if (gfx::sdl::Window()) { SDL_StartTextInput(gfx::sdl::Window()); }
         return Input.Serial;
     }
+    void SetActiveTextInput(int handle) {
+        if (handle == Input.Serial && Input.Active) { return; }
+        auto it = OtherInputs.find(handle);
+        if (it == OtherInputs.end()) { return; }
+        if (Input.Active) { Input.Composition.clear(); OtherInputs[Input.Serial] = Input; }
+        Input = it->second;
+        OtherInputs.erase(handle);
+    }
     void EndTextInput(int handle) {
+        if (OtherInputs.erase(handle)) { return; }
         if (handle != Input.Serial || !Input.Active) { return; }
         Input.Active = false;
         if (gfx::sdl::Window()) { SDL_StopTextInput(gfx::sdl::Window()); }
     }
-    int TextInputState(int handle) { return handle == Input.Serial ? Input.State : 2; }
-    std::string TextInputString(int handle) { return handle == Input.Serial ? Input.Text : std::string(); }
+    int TextInputState(int handle) { const TextInput* in = FindInput(handle); return in ? in->State : 2; }
+    std::string TextInputString(int handle) { const TextInput* in = FindInput(handle); return in ? in->Text : std::string(); }
     void SetTextInputString(int handle, const std::string& text) {
-        if (handle != Input.Serial) { return; }
-        Input.Text = text.substr(0, Input.MaxBytes);
-        Input.Cursor = Input.Text.size();
+        TextInput* in = const_cast<TextInput*>(FindInput(handle));
+        if (!in) { return; }
+        in->Text = text.substr(0, in->MaxBytes);
+        in->Cursor = in->Text.size();
     }
     void SetTextInputFont(int font) { InputFont = font; }
     void DrawTextInput(int handle, float x, float y, gfx::Color color, gfx::Color cursor) {
-        if (handle != Input.Serial || !Input.Active || !txt::IsValid(InputFont)) { return; }
+        if (!txt::IsValid(InputFont)) { return; }
+        if (handle != Input.Serial || !Input.Active) {
+            if (const TextInput* in = FindInput(handle)) { txt::Draw(InputFont, x, y, in->Text, color); }
+            return;
+        }
         const std::string before = Input.Text.substr(0, Input.Cursor);
         const std::string after = Input.Text.substr(Input.Cursor);
         float cx = x;

@@ -34,6 +34,8 @@ namespace sys {
     // 番号を返す (-1 は失敗)。maxBytes: UTF-8 の最大バイト数
     int BeginTextInput(const std::string& initial, size_t maxBytes, bool numberOnly = false);
     void EndTextInput(int handle);
+    // 複数の入力欄がある時に、キーと IME を受け取る欄を選ぶ (BeginTextInput で作った欄は作った時に選ばれる)
+    void SetActiveTextInput(int handle);
     // 0: 入力中, 1: 決定 (Enter), 2: キャンセル (Esc)
     int TextInputState(int handle);
     std::string TextInputString(int handle);

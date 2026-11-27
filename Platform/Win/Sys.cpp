@@ -6,6 +6,7 @@
 #include <timeapi.h>
 #include <algorithm>
 #include <atomic>
+#include <map>
 #include <random>
 #include <vector>
 
@@ -48,6 +49,24 @@ namespace sys {
             int Serial = 0;
         } Input;
         int InputFont = -1;
+        // 入力欄は複数持てる (譜面制作の入力フォームなど)。キーと IME が届くのは Input (選んでいる欄) だけで、ほかの欄はここに置いておく
+        std::map<int, TextInput> OtherInputs;
+        int NextSerial = 0;
+        // 選んでいる欄を handle に替える (今の欄はしまう)
+        bool Activate(int handle) {
+            if (handle == Input.Serial && Input.Active) { return true; }
+            auto it = OtherInputs.find(handle);
+            if (it == OtherInputs.end()) { return false; }
+            if (Input.Active) { Input.Composition.clear(); OtherInputs[Input.Serial] = Input; }
+            Input = it->second;
+            OtherInputs.erase(handle);
+            return true;
+        }
+        const TextInput* FindInput(int handle) {
+            if (handle == Input.Serial && Input.Active) { return &Input; }
+            auto it = OtherInputs.find(handle);
+            return it != OtherInputs.end() ? &it->second : nullptr;
+        }
         wchar_t HighSurrogate = 0;
 
         size_t PrevChar(const std::string& s, size_t pos) {
@@ -288,6 +307,8 @@ namespace sys {
     }
 
     int BeginTextInput(const std::string& initial, size_t maxBytes, bool numberOnly) {
+        if (Input.Active) { Input.Composition.clear(); OtherInputs[Input.Serial] = Input; }     // 新しい欄を選ぶ (前の欄は残す)
+        Input = TextInput{};
         Input.Active = true;
         Input.Text = initial.substr(0, maxBytes);
         Input.Cursor = Input.Text.size();
@@ -295,11 +316,15 @@ namespace sys {
         Input.MaxBytes = maxBytes;
         Input.NumberOnly = numberOnly;
         Input.State = 0;
-        ++Input.Serial;
+        Input.Serial = ++NextSerial;
         EnableIme(!numberOnly);
         return Input.Serial;
     }
+    void SetActiveTextInput(int handle) {
+        if (Activate(handle)) { EnableIme(!Input.NumberOnly); }
+    }
     void EndTextInput(int handle) {
+        if (OtherInputs.erase(handle)) { return; }
         if (handle != Input.Serial || !Input.Active) { return; }
         Input.Active = false;
         Input.Composition.clear();
@@ -308,16 +333,22 @@ namespace sys {
         }
         EnableIme(false);
     }
-    int TextInputState(int handle) { return handle == Input.Serial ? Input.State : 2; }
-    std::string TextInputString(int handle) { return handle == Input.Serial ? Input.Text : std::string(); }
+    int TextInputState(int handle) { const TextInput* in = FindInput(handle); return in ? in->State : 2; }
+    std::string TextInputString(int handle) { const TextInput* in = FindInput(handle); return in ? in->Text : std::string(); }
     void SetTextInputString(int handle, const std::string& text) {
-        if (handle != Input.Serial) { return; }
-        Input.Text = text.substr(0, Input.MaxBytes);
-        Input.Cursor = Input.Text.size();
+        TextInput* in = const_cast<TextInput*>(FindInput(handle));
+        if (!in) { return; }
+        in->Text = text.substr(0, in->MaxBytes);
+        in->Cursor = in->Text.size();
     }
     void SetTextInputFont(int font) { InputFont = font; }
     void DrawTextInput(int handle, float x, float y, gfx::Color color, gfx::Color cursor) {
-        if (handle != Input.Serial || !Input.Active || !txt::IsValid(InputFont)) { return; }
+        if (!txt::IsValid(InputFont)) { return; }
+        if (handle != Input.Serial || !Input.Active) {
+            // 選んでいない欄は文字だけ描く
+            if (const TextInput* in = FindInput(handle)) { txt::Draw(InputFont, x, y, in->Text, color); }
+            return;
+        }
         const std::string before = Input.Text.substr(0, Input.Cursor);
         const std::string after = Input.Text.substr(Input.Cursor);
         float cx = x;

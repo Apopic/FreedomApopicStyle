@@ -38,6 +38,7 @@ void Game::EditorClamp() {
     Editor.Top = std::clamp(Editor.Top, 0, std::max(n - 1, 0));
     EditorNormalizeFolds();
     EditorReveal(Editor.CursorMeasure);     // カーソルの小節は開いて見えるようにする
+    EditorShowCursorPage();                 // 横のページもカーソルの位置に合わせる
 }
 
 #ifndef __ANDROID__
@@ -825,6 +826,17 @@ void Game::EditorScrollHorizontal(int dir) {
     EditorHorizontalOffset=std::clamp(EditorHorizontalOffset+dir*width,0.0f,(float)(width*(std::ceil(longest)-1)));
 }
 
+void Game::EditorShowCursorPage() {
+    if (EditorMeasureCount() <= 0) { return; }
+    const float width = EditorStandardMeasureWidth();
+    const double ratio = std::clamp(EditorMeasureRatio(Editor.CursorMeasure), 0.05, 16.0);
+    const float x = (float)(width * ratio * Editor.CursorSlot / std::max(EditorDivOf(Editor.CursorMeasure), 1));
+    // 前・次のページに出た時だけ切り替える (見えている間はそのまま)
+    if (x < EditorHorizontalOffset || x >= EditorHorizontalOffset + width) {
+        EditorHorizontalOffset = editlayout::PageOffset(x, width, ratio);
+    }
+}
+
 auto Game::EditorLane(int row) const -> UIRect {
     const UIRect a = EditorGridArea();
     const float h = EditorRowHeight(), top = a.T + h * row;
@@ -1320,7 +1332,8 @@ void Game::EditorFocusField(int index) {
     if (Editor.FormFields.empty()) { return; }
     Editor.FormActive = (index + (int)Editor.FormFields.size()) % (int)Editor.FormFields.size();
 #ifndef __ANDROID__
-    ((void)0);
+    // キーと IME を選んだ欄に向ける (選択肢の欄は入力欄を持たない)
+    if (const int handle = Editor.FormFields[(size_t)Editor.FormActive].Handle; handle != -1) { sys::SetActiveTextInput(handle); }
 #endif
 }
 
@@ -3682,10 +3695,12 @@ void Game::EditorProc() {
                 EditorToggleFold(m);
                 return;
             }
-            if (m >= 0 && UIRect{ EditorGridArea().L, lane.T, lane.L, lane.B }.Contains(pt.X, pt.Y)) {
+            // 小節番号の列: 横にスクロールしていても (レーンが左にずれていても) 列の幅全体で押せる
+            if (m >= 0 && UIRect{ EditorGridArea().L, lane.T, EditorGridArea().L + EditorLabelWidth(), lane.B }.Contains(pt.X, pt.Y)) {
                 Editor.CursorMeasure = m;
                 Editor.CursorSlot = 0;
                 Editor.Selecting = false;
+                EditorShowCursorPage();
                 if (Editor.Preview) { EditorStopPreview(); EditorTogglePreview(); }
                 return;
             }

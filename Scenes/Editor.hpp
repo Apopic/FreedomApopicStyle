@@ -208,6 +208,8 @@
     float EditorStandardMeasureWidth() const;
     float EditorHorizontalOffset=0;
     void EditorScrollHorizontal(int dir);
+    // カーソルの位置が見えるページ (長い小節を横に分けた表示) に切り替える
+    void EditorShowCursorPage();
     // 音符と小節幅を同じ縮尺で描き、演奏画面の16分の間隔と音符径の比率を保つ。
     UIRect EditorLane(int row) const;
     float EditorX(const UIRect& lane, double pos) const;
