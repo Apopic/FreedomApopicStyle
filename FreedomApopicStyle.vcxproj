@@ -62,14 +62,14 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/execution-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(FasDxLib);$(FasSocketHeaders);$(FasMagicEnumHeaders);$(FasZlibHeaders);$(FasLibarrierHeaders);$(FasZipHeaders);$(FasJsonHeaders);$(FasFastFloatHeaders);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(FasSdl3)\include;$(FasSocketHeaders);$(FasMagicEnumHeaders);$(FasZlibHeaders);$(FasLibarrierHeaders);$(FasZipHeaders);$(FasJsonHeaders);$(FasFastFloatHeaders);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(FasDxLib);$(FasIcuLibs);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>icuuc.lib;icudt.lib;icuin.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(FasSdl3)\lib;$(FasIcuLibs);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(FasBackendLibs);icuuc.lib;icudt.lib;icuin.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -86,14 +86,14 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/execution-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(FasDxLib);$(FasSocketHeaders);$(FasMagicEnumHeaders);$(FasZlibHeaders);$(FasLibarrierHeaders);$(FasZipHeaders);$(FasJsonHeaders);$(FasFastFloatHeaders);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(FasSdl3)\include;$(FasSocketHeaders);$(FasMagicEnumHeaders);$(FasZlibHeaders);$(FasLibarrierHeaders);$(FasZipHeaders);$(FasJsonHeaders);$(FasFastFloatHeaders);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(FasDxLib);$(FasIcuLibs);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>icuuc.lib;icudt.lib;icuin.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(FasSdl3)\lib;$(FasIcuLibs);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(FasBackendLibs);icuuc.lib;icudt.lib;icuin.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -103,6 +103,17 @@
   <ItemGroup>
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="SystemCommon.cpp" />
+    <ClCompile Include="Platform\Audio.cpp" />
+    <ClCompile Include="Platform\Movie.cpp" />
+    <ClCompile Include="Platform\Win\Gfx.cpp" Condition="'$(FasBackend)'=='Win'" />
+    <ClCompile Include="Platform\Win\Text.cpp" Condition="'$(FasBackend)'=='Win'" />
+    <ClCompile Include="Platform\Win\Sys.cpp" Condition="'$(FasBackend)'=='Win'" />
+    <ClCompile Include="Platform\Win\Image.cpp" Condition="'$(FasBackend)'=='Win'" />
+    <ClCompile Include="Platform\Win\AudioDevice.cpp" Condition="'$(FasBackend)'=='Win'" />
+    <ClCompile Include="Platform\SDL\Gfx.cpp" Condition="'$(FasBackend)'=='SDL'" />
+    <ClCompile Include="Platform\SDL\Text.cpp" Condition="'$(FasBackend)'=='SDL'" />
+    <ClCompile Include="Platform\SDL\Sys.cpp" Condition="'$(FasBackend)'=='SDL'" />
+    <ClCompile Include="Platform\SDL\AudioDevice.cpp" Condition="'$(FasBackend)'=='SDL'" />
     <ClCompile Include="System\CoreStart.cpp" />
     <ClCompile Include="Scenes\Title.cpp" />
     <ClCompile Include="Scenes\ModeSelect.cpp" />
@@ -125,6 +136,14 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="GameDependencies.hpp" />
+    <ClInclude Include="Platform\Gfx.hpp" />
+    <ClInclude Include="Platform\Text.hpp" />
+    <ClInclude Include="Platform\Audio.hpp" />
+    <ClInclude Include="Platform\Sys.hpp" />
+    <ClInclude Include="Platform\Movie.hpp" />
+    <ClInclude Include="Platform\AudioMixer.hpp" />
+    <ClInclude Include="Platform\Win\WinInternal.hpp" />
+    <ClInclude Include="Platform\SDL\SdlInternal.hpp" />
     <ClInclude Include="Library\AddStruct.hpp" />
     <ClInclude Include="Library\DiscordRpc.hpp" />
     <ClInclude Include="Library\Easing.hpp" />
@@ -134,6 +153,8 @@
     <ClInclude Include="Library\PreviewRoll.hpp" />
     <ClInclude Include="Library\ExString.hpp" />
     <ClInclude Include="Library\Input.hpp" />
+    <ClInclude Include="Library\RawInputQueue.hpp" />
+    <ClInclude Include="Library\PcmMixer.hpp" />
     <ClInclude Include="Library\Net.hpp" />
     <ClInclude Include="Library\NetCrypto.hpp" />
     <ClInclude Include="Library\PlayRecorder.hpp" />

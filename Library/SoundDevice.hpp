@@ -1,5 +1,5 @@
 ﻿#pragma once
-#include "DxLib.h"
+#include "../Platform/Audio.hpp"
 
 class SoundDevice final {
 public:
@@ -25,29 +25,12 @@ public:
         ASIO
     };
 
-#ifndef __ANDROID__
-    void SetDevice(int type, bool exclusive, int bufsize, int samplerate) {
-
+    // 音声の出力を開く。Windows は WASAPI (exclusive なら排他モード、使えなければ共有モード) で、既定の出力機器に出す。
+    // 出力方式の種類 (XAudio・MME・ASIO) は WASAPI にまとめ、バッファの大きさ (遅延) とサンプリングレートを使う
+    bool SetDevice(int type, bool exclusive, int bufsize, int samplerate) {
+        (void)type;
         if (samplerate <= 0) { samplerate = 48000; }
         if (bufsize <= 0) { bufsize = 480; }
-        int ns = static_cast<int>(10000000LL * bufsize / samplerate);
-        switch (type) {
-        case SoundDeviceType::WASAPI:
-            SetEnableWASAPIFlag(TRUE, exclusive, ns, samplerate);
-            break;
-        case SoundDeviceType::XAudio:
-            SetEnableXAudioFlag(TRUE);
-            break;
-        case SoundDeviceType::MMEwaveOut:
-            SetEnableMMEwaveOutFlag(TRUE, bufsize, samplerate);
-            break;
-        case SoundDeviceType::ASIO:
-            SetEnableASIOFlag(TRUE, bufsize, samplerate);
-            break;
-        default:
-            SetDevice(SoundDeviceType::WASAPI, exclusive, bufsize, samplerate);
-            break;
-        }
+        return snd::Init({ samplerate, bufsize, exclusive });
     }
-#endif
 };

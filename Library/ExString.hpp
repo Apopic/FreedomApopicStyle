@@ -11,7 +11,7 @@
 #include <fstream>
 #include <unordered_map>
 #include "OsuTaiko.hpp"
-#include "DxLib.h"
+#include "../Platform/Text.hpp"
 #include "fast_float.h"
 
 template<typename T>
@@ -39,8 +39,7 @@ inline std::string ToLower(std::string_view str) {
 }
 
 inline size_t GetStrlen(std::string_view data, int handle) {
-    std::string str(data);
-    const int width = GetDrawStringWidthToHandle(str.c_str(), (int)str.size(), handle);
+    const int width = txt::Width(handle, data);
     return width > 0 ? (size_t)width : 0;
 }
 

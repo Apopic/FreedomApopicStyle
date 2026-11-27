@@ -50,35 +50,35 @@ void Game::DrawHitErrorMeter(float cx, float cy, float width, const HitErrorSumm
     const float scale = half / (float)bad;
     auto X = [&](double e) { return cx + (float)std::clamp(e, -bad, bad) * scale; };
     const float h = 9.0f;
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 210);
-    DrawBoxAA(X(-bad), cy - 3, X(bad), cy + 3, GetColor(70, 120, 230), TRUE);
-    DrawBoxAA(X(-Config.JudgeOk), cy - 3, X(Config.JudgeOk), cy + 3, GetColor(235, 235, 235), TRUE);
-    DrawBoxAA(X(-Config.JudgeGood), cy - 3, X(Config.JudgeGood), cy + 3, GetColor(255, 170, 40), TRUE);
-    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-    DrawLineAA(cx, cy - h - 2, cx, cy + h + 2, GetColor(255, 255, 255), 2.0f);
+    gfx::SetBlend(gfx::Blend::Alpha, 210);
+    gfx::Box(X(-bad), cy - 3, X(bad), cy + 3, gfx::Rgb(70, 120, 230), true);
+    gfx::Box(X(-Config.JudgeOk), cy - 3, X(Config.JudgeOk), cy + 3, gfx::Rgb(235, 235, 235), true);
+    gfx::Box(X(-Config.JudgeGood), cy - 3, X(Config.JudgeGood), cy + 3, gfx::Rgb(255, 170, 40), true);
+    gfx::SetBlend(gfx::Blend::None);
+    gfx::Line(cx, cy - h - 2, cx, cy + h + 2, gfx::Rgb(255, 255, 255), 2.0f);
 
     auto zone = [&](double e) {
         const double a = std::abs(e);
-        return a < Config.JudgeGood ? GetColor(255, 210, 80) : a < Config.JudgeOk ? GetColor(255, 255, 255) : GetColor(120, 170, 255);
+        return a < Config.JudgeGood ? gfx::Rgb(255, 210, 80) : a < Config.JudgeOk ? gfx::Rgb(255, 255, 255) : gfx::Rgb(120, 170, 255);
     };
     if (recent) {
         const auto now = std::chrono::steady_clock::now();
         for (const auto& r : HitStats.RecentHits) {
             const double age = std::chrono::duration<double, std::milli>(now - r.At).count();
             if (age > HitErrorStats::RecentMs) { continue; }
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, std::clamp((int)(255 * (1.0 - age / HitErrorStats::RecentMs)), 0, 255));
-            DrawBoxAA(X(r.Error) - 1.5f, cy - h, X(r.Error) + 1.5f, cy + h, zone(r.Error), TRUE);
+            gfx::SetBlend(gfx::Blend::Alpha, std::clamp((int)(255 * (1.0 - age / HitErrorStats::RecentMs)), 0, 255));
+            gfx::Box(X(r.Error) - 1.5f, cy - h, X(r.Error) + 1.5f, cy + h, zone(r.Error), true);
         }
-        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        gfx::SetBlend(gfx::Blend::None);
     }
     if (summary != nullptr && summary->Count > 0) {
-        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 80);
-        DrawBoxAA(X(summary->Mean - summary->StdDev), cy - h, X(summary->Mean + summary->StdDev), cy + h, GetColor(255, 255, 255), TRUE);
-        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        gfx::SetBlend(gfx::Blend::Alpha, 80);
+        gfx::Box(X(summary->Mean - summary->StdDev), cy - h, X(summary->Mean + summary->StdDev), cy + h, gfx::Rgb(255, 255, 255), true);
+        gfx::SetBlend(gfx::Blend::None);
         const float mx = X(summary->Mean);
-        DrawTriangleAA(mx, cy - h - 1, mx - 6, cy - h - 11, mx + 6, cy - h - 11, GetColor(255, 80, 80), TRUE);
+        gfx::Triangle(mx, cy - h - 1, mx - 6, cy - h - 11, mx + 6, cy - h - 11, gfx::Rgb(255, 80, 80), true);
         if (font != nullptr && font->Handle != -1) {
-            UIText(*font, cx, cy + h + 10 + font->Size * 0.5f, HitErrorText(*summary), GetColor(255, 255, 255), 1);
+            UIText(*font, cx, cy + h + 10 + font->Size * 0.5f, HitErrorText(*summary), gfx::Rgb(255, 255, 255), 1);
         }
     }
 }

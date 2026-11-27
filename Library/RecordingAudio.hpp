@@ -7,7 +7,8 @@ namespace rec {
     // 設定の百分率をそのまま振幅へ適用する。小さい設定を平方根で持ち上げない。
     inline float VolumeGain(double chartPercent, double configPercent) {
         if (!std::isfinite(chartPercent) || !std::isfinite(configPercent)) { return 0; }
-        return (float)(std::clamp(chartPercent, 0.0, 100.0) * std::clamp(configPercent, 0.0, 100.0) / 10000.0);
+        // ゲームの音量と同じ 2.5 乗の目盛り (曲と効果音の大きさの釣り合いをゲームと同じにする)
+        return (float)std::pow(std::clamp(chartPercent, 0.0, 100.0) * std::clamp(configPercent, 0.0, 100.0) / 10000.0, 2.5);
     }
     inline void LimitMixPeak(std::vector<float>& mix, float ceiling = 0.98f) {
         float peak = 0;

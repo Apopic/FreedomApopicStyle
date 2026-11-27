@@ -37,7 +37,9 @@ def main():
     text(draw, (360, 80), "PAUSE", 44, "#ffffff")
     text(draw, (360, 440), "↑↓  選択     Enter  決定     TAB / Esc  再開", 16, "#cccccc")
     save(canvas, "Panel.png")
-    for name, label in [("Resume.png", "続ける"), ("Restart.png", "最初から"), ("Exit.png", "選曲へ戻る")]:
+    # 譜面制作のテストプレイでは *Test.png を使う
+    for name, label in [("Resume.png", "続ける"), ("Restart.png", "最初から"), ("Exit.png", "選曲へ戻る"),
+                        ("ResumeTest.png", "テストを続ける"), ("RestartTest.png", "もう一度テスト"), ("ExitTest.png", "編集に戻る")]:
         canvas, draw = image((420, 64))
         box(draw, (2, 2, 418, 62), 20, "#454545", "#747474", 2)
         text(draw, (210, 33), label, 28, "#ffffff")

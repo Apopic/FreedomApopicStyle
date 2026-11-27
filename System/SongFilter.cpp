@@ -165,7 +165,7 @@ void Game::OpenFilterPanel() {
 void Game::CloseFilterPanel() {
 #ifndef __ANDROID__
     if (FilterUI.Editing) {
-        DeleteKeyInput(FilterUI.EditHandle);
+        sys::EndTextInput(FilterUI.EditHandle);
     }
 #endif
     FilterUI.Editing = false;
@@ -187,7 +187,7 @@ void Game::ApplyFilter(bool random) {
         ShowSelectMessage("条件に一致する譜面がありません");
         return;
     }
-    BoxDataIndex = random ? GetRand((int)BoxDatas.size() - 1) : 0;
+    BoxDataIndex = random ? sys::Rand((int)BoxDatas.size() - 1) : 0;
     ShowSelectMessage(Filter.Empty() ? std::string("絞り込みを解除しました") : std::to_string(BoxDatas.size()) + " 件見つかりました");
     DemoSongPlayBlank.Reset();
     ResetDemoSong();
@@ -200,15 +200,15 @@ void Game::DrawFilterPanel(const FontData& titlefont) {
         FilterUI.PreviewDirty = false;
     }
     const FontData& sfont = ConfigSmallFont();
-    const unsigned int white = GetColor(255, 255, 255);
-    const unsigned int black = GetColor(0, 0, 0);
-    const unsigned int gray = GetColor(170, 170, 170);
-    const unsigned int accent = GetColor(255, 200, 40);
+    const unsigned int white = gfx::Rgb(255, 255, 255);
+    const unsigned int black = gfx::Rgb(0, 0, 0);
+    const unsigned int gray = gfx::Rgb(170, 170, 170);
+    const unsigned int accent = gfx::Rgb(255, 200, 40);
     const UIRect r = FilterPanelRect();
     const float lh = FilterLineHeight();
 
     UIBox({ 0, 0, (float)Skin.Info.Resolution.X, (float)Skin.Info.Resolution.Y }, black, 120);
-    UIBox(r, GetColor(18, 20, 32), 238);
+    UIBox(r, gfx::Rgb(18, 20, 32), 238);
     UIBox(r, white, 200, false);
     const FontData& title = titlefont.Handle != -1 && titlefont.Size <= lh * 1.6f ? titlefont : sfont;
     UIText(title, r.L + 24, r.T + lh * 1.1f, FitText("譜面の絞り込み", title.Handle, r.R - r.L - 48, false), white);
@@ -235,7 +235,7 @@ void Game::DrawFilterPanel(const FontData& titlefont) {
         case ConfigItemType::Bool: {
             const bool on = value == "ON";
             const UIRect pill{ v.L, v.T, v.L + std::max(96.0f, sfont.Size * 4.0f), v.B };
-            UIBox(pill, on ? GetColor(40, 200, 90) : GetColor(90, 90, 90), 230);
+            UIBox(pill, on ? gfx::Rgb(40, 200, 90) : gfx::Rgb(90, 90, 90), 230);
             UIText(sfont, (pill.L + pill.R) * 0.5f, cy, value, white, 1);
             break;
         }
@@ -255,7 +255,7 @@ void Game::DrawFilterPanel(const FontData& titlefont) {
     for (int i = 0; i < FilterButtonCount; ++i) {
         const UIRect b = FilterButtonRect(i);
         const bool current = FilterUI.Selected == RowButtons && FilterUI.Button == i;
-        UIBox(b, current ? GetColor(214, 116, 20) : GetColor(50, 54, 70), 230);
+        UIBox(b, current ? gfx::Rgb(214, 116, 20) : gfx::Rgb(50, 54, 70), 230);
         UIBox(b, white, 160, false);
         UIText(sfont, (b.L + b.R) * 0.5f, (b.T + b.B) * 0.5f, FitText(buttons[i], sfont.Handle, b.R - b.L - 12, false), white, 1);
     }
@@ -277,16 +277,16 @@ void Game::DrawFilterPanel(const FontData& titlefont) {
         y -= lh;
     }
     if (y >= top - lh * 0.5f) {
-        UIText(sfont, r.L + 24, y, "該当: " + std::to_string(FilterUI.Preview) + " 譜面", FilterUI.Preview == 0 ? GetColor(255, 120, 120) : GetColor(255, 230, 120));
+        UIText(sfont, r.L + 24, y, "該当: " + std::to_string(FilterUI.Preview) + " 譜面", FilterUI.Preview == 0 ? gfx::Rgb(255, 120, 120) : gfx::Rgb(255, 230, 120));
     }
 #ifndef __ANDROID__
     if (FilterUI.Editing) {
         const UIRect v = FilterValueRect(FilterUI.Selected);
         UIBox(v, black, 235);
         UIBox(v, accent, 255, false);
-        SetDrawArea((int)v.L + 4, (int)v.T, (int)v.R - 4, (int)v.B);
+        gfx::SetClip((int)v.L + 4, (int)v.T, (int)v.R - 4, (int)v.B);
         DrawTextInput((int)v.L + 12, (int)(((v.T + v.B) * 0.5f) - sfont.Size * 0.5f), FilterUI.EditHandle);
-        SetDrawAreaFull();
+        gfx::ResetClip();
     }
 #endif
 }
@@ -300,16 +300,15 @@ void Game::FilterPanelProc() {
 
 #ifndef __ANDROID__
     if (FilterUI.Editing) {
-        const int state = CheckKeyInput(FilterUI.EditHandle);
+        const int state = sys::TextInputState(FilterUI.EditHandle);
         const bool clickout = pt.LeftPressed && !FilterValueRect(FilterUI.Selected).Contains(pt.X, pt.Y);
         if (state != 0 || clickout) {
             if (state == 1 || clickout) {
-                char buf[1024]{};
-                GetKeyInputString(buf, FilterUI.EditHandle);
+                const std::string buf = sys::TextInputString(FilterUI.EditHandle);
                 FilterUI.Edit.Keyword = std::string(strtrim(buf));
                 FilterUI.PreviewDirty = true;
             }
-            DeleteKeyInput(FilterUI.EditHandle);
+            sys::EndTextInput(FilterUI.EditHandle);
             FilterUI.EditHandle = 0;
             FilterUI.Editing = false;
             Input::GetInstance().ResyncKeys();
@@ -321,10 +320,10 @@ void Game::FilterPanelProc() {
     auto BeginEdit = [&] {
         Se(true);
 #ifndef __ANDROID__
-        FilterUI.EditHandle = MakeKeyInput(255, TRUE, FALSE, FALSE);
-        SetKeyInputString(FilterUI.Edit.Keyword.c_str(), FilterUI.EditHandle);
-        SetActiveKeyInput(FilterUI.EditHandle);
-        SetKeyInputStringFont(ConfigSmallFont().Handle);
+        FilterUI.EditHandle = sys::BeginTextInput("", (size_t)(255), false);
+        sys::SetTextInputString(FilterUI.EditHandle, FilterUI.Edit.Keyword.c_str());
+        ((void)0);
+        sys::SetTextInputFont(ConfigSmallFont().Handle);
         FilterUI.Editing = true;
 #else
         FilterUI.Edit.Keyword = std::string(strtrim(GetInputText(FilterRowLabel(RowKeyword))));
@@ -414,7 +413,7 @@ void Game::SelectSceneEnter() {
     // 前の画面 (リザルトなど) の入力を持ち込まない: たまったホイール・押したままの指を離した時のタップで、
     // 入った直後に曲が動いてカッが鳴らないように
 #ifndef __ANDROID__
-    SetMouseDispFlag(TRUE);
+    sys::ShowCursor(true);
     Input::GetInstance().GetMouseWheel();
 #else
     TouchState = TouchTrack{};
@@ -427,7 +426,7 @@ void Game::SelectSceneLeave() {
         CloseFilterPanel();
     }
 #ifndef __ANDROID__
-    SetMouseDispFlag(!Config.FullScreen);
+    sys::ShowCursor(!Config.FullScreen);
 #endif
 }
 

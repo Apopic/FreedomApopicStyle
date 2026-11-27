@@ -32,27 +32,24 @@ double Game::DemoSongPlayBlankTime() const {
 
 void Game::ResetDemoSong() {
     // 読み込み中の DeleteSoundMem は待機することがあるので、選曲操作では解放しない。
-    if (DemoSong.Handle != -1 && CheckHandleASyncLoad(DemoSong.Handle) == FALSE) { DemoSong.Stop(); }
+    if (DemoSong.Handle != -1 && snd::IsReady(DemoSong.Handle)) { DemoSong.Stop(); }
     DemoLoadFailed = false;
 }
 
 void Game::UpdateDemoSong(const ChartData& selected) {
     const std::string path = selected.SongPath.string();
-    const int loading = DemoSong.Handle == -1 ? 0 : CheckHandleASyncLoad(DemoSong.Handle);
-    if (loading > 0) { return; }
-    if (loading < 0) { DemoSong.Handle = -1; DemoLoadFailed = true; }
+    // 非同期の展開が終わるまで待つ。展開に失敗した音 (データが無い) は失敗として扱う
+    if (DemoSong.Handle != -1 && !snd::IsReady(DemoSong.Handle)) { return; }
+    if (DemoSong.Handle != -1 && !snd::Data(DemoSong.Handle)) { DemoSong.Delete(); DemoLoadFailed = true; }
     if (DemoSong.FilePath != path || (DemoSong.Handle == -1 && !DemoLoadFailed)) {
         DemoSong.Delete();
-        const int previous = GetCreateSoundDataType();
-        SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
         DemoSong.LoadAsync(path);
-        SetCreateSoundDataType(previous);
         DemoLoadFailed = DemoSong.Handle == -1;
         return;
     }
     if (DemoSong.Handle != -1 && !DemoSong.IsPlay()) {
         DemoSong.FinishAsync();
-        const double duration = (double)GetSoundTotalTime(DemoSong.Handle), preview = selected.DemoStart * 1000;
+        const double duration = snd::TotalMs(DemoSong.Handle), preview = selected.DemoStart * 1000;
         DemoSong.SetCurrent(std::isfinite(preview) && preview >= 0 && preview < duration ? preview : 0);
         DemoSong.SetVolume(selected.SongVolume * Config.SongVolume / 100);
         DemoSong.Play(FALSE);
@@ -312,7 +309,7 @@ void Game::FinishSkinReload() {
     ConfigSmall.Delete(); ConfigSmallSource=-2; ConfigSmallSourceSize=0;
     EditorFontData.Delete(); EditorFontSize=0; EditorPanelFontData.Delete(); EditorPanelFontSize=0;
     EditorNoteWidthFractions.clear();
-    EditorNoteBoundsHandle = -2; EditorNoteBoundsPath.clear();
+    EditorNoteBoundsHandle = nullptr; EditorNoteBoundsPath.clear();
     ClearStrlenCache();
     SkinVoice={};
     PlayerCharAnim={};
@@ -647,7 +644,7 @@ void Game::DrawSearchStatus(const FontData& font) {
     }
     if (!status.empty()) {
         const FontData& f = font.Handle != -1 ? font : sfont;
-        UIText(f, 16, 24, FitText(status, f.Handle, resx - 32, false), GetColor(255, 230, 120));
+        UIText(f, 16, 24, FitText(status, f.Handle, resx - 32, false), gfx::Rgb(255, 230, 120));
     }
 #ifndef __ANDROID__
     if (!FilterUI.Open) {
@@ -659,10 +656,10 @@ void Game::DrawSearchStatus(const FontData& font) {
 #endif
         const float lh = ConfigLineHeight();
         const float top = resy - 8 - lh * (float)lines.size();
-        UIBox({ 0, top - 4, resx, resy }, GetColor(0, 0, 0), 210);     // 後ろの箱の文字が透けて読みにくくならないよう濃くする
+        UIBox({ 0, top - 4, resx, resy }, gfx::Rgb(0, 0, 0), 210);     // 後ろの箱の文字が透けて読みにくくならないよう濃くする
         float y = top + lh * 0.5f;
         for (const auto& line : lines) {
-            UIText(sfont, 16, y, line, GetColor(225, 225, 225));
+            UIText(sfont, 16, y, line, gfx::Rgb(225, 225, 225));
             y += lh;
         }
     }
@@ -671,7 +668,7 @@ void Game::DrawSearchStatus(const FontData& font) {
 
 void Game::DrawFavoriteMark(const GraphData& box, const FontData& font, float y) {
     const float x = box.Pos.X - box.Size.Width * 0.5f + font.Size;
-    UIText(font, x, y, "★", GetColor(255, 215, 0), 1);
+    UIText(font, x, y, "★", gfx::Rgb(255, 215, 0), 1);
 }
 
 std::vector<uint8_t> Game::FileToMem(const fs::path& path) {
@@ -697,15 +694,10 @@ void Game::FileImport() {
 
     std::vector<std::string> DropFiles;
 
-    if (GetDragFileNum() <= 0) {
+    if (sys::DroppedFileCount() == 0) {
         return;
     }
-
-    char path[MAX_PATH];
-    while (GetDragFilePath(path) == 0) {
-        DropFiles.push_back(path);
-    }
-    DragFileInfoClear();
+    DropFiles = sys::TakeDroppedFiles();
 
     fs::path ImportFolderPath;
     HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
@@ -849,14 +841,14 @@ bool Game::RunProcess(const std::vector<std::wstring>& args, const fs::path& wor
     CloseHandle(pi.hThread);
 
     while (WaitForSingleObject(pi.hProcess, 16) == WAIT_TIMEOUT) {
-        if (ProcessMessage() == -1) {
+        if (!sys::PumpEvents()) {
             TerminateProcess(pi.hProcess, 1);
             EndFlag = true;
             break;
         }
-        ClearDrawScreen();
-        DrawString(16, 16, status, GetColor(255, 255, 255));
-        ScreenFlip();
+        gfx::Clear();
+        txt::Draw(txt::DefaultFont(), (float)(16), (float)(16), status, gfx::Rgb(255, 255, 255));
+        gfx::Present();
     }
 
     DWORD code = 1;
@@ -892,7 +884,7 @@ bool Game::ConfirmToolInstall(ToolKind kind, const char* reason) {
             "・ダウンロードする動画・音源の利用は、各サイトの規約と著作権に従ってください。\n";
     }
     text += "\nダウンロードしたファイルは配布元が公開している SHA-256 と照合します。導入しますか?";
-    return MessageBox(GetMainWindowHandle(), text.c_str(), "外部ツールの導入", MB_YESNO | MB_ICONQUESTION) == IDYES;
+    return MessageBox(((HWND)sys::NativeWindow()), text.c_str(), "外部ツールの導入", MB_YESNO | MB_ICONQUESTION) == IDYES;
 }
 
 bool Game::InstallTool(ToolKind kind) {
@@ -902,17 +894,17 @@ bool Game::InstallTool(ToolKind kind) {
         return kind == ToolKind::Ffmpeg ? tools::InstallFfmpeg(exedir, p, e) : tools::InstallYtDlp(exedir, p, e);
         }, std::string(ToolName(kind)) + " を導入しました");
     while (job.Busy()) {
-        if (ProcessMessage() == -1) { job.Cancel(); EndFlag = true; break; }
-        if (CheckHitKey(KEY_INPUT_ESCAPE)) { job.Cancel(); }
-        ClearDrawScreen();
-        DrawString(16, 16, (std::string(ToolName(kind)) + ": " + job.State().Describe()).c_str(), GetColor(255, 255, 255));
-        DrawString(16, 48, "Esc: 中止", GetColor(200, 200, 200));
-        ScreenFlip();
+        if (!sys::PumpEvents()) { job.Cancel(); EndFlag = true; break; }
+        if (sys::KeyDown(sys::Key::Escape)) { job.Cancel(); }
+        gfx::Clear();
+        txt::Draw(txt::DefaultFont(), (float)(16), (float)(16), (std::string(ToolName(kind)) + ": " + job.State().Describe()).c_str(), gfx::Rgb(255, 255, 255));
+        txt::Draw(txt::DefaultFont(), (float)(16), (float)(48), "Esc: 中止", gfx::Rgb(200, 200, 200));
+        gfx::Present();
     }
     job.Join();
     const bool ok = job.State().State == tools::Progress::Phase::Done;
     if (!EndFlag) {
-        MessageBox(GetMainWindowHandle(), job.State().Text().c_str(), ToolName(kind), ok ? MB_ICONINFORMATION : MB_ICONERROR);
+        MessageBox(((HWND)sys::NativeWindow()), job.State().Text().c_str(), ToolName(kind), ok ? MB_ICONINFORMATION : MB_ICONERROR);
     }
     Input::GetInstance().ResyncKeys();
     return ok;
@@ -1029,10 +1021,10 @@ bool Game::AndroidDownloadMedia(const std::string& link, const fs::path& path, b
         } catch(...) { task->Result.clear(); }
         }).detach();
     while (!task->Done) {
-        if (ProcessMessage() == -1) { EndFlag = true; return false; }
-        ClearDrawScreen();
-        DrawString(16, 16, "ダウンロードしています... (初回は yt-dlp の準備に時間がかかります)", GetColor(255, 255, 255));
-        ScreenFlip();
+        if (!sys::PumpEvents()) { EndFlag = true; return false; }
+        gfx::Clear();
+        txt::Draw(txt::DefaultFont(), (float)(16), (float)(16), "ダウンロードしています... (初回は yt-dlp の準備に時間がかかります)", gfx::Rgb(255, 255, 255));
+        gfx::Present();
     }
     if (task->Result.empty()) { ShowToast("ダウンロードに失敗しました: " + task->Error); return false; }
     fs::rename(task->Result, path, ec);

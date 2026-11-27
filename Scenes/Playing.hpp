@@ -141,6 +141,7 @@
                 Judge[0].Rolls.Init();
             }
             RawNoteDatas.clear();
+            NotesTimeOrdered = false;
             BranchDatas.clear();
             BpmEvents.clear();
             DelayEvents.clear();
@@ -599,6 +600,11 @@
         // 演奏中の音符の走査は、終わった先頭部分を飛ばす (毎フレーム・打撃ごとの全件走査を避ける)。
         // 音符は分岐ごとに並ぶため時刻順ではないので、先頭から「確実に終わった」音符だけを進める
         size_t ScanStart = 0;
+        bool NotesTimeOrdered = false;
+        void PrepareJudgementWindow() {
+            NotesTimeOrdered = std::ranges::all_of(RawNoteDatas, [](const NoteData& n) { return std::isfinite(n.AbsTime); })
+                && std::is_sorted(RawNoteDatas.begin(), RawNoteDatas.end(), [](const NoteData& a, const NoteData& b) { return a.AbsTime < b.AbsTime; });
+        }
         double ScanTime = -std::numeric_limits<double>::infinity();
         static constexpr double ScanMargin = 2000.0;   // 判定・連打の終わりからこれだけ過ぎた音符は処理しない
         void UpdateScanStart(double now, double judgebad) {
@@ -614,6 +620,14 @@
             }
         }
         std::span<NoteData> ActiveNotes() { return std::span<NoteData>(RawNoteDatas).subspan(std::min(ScanStart, RawNoteDatas.size())); }
+        std::span<NoteData> JudgementNotes(double now, double margin) {
+            const auto notes = ActiveNotes();
+            if (!NotesTimeOrdered || !std::isfinite(now) || !std::isfinite(margin)) { return notes; }
+            const double cutoff = std::nextafter(now + std::max(0.0, margin), std::numeric_limits<double>::infinity());
+            const auto end = std::upper_bound(notes.begin(), notes.end(), cutoff,
+                [](double time, const NoteData& note) { return time < note.AbsTime; });
+            return notes.first((size_t)(end - notes.begin()));
+        }
 
         size_t DanBalloonIndex = 0;
 
@@ -666,6 +680,11 @@
         uint64_t NoteDataIndex = 0;
         uint64_t BarlineIndex = 0;
         BranchType MemBranchFlag = BranchType::Null;
+        // 小節移動のキーの長押し: 押している時間に合わせて速くし、速くなったら一度に何小節も進む
+        int HoldDir = 0;                                    // 1: 先へ / -1: 前へ / 0: 押していない
+        std::chrono::steady_clock::time_point HoldStart{}, HoldLast{};
+        double HoldAccum = 0;                               // 進める小節数の端数
+        double HoldRate = 0;                                // 今の速さ (小節 / 秒)
 
         void Init() {
             BarlineMoveTimer.Reset();
@@ -675,6 +694,9 @@
             NoteDataIndex = 0;
             BarlineIndex = 0;
             MemBranchFlag = BranchType::Null;
+            HoldDir = 0;
+            HoldAccum = 0;
+            HoldRate = 0;
         }
     } Training;
 
@@ -743,18 +765,21 @@
 
     void SetDrawBranchArea(Pos2D<float> DelayPos) const;
     playerchar::Clock PlayerCharAnim;
+    std::array<playerchar::Clock, 3> RemotePlayerCharAnim;
     struct SkinVoiceState {
         uint64_t LastCombo = 0;
         bool FullComboPlayed = false;
         std::optional<std::chrono::steady_clock::time_point> FullComboAt;
+        std::optional<std::chrono::steady_clock::time_point> FullComboEndedAt;
     } SkinVoice;
     static bool HasImage(const GraphData& g);
     void SkinVoiceReset();
     // コンボ数に応じたボイスを再生する
     void UpdateFullComboVoice(std::chrono::steady_clock::time_point now);
+    bool WaitForFullComboVoice(std::chrono::steady_clock::time_point now);
     void SkinVoiceUpdate();
     float DrawKeyMap();
-    void DrawPlayerChar(double now);
+    void DrawPlayerChar(double now, size_t lane = 0, Pos2D<float> offset = {});
     // 画像の 1 コマを (pos からのずれで) 描く。番号が範囲外なら何もしない
     static void DrawFrame(const GraphData& g, Pos2D<float> pos, int index);
     // 角を伸ばさずに 9 分割で伸ばして描く (slice <= 0 なら普通に伸ばす)

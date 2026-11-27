@@ -7,7 +7,7 @@ auto Game::DetectDevice() -> DeviceInfo {
     if (int rate = GetRefreshRate(); rate > 0) { dev.RefreshRate = rate; }
 #endif
 #ifndef __ANDROID__
-    HMONITOR monitor = MonitorFromWindow(GetMainWindowHandle(), MONITOR_DEFAULTTOPRIMARY);
+    HMONITOR monitor = MonitorFromWindow(((HWND)sys::NativeWindow()), MONITOR_DEFAULTTOPRIMARY);
     MONITORINFOEXW info{};
     info.cbSize = sizeof(info);
     DEVMODEW mode{};

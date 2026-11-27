@@ -3,7 +3,7 @@
 void Game::DanSelectInit() {
 
 #ifndef __ANDROID__
-    SetDragFileValidFlag(TRUE);
+    sys::SetDropEnabled(true);
 #endif
 
     Skin.Base->DanSelect.SE.Don.SetVolume((Config.SEVolume));
@@ -38,7 +38,7 @@ void Game::DanSelectInit() {
 
 void Game::DanSelectEnd() {
 #ifndef __ANDROID__
-    SetDragFileValidFlag(FALSE);
+    sys::SetDropEnabled(false);
 #endif
     SelectSceneLeave();
 }
@@ -58,17 +58,16 @@ std::vector<std::string> Game::DanSelectDetails(const ChartData& chart) const {
 
 void Game::DanSelectDraw() {
     auto& skin = Skin.Base->DanSelect;
-    SetDrawBlendMode(0, 0);
+    gfx::SetBlend(gfx::Blend::None);
     skin.Image.BackGround.Draw({});
-    UpdateSongSelectAnimation(GetNowCount());
+    UpdateSongSelectAnimation(((int)sys::Ticks()));
     const int center = (int)std::floor(SongSelectScrollPosition);
     auto heading = [&](const FontData& font, float x, float y, const std::string& text, float width, float scale, bool centered) {
         if (font.Handle == -1 || text.empty()) { return; }
         const float sx = scale * font.WidthScale;
         const std::string fitted = FitText(text, font.Handle, width / sx, false);
         const float measured = GetStrlenCached(fitted, font.Handle) * sx;
-        DrawExtendStringFToHandle(x - (centered ? measured * .5f : 0), y - font.Size * scale * .5f,
-            sx, scale, fitted.c_str(), GetColor(255,255,255), font.Handle, 0);
+        txt::Draw(font.Handle, x - (centered ? measured * .5f : 0), y - font.Size * scale * .5f, fitted.c_str(), gfx::Rgb(255, 255, 255), 0, (float)(sx), (float)(scale));
     };
     for (int slot = center - 6; slot <= center + 6; ++slot) {
         const int index = SongSelectWrapIndex(slot);
@@ -77,12 +76,13 @@ void Game::DanSelectDraw() {
         const GraphData box = SongSelectBoxLayout(slot);
         const bool selected = slot == (int)SongSelectScrollTarget;
         const unsigned int boost = selected ? 200 : 0;
-        SetDrawAddColor(std::min(255u,data.GenreColor.R+boost),std::min(255u,data.GenreColor.G+boost),std::min(255u,data.GenreColor.B+boost));
+        gfx::SetAddColor(std::min(255u,data.GenreColor.R+boost), std::min(255u,data.GenreColor.G+boost), std::min(255u,data.GenreColor.B+boost));
         DrawSliced(box, {}, skin.Config.BoxSlice);
-        SetDrawAddColor(0,0,0);
-        const float titleY = box.Pos.Y - (box.Size.Height-skin.Image.Box.Size.Height)*.5f + (selected ? 8*SongSelectOpenAmount : 0);
+        gfx::SetAddColor(0, 0, 0);
+        const bool expandedTitle = selected && !data.IsGenre();
+        const float titleY = box.Pos.Y - (box.Size.Height-skin.Image.Box.Size.Height)*.5f + (expandedTitle ? 8*SongSelectOpenAmount : 0);
         const std::string title = data.IsGenre() ? (data.GetGenre()->IsOpen ? "Close" : data.GetGenre()->Name) : data.GetChart()->Title;
-        heading(skin.Font.Title, box.Pos.X, titleY, title, box.Size.Width-96, 1+(selected ? .125f*SongSelectOpenAmount : 0), true);
+        heading(skin.Font.Title, box.Pos.X, titleY, title, box.Size.Width-96, 1+(expandedTitle ? .125f*SongSelectOpenAmount : 0), true);
         if (data.IsGenre()) { continue; }
         if (IsFavorite(*data.GetChart())) { DrawFavoriteMark(box, skin.Font.Title, titleY); }
         GraphData crown = skin.Image.Crown;
@@ -96,15 +96,15 @@ void Game::DanSelectDraw() {
         const float bottom = box.Pos.Y + box.Size.Height*.5f-20;
         const float line = std::min(std::max(24.0f,font.Size*1.3f), (bottom-top)/std::max(1.0f,(float)lines.size()));
         const float scale = std::min(1.0f,line/std::max(1.0f,font.Size*1.3f));
-        SetDrawBlendMode(DX_BLENDMODE_ALPHA,(int)(255*(SongSelectOpenAmount-.85f)/.15f));
+        gfx::SetBlend(gfx::Blend::Alpha, (int)(255*(SongSelectOpenAmount-.85f)/.15f));
         for (size_t i=0;i<lines.size();++i) { heading(font,box.Pos.X-box.Size.Width*.5f+32,top+line*i,lines[i],box.Size.Width-64,scale,false); }
-        SetDrawBlendMode(0,0);
+        gfx::SetBlend(gfx::Blend::None);
     }
-    SetDrawBlendMode(0,0);
+    gfx::SetBlend(gfx::Blend::None);
     DrawSearchStatus(skin.Font.KeyWord);
     if (FilterUI.Open) { DrawFilterPanel(skin.Font.KeyWord); }
 #ifdef __ANDROID__
-    SetDrawBlendMode(0,0);
+    gfx::SetBlend(gfx::Blend::None);
     skin.Image.Back.Draw({}); skin.Image.Config.Draw({}); skin.Image.Random.Draw({}); skin.Image.Search.Draw({});
 #endif
 }
@@ -115,7 +115,7 @@ void Game::DanSelectProc() {
         NowScene = Scene::ModeSelect;
         return;
     }
-    UpdateSongSelectAnimation(GetNowCount());
+    UpdateSongSelectAnimation(((int)sys::Ticks()));
     if (FilterUI.Open) {
         FilterPanelProc();
         return;
@@ -160,8 +160,8 @@ void Game::DanSelectProc() {
         }
         };
     auto RandomInputProc = [&] {
+        if (!SelectRandomChartBox()) { return; }
         Skin.Base->DanSelect.SE.Ka.Play();
-        SetSongSelectBox(GetRand(numeric::Cast<int>(BoxDatas.size() - 1)));
         };
     auto SearchInputProc = [&]() {
         Skin.Base->DanSelect.SE.Don.Play();

@@ -512,8 +512,7 @@
                 if (data.size() < 2) { return {}; }
                 int color = 0;
                 std::from_chars(data.data() + 1, data.data() + data.size(), color, 16);
-                int r = 0, g = 0, b = 0;
-                GetColor2(color, &r, &g, &b);
+                const int r = gfx::R((gfx::Color)color), g = gfx::G((gfx::Color)color), b = gfx::B((gfx::Color)color);
                 return { (r - 128) * 2, (g - 128) * 2, (b - 128) * 2 };
                 };
 

@@ -7,11 +7,6 @@ bool Game::Init() {
         fs::remove(GetExecutablePath() / "temp.tja", ec);
     }
 
-    SetOutApplicationLogValidFlag(FALSE);
-    SetUseCharCodeFormat(DX_CHARCODEFORMAT_UTF8);
-    SetAlwaysRunFlag(TRUE);
-    SetUseDivGraphFlag(FALSE);
-
 #ifndef __ANDROID__
     // 初めての起動: この PC に合わせたおすすめ設定にしておく (音声デバイスはこの後で作るので、ここで決める)
     if (Config.FirstRun) {
@@ -21,36 +16,40 @@ bool Game::Init() {
         Config.FirstRun = false;
         Config.Write();
     }
-    SetWaitVSyncFlag(Config.WaitVSync);
-    SetDoubleStartValidFlag(Config.MultiBoot);
-    ChangeWindowMode(!Config.FullScreen);
-    // 最大化ボタンを使えるようにする (画面はウィンドウに合わせて拡大。枠をつかんでのサイズ変更は処理が止まるので WndProc で無効にしている)
-    SetWindowStyleMode(7);
-    SetWindowSizeChangeEnableFlag(TRUE, TRUE);
-    SetMainWindowText("FreedomApopicStyle");
-#ifndef __ANDROID__
-    SetWindowIconID(101);       // FreedomApopicStyle.rc の IDI_ICON1 (タイトルバー・タスクバーのアイコン)
+    // 複数の起動を許さない時は、名前付きミューテックスで 2 つ目の起動を止める
+    if (!Config.MultiBoot) {
+        static HANDLE single = CreateMutexA(nullptr, FALSE, "FreedomApopicStyle.SingleInstance");
+        if (single && GetLastError() == ERROR_ALREADY_EXISTS) { return false; }
+    }
 #endif
-    SetWindowVisibleFlag(FALSE);
-
+    // ウィンドウはスキンを読むまで隠しておく (論理解像度はスキンの解像度。ウィンドウの大きさは最初は 1280×720)
+    gfx::InitOptions window;
+    window.Title = "FreedomApopicStyle";
+    window.FullScreen = Config.FullScreen;
+    window.VSync = Config.WaitVSync;
+    window.UseGpuRenderer = Config.UseGpuRenderer;
+    window.Hidden = true;
+    window.IconResource = 101;      // タイトルバー・タスクバーのアイコン (FreedomApopicStyle.rc の IDI_ICON1)
+    if (!gfx::Init(window) || !txt::Init()) {
+        ShowErrorDialog(std::string("画面を初期化できませんでした。\n原因: ") + gfx::LastError());
+        return false;
+    }
+    Input::GetInstance();       // ウィンドウの通知の受け取りを登録する
+#ifndef __ANDROID__
     SoundDevice::GetInstance().SetDevice(
         Config.SoundDeviceType,
         Config.Exclusive,
         Config.BufferSize,
         Config.SampleRate
     );
+    ApplyDarkWindowMode(((HWND)sys::NativeWindow()));
+    // 背景動画は ffmpeg にデコードさせる (無ければ背景動画は表示しない)
+    gfx::SetMoviePlayerPath(PathToU8(rec::FindFfmpeg(GetExecutablePath())));
+#else
+    snd::Init({ 48000, 0 });
 #endif
 
-    if (DxLib_Init() == -1) {
-        return false;
-    }
-#ifndef __ANDROID__
-    ApplyDarkWindowMode(GetMainWindowHandle());
-#endif
-
-    if (int rate = GetRefreshRate(); rate > 0) {
-        RefreshRate = rate;
-    }
+    if (const int rate = gfx::RefreshRate(); rate > 0) { RefreshRate = rate; }
     BackFPS = RefreshRate;
 
 #ifdef __ANDROID__
@@ -61,8 +60,8 @@ bool Game::Init() {
 
     NativeActivity = GetNativeActivity();
 
-    while (ProcessMessage() == 0 && AssetCopyState == 0) {
-        ClearDrawScreen();
+    while (sys::PumpEvents() && AssetCopyState == 0) {
+        gfx::Clear();
 
         if (NativeActivity->vm->AttachCurrentThreadAsDaemon(&env, NULL) != JNI_OK) {
             return false;
@@ -74,8 +73,8 @@ bool Game::Init() {
         env->DeleteLocalRef(jclass_MainActivity);
         NativeActivity->vm->DetachCurrentThread();
 
-        DrawString(0, 0, "スキンアセットの読み込み中", GetColor(255, 255, 255));
-        ScreenFlip();
+        txt::Draw(txt::DefaultFont(), (float)(0), (float)(0), "スキンアセットの読み込み中", gfx::Rgb(255, 255, 255));
+        gfx::Present();
     }
 #endif
     Skin.Init();
@@ -83,10 +82,10 @@ bool Game::Init() {
     EnumChart(Config.SongDirectories);
 
 #ifndef __ANDROID__
-    SetWindowVisibleFlag(TRUE);
-    SetWindowZOrder(DX_WIN_ZTYPE_TOP, false);
+    gfx::SetWindowVisible(true);
+    gfx::RaiseWindow();
     // 失敗した場合は従来のウィンドウメッセージによる入力判定で動作する
-    RawKeyboard::GetInstance().Start(GetMainWindowHandle());
+    RawKeyboard::GetInstance().Start(((HWND)sys::NativeWindow()));
     DiscordRpc::GetInstance().Start(DiscordAppId());
 #else
     Touch.Geometry.Load(Skin, Config);
@@ -117,13 +116,15 @@ void Game::UpdateSceneFade() {
 
 void Game::Draw() {
 
-#ifndef __ANDROID__
-    TextInputArea.reset();
-#endif
     FpsCounter.Tick();
     BackFPS = FpsCounter.Rate;
     FPSTimer.Start();
     DrawTimer.Start();
+    struct DrawMeasurement {
+        double& Average;
+        libarrier::Timer& Timer;
+        ~DrawMeasurement() { Average = (Average + Timer.GetElapsed().Second()) / 2; }
+    } measurement{BackDrawTime, DrawTimer};
 
     UpdateSceneFade();
     if (Fade.PendingScene) {
@@ -235,11 +236,7 @@ void Game::Draw() {
     if (NowScene != Scene::Editor && NowScene != Scene::SongSelect && NowScene != Scene::DanSelect) { Touch.Geometry.Draw(); }
 #endif
 
-#ifndef __ANDROID__
-    DrawTextCandidates(GetIMEInputData());
-#endif
 
-    BackDrawTime = (BackDrawTime + DrawTimer.GetElapsed().Second()) / 2;
 
     if (Config.ViewDebug) {
         if (!AverageTimer.IsRunning() || AverageTimer.GetElapsed().Second() > 0.5) {
@@ -247,20 +244,19 @@ void Game::Draw() {
             NowFPS = numeric::Cast<uint64_t>(BackFPS);
             NowDrawTime = BackDrawTime;
         }
-        DrawFormatString(0, 0, GetColor(255, 255, 255), "FPS:%llu (max %.1fms)\nTPS:%.0f\nDrawTime:%.12lf",
-            NowFPS, FpsCounter.LastMaxGapMs, NowTPS, NowDrawTime);
+        std::string renderer = gfx::BackendName();
+        std::ranges::transform(renderer, renderer.begin(), [](unsigned char ch) { return (char)std::toupper(ch); });
+        if (NowScene == Scene::Playing) {
+            txt::DrawFormat(0, 0, gfx::Rgb(255, 255, 255), "FPS:%llu (max %.1fms)\nTPS:%.0f\nDrawTime:%.12lf\nRenderer:%s\nAudio:%s\nNowTime:%lf\nBPM:%lf", NowFPS, FpsCounter.LastMaxGapMs, NowTPS, NowDrawTime, renderer.c_str(), snd::DeviceDescription(), ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed);
+        }
+        else {
+            txt::DrawFormat(0, 0, gfx::Rgb(255, 255, 255), "FPS:%llu (max %.1fms)\nTPS:%.0f\nDrawTime:%.12lf\nRenderer:%s\nAudio:%s", NowFPS, FpsCounter.LastMaxGapMs, NowTPS, NowDrawTime, renderer.c_str(), snd::DeviceDescription());
+        }
     }
     if (NowScene == Scene::Playing) { DrawPlayingBlackout(); }
     else if (NowScene == Scene::Loading) {
-        SetDrawBlendMode(0, 0);
-        DrawFillBox(0, 0, Skin.Info.Resolution.X, Skin.Info.Resolution.Y, GetColor(0, 0, 0));
-    }
-    if (NowScene == Scene::SongSelect && SongSelectTransitionStart >= 0) {
-        const float elapsed = static_cast<float>(GetNowCount() - SongSelectTransitionStart);
-        const float opacity = elapsed < 350 ? elapsed / 250.0f : (600 - elapsed) / 250.0f;
-        SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255 * std::clamp(opacity, 0.0f, 1.0f)));
-        DrawFillBox(0, 0, Skin.Info.Resolution.X, Skin.Info.Resolution.Y, GetColor(0, 0, 0));
-        SetDrawBlendMode(0, 0);
+        gfx::SetBlend(gfx::Blend::None);
+        gfx::Box((float)(0), (float)(0), (float)(Skin.Info.Resolution.X), (float)(Skin.Info.Resolution.Y), gfx::Rgb(0, 0, 0), true);
     }
     Fade.Draw(Skin);
     Fade.Capture(Skin);
@@ -273,7 +269,7 @@ void Game::CheckRawInputAlive() {
     for (const auto& e : KeyEvents) {
         if (e.Down) { RawLastDownTick = std::max(RawLastDownTick, e.Time); }
     }
-    const bool pressed = !NewlyPressedKeys(WndKeysPrev).empty();
+    const bool pressed = ConsumeNewKeyboardPress(__gotkeyboardinput, WndKeysPrev);
     if (!raw.IsActive() || !RawEventsSeen) {
         PendingWndDown = 0;
         return;
@@ -458,7 +454,7 @@ void Game::Main() {
 
     while (true) {
 
-        if (ProcessMessage() == -1 || NowScene == Scene::End) {
+        if (!sys::PumpEvents() || NowScene == Scene::End) {
             EndFlag = true;
         }
         if (EndFlag) {
@@ -479,8 +475,8 @@ void Game::Main() {
                 RecorderOverlay();
                 RecorderPromptProc();
 #endif
-                ScreenFlip();
-                ClearDrawScreen();
+                gfx::Present();
+                gfx::Clear();
                 WaitTimer.Reset();
                 drawflag = true;
             }
@@ -499,8 +495,8 @@ void Game::Main() {
             RecorderPromptProc();
 #endif
             Proc();
-            ScreenFlip();
-            ClearDrawScreen();
+            gfx::Present();
+            gfx::Clear();
         }
     }
 
@@ -514,7 +510,7 @@ void Game::Cleanup() noexcept {
     CleanupDone=true;
     EndFlag=true;
     const auto attempt=[](auto&& action) noexcept { try { action(); } catch(...) {} };
-    attempt([&]{ if(Fade.FrameGraph!=-1) { DeleteGraph(Fade.FrameGraph); Fade.FrameGraph=-1; } });
+    attempt([&]{ Fade.FrameGraph = {}; });
     attempt([&]{ OnlineDisconnect(); });
     // Workers must finish while all referenced game state still exists.
     if(Editor.StretchCancel) *Editor.StretchCancel=true;
@@ -534,14 +530,17 @@ void Game::Cleanup() noexcept {
     attempt([&]{ RawKeyboard::GetInstance().Stop(); });
     attempt([&]{ DiscordRpc::GetInstance().Stop(); });
 #endif
-    if(DxLib_IsInit()) {
+    if(gfx::IsInit()) {
         attempt([&]{ EditorReleaseSong(); });
+        attempt([&]{ Editor.IconCache.clear(); });
         attempt([&]{ EditorFontData.Delete(); });
         attempt([&]{ EditorPanelFontData.Delete(); });
         attempt([&]{ DemoSong.Delete(); });
         attempt([&]{ ConfigSmall.Delete(); });
         attempt([&]{ Skin.Dispose(); });
-        DxLib_End();
+        attempt([&]{ snd::Shutdown(); });
+        attempt([&]{ txt::Shutdown(); });
+        attempt([&]{ gfx::Shutdown(); });
     } else {
         attempt([&]{ Skin.Dispose(); });
     }

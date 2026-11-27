@@ -3,7 +3,7 @@
 void Game::SongSelectInit() {
 
 #ifndef __ANDROID__
-    SetDragFileValidFlag(TRUE);
+    sys::SetDropEnabled(true);
 #endif
     Skin.Base->SongSelect.SE.Don.SetVolume((Config.SEVolume));
     Skin.Base->SongSelect.SE.Ka.SetVolume((Config.SEVolume));
@@ -12,7 +12,7 @@ void Game::SongSelectInit() {
     SongSelectMotionCount = 0;
     SongSelectOpenAmount = 0;
     SongSelectTransitionStart = -1;
-    SongSelectResultStart = GetNowCount();
+    SongSelectResultStart = ((int)sys::Ticks());
 
     BoxDatasUpdate();
     if (BoxDatas.empty() && !Filter.Empty()) {
@@ -36,7 +36,7 @@ void Game::SongSelectInit() {
 void Game::SongSelectEnd() {
 
 #ifndef __ANDROID__
-    SetDragFileValidFlag(FALSE);
+    sys::SetDropEnabled(false);
 #endif
 
     DemoSongPlayBlank.Reset();
@@ -102,7 +102,7 @@ void Game::UpdateSongSelectAnimation(int now) {
 
 void Game::SetSongSelectBox(int index, int steps) {
     if (BoxDatas.empty()) { return; }
-    const int now = GetNowCount();
+    const int now = ((int)sys::Ticks());
     UpdateSongSelectAnimation(now);
     index = SongSelectWrapIndex(index);
     if (index == BoxDataIndex && steps == 0) { return; }
@@ -125,45 +125,57 @@ void Game::SetSongSelectBox(int index, int steps) {
     BoxDataIndex = SongSelectMotionIndex = index;
 }
 
+bool Game::SelectRandomChartBox() {
+    int selected = -1, count = 0;
+    for (int i = 0; i < (int)BoxDatas.size(); ++i) {
+        if (BoxDatas[i]->IsGenre()) { continue; }
+        if (sys::Rand(count++) == 0) { selected = i; }
+    }
+    if (selected < 0) { return false; }
+    SetSongSelectBox(selected);
+    return true;
+}
+
 void Game::BeginSongSelectTransition(bool courseSelect) {
     if (SongSelectTransitionStart >= 0 || IsCourseSelect == courseSelect) { return; }
     SongSelectTransitionTarget = courseSelect;
-    SongSelectTransitionStart = GetNowCount();
+    SongSelectTransitionStart = ((int)sys::Ticks());
 }
 
 void Game::UpdateSongSelectTransition() {
     if (SongSelectTransitionStart < 0) { return; }
-    const int elapsed = GetNowCount() - SongSelectTransitionStart;
-    if (elapsed >= 350 && IsCourseSelect != SongSelectTransitionTarget) {
+    const int elapsed = ((int)sys::Ticks()) - SongSelectTransitionStart;
+    if (elapsed >= 250 && IsCourseSelect != SongSelectTransitionTarget) {
         IsCourseSelect = SongSelectTransitionTarget;
-        if (IsCourseSelect) { SongSelectResultStart = GetNowCount(); }
+        if (IsCourseSelect) { SongSelectResultStart = ((int)sys::Ticks()); }
     }
-    if (elapsed >= 600) { SongSelectTransitionStart = -1; }
+    if (elapsed >= 500) { SongSelectTransitionStart = -1; }
 }
 
 void Game::DrawCourseHeading(FontData& font, Pos2D<float> position, const std::string& text) {
     if (font.Handle == -1 || text.empty()) { return; }
     const auto& box = Skin.Base->SongSelect.Image.TitleBox;
-    font.Draw(position, GetColor(255, 255, 255), 0,
+    font.Draw(position, gfx::Rgb(255, 255, 255), 0,
         FitText(text, font.Handle, (box.Size.Width - 48.0f) / font.WidthScale, false));
 }
 
 float Game::SongSelectContentOpacity() const {
     if (SongSelectTransitionStart < 0) { return 1; }
-    return 1;
+    const float elapsed = (float)((int)sys::Ticks() - SongSelectTransitionStart);
+    return std::clamp(std::abs(elapsed - 250.0f) / 250.0f, 0.0f, 1.0f);
 }
 
 void Game::DrawCourseBestResult(int course, float y, float contentOpacity) {
     const auto& config = Skin.Base->SongSelect.Config;
     const ScoreData best = ScoreDataLoad(BoxDatas[BoxDataIndex]->GetChart()->ChartPath.string(), course);
-    const int elapsed = std::max(0, GetNowCount() - SongSelectResultStart) % 6400;
+    const int elapsed = std::max(0, ((int)sys::Ticks()) - SongSelectResultStart) % 6400;
     const int phase = elapsed % 3200;
     const float opacity = std::clamp(std::min(phase / 240.0f, (3200 - phase) / 240.0f), 0.0f, 1.0f);
     const float width = std::max(1.0f, config.HighScorePos.X - config.LevelPos.X - 100.0f);
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255 * opacity * contentOpacity));
+    gfx::SetBlend(gfx::Blend::Alpha, (int)(255 * opacity * contentOpacity));
     if (elapsed < 3200) {
         auto& font = Skin.Base->SongSelect.Font.HighScore;
-        font.Draw({ config.HighScorePos.X, config.HighScorePos.Y + y }, GetColor(255, 255, 255), 0,
+        font.Draw({ config.HighScorePos.X, config.HighScorePos.Y + y }, gfx::Rgb(255, 255, 255), 0,
             FitText(std::to_string(best.Score), font.Handle, width, false));
     }
     else {
@@ -178,8 +190,7 @@ void Game::DrawCourseBestResult(int course, float y, float contentOpacity) {
                 const float measured = static_cast<float>(GetStrlenCached(text, font.Handle));
                 const float scale = measured > 0 ? std::min(1.0f, usable / measured) : 1.0f;
                 const float center = x - width + column * (static_cast<float>(i) + 0.5f);
-                DrawExtendStringFToHandle(center - measured * scale * 0.5f, textY - font.Size * scale * 0.5f,
-                    scale, scale, text.c_str(), GetColor(255, 255, 255), font.Handle, 0);
+                txt::Draw(font.Handle, center - measured * scale * 0.5f, textY - font.Size * scale * 0.5f, text.c_str(), gfx::Rgb(255, 255, 255), 0, (float)(scale), (float)(scale));
             }
         };
         if (best.HasResult) {
@@ -193,7 +204,7 @@ void Game::DrawCourseBestResult(int course, float y, float contentOpacity) {
             drawRow({ "連打 -", "最大コンボ -", "精度 -" }, cy + font.Size * 0.62f);
         }
     }
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255 * contentOpacity));
+    gfx::SetBlend(gfx::Blend::Alpha, (int)(255 * contentOpacity));
     Skin.Base->SongSelect.Image.Crown.Draw({ 0, y }, best.Crown);
 }
 
@@ -237,7 +248,7 @@ void Game::SongSelectDraw() {
     UpdateSongSelectTransition();
     const float contentOpacity = SongSelectContentOpacity();
     const int contentAlpha = (int)(255 * contentOpacity);
-    SetDrawBlendMode(0, 0);
+    gfx::SetBlend(gfx::Blend::None);
     Skin.Base->SongSelect.Image.BackGround.Draw({});
     auto drawHeading = [&](const FontData& font, Pos2D<float> position, const std::string& text, float width, float scale, int align) {
         if (font.Handle == -1 || text.empty()) { return; }
@@ -245,13 +256,12 @@ void Game::SongSelectDraw() {
         const std::string fitted = FitText(text, font.Handle, width / horizontal, false);
         const float measured = static_cast<float>(GetStrlenCached(fitted, font.Handle)) * horizontal;
         const float offset = align == 1 ? measured * 0.5f : (align == 2 ? measured : 0.0f);
-        DrawExtendStringFToHandle(position.X - offset, position.Y - font.Size * scale * 0.5f,
-            horizontal, scale, fitted.c_str(), GetColor(255, 255, 255), font.Handle, 0);
+        txt::Draw(font.Handle, position.X - offset, position.Y - font.Size * scale * 0.5f, fitted.c_str(), gfx::Rgb(255, 255, 255), 0, (float)(horizontal), (float)(scale));
     };
 
     if (!IsCourseSelect) {
 
-        UpdateSongSelectAnimation(GetNowCount());
+        UpdateSongSelectAnimation(((int)sys::Ticks()));
         const int center = static_cast<int>(std::floor(SongSelectScrollPosition));
         for (int slot = center - 6; slot <= center + 6; ++slot) {
             const int i = SongSelectWrapIndex(slot);
@@ -265,29 +275,25 @@ void Game::SongSelectDraw() {
             };
 
             unsigned int c = 200 * selected;
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, contentAlpha);
-            SetDrawAddColor(
-                std::min(255u, BoxDatas[i]->GenreColor.R + c),
-                std::min(255u, BoxDatas[i]->GenreColor.G + c),
-                std::min(255u, BoxDatas[i]->GenreColor.B + c)
-            );
+            gfx::SetBlend(gfx::Blend::Alpha, contentAlpha);
+            gfx::SetAddColor(std::min(255u, BoxDatas[i]->GenreColor.R + c), std::min(255u, BoxDatas[i]->GenreColor.G + c), std::min(255u, BoxDatas[i]->GenreColor.B + c));
             DrawSliced(box, {}, Skin.Base->SongSelect.Config.BoxSlice);
-            SetDrawAddColor(0, 0, 0);
+            gfx::SetAddColor(0, 0, 0);
 
             if (BoxDatas[i]->IsGenre()) {
                 if (BoxDatas[i]->GetGenre()->IsOpen) {
                     Skin.Base->SongSelect.Font.Title.Draw(
                         pos,
-                        GetColor(255, 255, 255),
-                        GetColor(0, 0, 0),
+                        gfx::Rgb(255, 255, 255),
+                        gfx::Rgb(0, 0, 0),
                         "Close"
                     );
                 }
                 else {
                     Skin.Base->SongSelect.Font.Title.Draw(
                         pos,
-                        GetColor(255, 255, 255),
-                        GetColor(0, 0, 0),
+                        gfx::Rgb(255, 255, 255),
+                        gfx::Rgb(0, 0, 0),
                         FitText(BoxDatas[i]->GetGenre()->Name, Skin.Base->SongSelect.Font.Title.Handle, Skin.Base->SongSelect.Image.Box.Size.Width - 48.0f, false)
                     );
                 }
@@ -300,8 +306,8 @@ void Game::SongSelectDraw() {
                 }
                 else { Skin.Base->SongSelect.Font.Title.Draw(
                     pos,
-                    GetColor(255, 255, 255),
-                    GetColor(0, 0, 0),
+                    gfx::Rgb(255, 255, 255),
+                    gfx::Rgb(0, 0, 0),
                     // 長い曲名は箱の幅に収める (お気に入りの印の分も空ける)
                     FitText(BoxDatas[i]->GetChart()->Title, Skin.Base->SongSelect.Font.Title.Handle, Skin.Base->SongSelect.Image.Box.Size.Width - 96.0f, false)
                 ); }
@@ -315,7 +321,7 @@ void Game::SongSelectDraw() {
                     const float line = std::max(24.0f, font.Size * 1.3f);
                     const float left = box.Pos.X - box.Size.Width * 0.5f + 32.0f;
                     const float width = std::max(1.0f, box.Size.Width - 64.0f);
-                    SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255 * contentOpacity * (SongSelectOpenAmount - 0.85f) / 0.15f));
+                    gfx::SetBlend(gfx::Blend::Alpha, (int)(255 * contentOpacity * (SongSelectOpenAmount - 0.85f) / 0.15f));
                     drawHeading(font, { box.Pos.X, pos.Y + line + 14.0f }, chart.Subtitle, width, 1.125f, 1);
                     const float courseY = pos.Y + line * 3.0f;
                     const float levelY = courseY + line;
@@ -323,16 +329,16 @@ void Game::SongSelectDraw() {
                     for (int course = 0; course <= (int)CourseType::Edit; ++course) {
                         const auto& data = chart.Courses[course];
                         const float x = left + column * (course + 0.5f);
-                        const unsigned int color = data.IsPlayable ? GetColor(255, 255, 255) : GetColor(205, 205, 205);
+                        const unsigned int color = data.IsPlayable ? gfx::Rgb(255, 255, 255) : gfx::Rgb(205, 205, 205);
                         const std::string name(magic_enum::enum_name((CourseType)course));
                         UIText(font, x, courseY, FitText(name, font.Handle, column - 8.0f, false), color, 1);
                         UIText(font, x, levelY, data.IsPlayable ? "★×" + std::to_string(data.Level) : "--", color, 1);
                     }
-                    SetDrawBlendMode(0, 0);
+                    gfx::SetBlend(gfx::Blend::None);
                 }
             }
         }
-        SetDrawBlendMode(0, 0);
+        gfx::SetBlend(gfx::Blend::None);
 
 #ifdef __ANDROID__
         Skin.Base->SongSelect.Image.Config.Draw({});
@@ -342,7 +348,7 @@ void Game::SongSelectDraw() {
 
     }
     else {
-        SetDrawBlendMode(DX_BLENDMODE_ALPHA, contentAlpha);
+        gfx::SetBlend(gfx::Blend::Alpha, contentAlpha);
         Skin.Base->SongSelect.Image.TitleBox.Draw({});
         DrawCourseHeading(Skin.Base->SongSelect.Font.BoxTitle,
             Skin.Base->SongSelect.Config.BoxTitlePos,
@@ -357,22 +363,22 @@ void Game::SongSelectDraw() {
 
             unsigned int c = 100 * (CourseIndex == i);
             float y = Skin.Base->SongSelect.Config.CourseBoxDistance * i;
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, contentAlpha);
-            SetDrawAddColor(c, c, c);
+            gfx::SetBlend(gfx::Blend::Alpha, contentAlpha);
+            gfx::SetAddColor(c, c, c);
             Skin.Base->SongSelect.Image.CourseBox.Draw({ 0, y });
-            SetDrawAddColor(0, 0, 0);
+            gfx::SetAddColor(0, 0, 0);
 
             if (!BoxDatas[BoxDataIndex]->GetChart()->Courses[i].IsPlayable) {
                 continue;
             }
 
-            Skin.Base->SongSelect.Font.Course.Draw({ Skin.Base->SongSelect.Config.CoursePos.X,Skin.Base->SongSelect.Config.CoursePos.Y + y }, GetColor(255, 255, 255), GetColor(0, 0, 0), magic_enum::enum_name((CourseType)i).data());
-            Skin.Base->SongSelect.Font.Level.Draw({ Skin.Base->SongSelect.Config.LevelPos.X,Skin.Base->SongSelect.Config.LevelPos.Y + y }, GetColor(255, 255, 255), GetColor(0, 0, 0), "★×" + std::to_string(BoxDatas[BoxDataIndex]->GetChart()->Courses[i].Level));
+            Skin.Base->SongSelect.Font.Course.Draw({ Skin.Base->SongSelect.Config.CoursePos.X,Skin.Base->SongSelect.Config.CoursePos.Y + y }, gfx::Rgb(255, 255, 255), gfx::Rgb(0, 0, 0), magic_enum::enum_name((CourseType)i).data());
+            Skin.Base->SongSelect.Font.Level.Draw({ Skin.Base->SongSelect.Config.LevelPos.X,Skin.Base->SongSelect.Config.LevelPos.Y + y }, gfx::Rgb(255, 255, 255), gfx::Rgb(0, 0, 0), "★×" + std::to_string(BoxDatas[BoxDataIndex]->GetChart()->Courses[i].Level));
 
             DrawCourseBestResult(numeric::Cast<int>(i), y, contentOpacity);
         }
     }
-    SetDrawBlendMode(0, 0);
+    gfx::SetBlend(gfx::Blend::None);
     if (!IsCourseSelect) {
         DrawSearchStatus(Skin.Base->SongSelect.Font.KeyWord);
         if (FilterUI.Open) {
@@ -380,7 +386,7 @@ void Game::SongSelectDraw() {
         }
     }
 #ifdef __ANDROID__
-    SetDrawBlendMode(0, 0);
+    gfx::SetBlend(gfx::Blend::None);
     Skin.Base->SongSelect.Image.Back.Draw({});
 #endif
 }
@@ -393,7 +399,7 @@ void Game::SongSelectProc() {
     }
     UpdateSongSelectTransition();
     if (SongSelectTransitionStart >= 0) { return; }
-    if (!IsCourseSelect) { UpdateSongSelectAnimation(GetNowCount()); }
+    if (!IsCourseSelect) { UpdateSongSelectAnimation(((int)sys::Ticks())); }
     if (FilterUI.Open) {
         FilterPanelProc();
         return;
@@ -474,8 +480,8 @@ void Game::SongSelectProc() {
         else if (DemoSongPlayBlank.GetElapsed().Second() > DemoSongPlayBlankTime()) { UpdateDemoSong(*BoxDatas[BoxDataIndex]->GetChart()); }
     }
     auto RandomInputProc = [&] {
+        if (!SelectRandomChartBox()) { return; }
         Skin.Base->SongSelect.SE.Ka.Play();
-        SetSongSelectBox(GetRand(numeric::Cast<int>(BoxDatas.size() - 1)));
         DemoSongPlayBlank.Stop();
         ResetDemoSong();
         };

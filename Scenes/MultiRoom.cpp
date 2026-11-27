@@ -11,7 +11,7 @@ void Game::MultiRoomEnd() {
     Online.TransferMode = false;
 #ifndef __ANDROID__
     if (Online.AddressEditing) {
-        DeleteKeyInput(Online.AddressHandle);
+        sys::EndTextInput(Online.AddressHandle);
         Online.AddressHandle = 0;
         Online.AddressEditing = false;
     }
@@ -54,15 +54,15 @@ float Game::PlayerLabelWidth() const {
 
 void Game::MultiRoomDraw() {
 
-    SetDrawBlendMode(0, 0);
+    gfx::SetBlend(gfx::Blend::None);
     Skin.Base->MultiRoom.Image.BackGround.Draw({});
 
 #ifdef __ANDROID__
     Skin.Base->MultiRoom.Image.Back.Draw({});
 #endif
     auto& font = Skin.Base->MultiRoom.Font;
-    const unsigned int white = GetColor(255, 255, 255);
-    const unsigned int black = GetColor(0, 0, 0);
+    const unsigned int white = gfx::Rgb(255, 255, 255);
+    const unsigned int black = gfx::Rgb(0, 0, 0);
     const float bottom = (float)Skin.Info.Resolution.Y - 32.0f;
     const float resx = (float)Skin.Info.Resolution.X;
 
@@ -73,7 +73,7 @@ void Game::MultiRoomDraw() {
             return;
         }
         if (!Online.Status.empty()) {
-            FitDraw(font.String, { 16, 16 }, GetColor(255, 160, 160), black, Online.Status, resx - (16) - 16.0f);
+            FitDraw(font.String, { 16, 16 }, gfx::Rgb(255, 160, 160), black, Online.Status, resx - (16) - 16.0f);
         }
         const std::string items[3] = {
             "サーバーに接続  (" + HiddenAddress(Config.ServerPort) + "  アドレスは Config の「オンライン」で変更)",
@@ -82,15 +82,15 @@ void Game::MultiRoomDraw() {
         };
         for (int i = 0; i < JoinMenuCount; ++i) {
             const bool selected = Online.JoinMenu == i;
-            FitDraw(font.String, { 48, 96.0f + 56.0f * i }, selected ? GetColor(255, 220, 0) : white, black, (selected ? "> " : "  ") + items[i], resx - (48) - 16.0f);
+            FitDraw(font.String, { 48, 96.0f + 56.0f * i }, selected ? gfx::Rgb(255, 220, 0) : white, black, (selected ? "> " : "  ") + items[i], resx - (48) - 16.0f);
         }
 #ifndef __ANDROID__
         if (Online.AddressEditing) {
             const int x = 72, y = 96 + 56 * JoinMenuCount + 16;
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
-            DrawBox(x - 12, y - 8, Skin.Info.Resolution.X - 48, y + (int)font.String.Size + 16, GetColor(0, 0, 0), TRUE);
-            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-            DrawBox(x - 12, y - 8, Skin.Info.Resolution.X - 48, y + (int)font.String.Size + 16, GetColor(255, 220, 0), FALSE);
+            gfx::SetBlend(gfx::Blend::Alpha, 200);
+            gfx::Box((float)(x - 12), (float)(y - 8), (float)(Skin.Info.Resolution.X - 48), (float)(y + (int)font.String.Size + 16), gfx::Rgb(0, 0, 0), true);
+            gfx::SetBlend(gfx::Blend::None);
+            gfx::Box((float)(x - 12), (float)(y - 8), (float)(Skin.Info.Resolution.X - 48), (float)(y + (int)font.String.Size + 16), gfx::Rgb(255, 220, 0), false);
             DrawTextInput(x, y, Online.AddressHandle);
             FitDraw(font.String, { 16, bottom }, white, black, "アドレス:ポート を入力して Enter (例: 192.168.0.2:8080 / Esc: キャンセル)", resx - (16) - 16.0f);
             return;
@@ -127,8 +127,7 @@ void Game::MultiRoomDraw() {
         if (font.String.Handle == -1 || text.empty()) { return; }
         const float scaleX = std::max(0.01f, font.String.WidthScale * footerScale);
         const std::string fitted = FitText(text, font.String.Handle, std::max(32.0f, (resx - 32.0f) / scaleX), false);
-        DrawExtendStringFToHandle(16.0f, footerBottom - row * footerPitch - footerHeight * 0.5f,
-            scaleX, footerScale, fitted.c_str(), color, font.String.Handle, black);
+        txt::Draw(font.String.Handle, 16.0f, footerBottom - row * footerPitch - footerHeight * 0.5f, fitted.c_str(), color, black, (float)(scaleX), (float)(footerScale));
     };
     const float count = (float)fasnet::MaxPlayers;
     float gap = fallbackGap;
@@ -189,23 +188,21 @@ void Game::MultiRoomDraw() {
 
         const bool selected = Online.TransferMode && Online.Cursor == (int)i;
         const unsigned int add = selected ? 120 : (player.Id == Online.MyId ? 40 : 0);
-        SetDrawAddColor(add, add, add);
+        gfx::SetAddColor(add, add, add);
         if (hasPlayerBox) {
             const float centerY = playerBox.Pos.Y + y;
-            DrawExtendGraphF(playerBox.Pos.X - playerBox.Size.Width * 0.5f, centerY - drawHeight * 0.5f,
-                playerBox.Pos.X + playerBox.Size.Width * 0.5f, centerY + drawHeight * 0.5f,
-                playerBox.Handles[0], TRUE);
+            gfx::DrawTexture(playerBox.Handles[0], playerBox.Pos.X - playerBox.Size.Width * 0.5f, centerY - drawHeight * 0.5f, playerBox.Pos.X + playerBox.Size.Width * 0.5f, centerY + drawHeight * 0.5f);
         }
-        SetDrawAddColor(0, 0, 0);
+        gfx::SetAddColor(0, 0, 0);
 
         unsigned int color = white;
         const char* state = "";
         switch (player.State) {
         case fasnet::PlayerState::Lobby: state = "待機"; break;
-        case fasnet::PlayerState::Loading: state = "読込中"; color = GetColor(160, 160, 160); break;
-        case fasnet::PlayerState::Ready: state = "準備完了"; color = GetColor(255, 255, 0); break;
-        case fasnet::PlayerState::Playing: state = "演奏中"; color = GetColor(0, 255, 255); break;
-        case fasnet::PlayerState::Finished: state = "終了"; color = GetColor(0, 255, 255); break;
+        case fasnet::PlayerState::Loading: state = "読込中"; color = gfx::Rgb(160, 160, 160); break;
+        case fasnet::PlayerState::Ready: state = "準備完了"; color = gfx::Rgb(255, 255, 0); break;
+        case fasnet::PlayerState::Playing: state = "演奏中"; color = gfx::Rgb(0, 255, 255); break;
+        case fasnet::PlayerState::Finished: state = "終了"; color = gfx::Rgb(0, 255, 255); break;
         }
         const std::string label = player.Name + "  [" + state + "]";     // 称号は待機室の箱には出さない (演奏画面・リザルトで表示)
         // 名前は箱の中で、ホストの王冠と重ならない幅に収める (長い名前・称号は省略する)
@@ -250,14 +247,14 @@ void Game::MultiRoomDraw() {
     // 招待用の接続先 (C: コピー / V: 切り替え)
     if (!Online.Addresses.empty()) {
         const auto& a = Online.Addresses[std::clamp(Online.AddressIndex, 0, (int)Online.Addresses.size() - 1)];
-        drawFooter(2, GetColor(255, 230, 120), "接続先 (" + a.Label + "): " + HiddenAddress(a.Port) + (Online.Addresses.size() > 1 ? "   C: コピー  V: 切り替え" : "   C: コピー"));
+        drawFooter(2, gfx::Rgb(255, 230, 120), "接続先 (" + a.Label + "): " + HiddenAddress(a.Port) + (Online.Addresses.size() > 1 ? "   C: コピー  V: 切り替え" : "   C: コピー"));
     }
     if (showNotice) {
-        drawFooter(3, GetColor(160, 255, 160), Online.Notice);
+        drawFooter(3, gfx::Rgb(160, 255, 160), Online.Notice);
     }
 #ifndef __ANDROID__
     if (Discord.Request) {
-        drawFooter(4, GetColor(160, 200, 255), "Discord: " + Discord.Request->UserName + " が参加を希望しています  Y: 許可  N: 断る");
+        drawFooter(4, gfx::Rgb(160, 200, 255), "Discord: " + Discord.Request->UserName + " が参加を希望しています  Y: 許可  N: 断る");
     }
 #endif
 
@@ -282,14 +279,13 @@ void Game::MultiRoomProc() {
 #ifndef __ANDROID__
         // 接続先の入力中
         if (Online.AddressEditing) {
-            const int state = CheckKeyInput(Online.AddressHandle);
+            const int state = sys::TextInputState(Online.AddressHandle);
             if (state != 0) {
                 if (state == 1) {
-                    char buf[256]{};
-                    GetKeyInputString(buf, Online.AddressHandle);
+                    const std::string buf = sys::TextInputString(Online.AddressHandle);
                     if (OnlineSetTarget(buf)) { OnlineConnectByAddress(); }
                 }
-                DeleteKeyInput(Online.AddressHandle);
+                sys::EndTextInput(Online.AddressHandle);
                 Online.AddressHandle = 0;
                 Online.AddressEditing = false;
                 // 確定に使った Enter が次のフレームで「参加」として誤動作しないようにする
@@ -311,9 +307,9 @@ void Game::MultiRoomProc() {
                 OnlineHostLocal();
                 return;
             }
-            Online.AddressHandle = MakeKeyInput(255, TRUE, TRUE, FALSE);
-            SetActiveKeyInput(Online.AddressHandle);
-            SetKeyInputStringFont(Skin.Base->MultiRoom.Font.String.Handle);
+            Online.AddressHandle = sys::BeginTextInput("", (size_t)(255), false);
+            ((void)0);
+            sys::SetTextInputFont(Skin.Base->MultiRoom.Font.String.Handle);
             // 入力欄には前の接続先を入れない (画面に IP アドレスを出さないため)
             Online.AddressEditing = true;
 #else
@@ -421,7 +417,7 @@ void Game::MultiRoomProc() {
     Input::GetInstance().HitKeyProcess('C', KeyState::Down, [&] {
         if (Online.Addresses.empty()) { return; }
         const auto& a = Online.Addresses[std::clamp(Online.AddressIndex, 0, (int)Online.Addresses.size() - 1)];
-        if (SetClipboardText(a.Text().c_str()) == 0) {
+        if (sys::SetClipboard(a.Text()), true) {
             Skin.Base->MultiRoom.SE.Don.Play();
             Online.Notice = "接続先をコピーしました (" + a.Label + ")";
             Online.NoticeUntil = std::chrono::steady_clock::now() + std::chrono::seconds(3);

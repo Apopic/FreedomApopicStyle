@@ -40,12 +40,12 @@ void Game::ModeSelectDraw() {
     const float offset = ModeBoxOffset();
     for (size_t i = 0; i < (size_t)Mode::Count; ++i) {
         unsigned int c = 100 * ((size_t)ModeSelector == i);
-        SetDrawAddColor(c, c, c);
+        gfx::SetAddColor(c, c, c);
         Skin.Base->ModeSelect.Image.Box.Draw({ 0, offset + distance * i });
-        SetDrawAddColor(0, 0, 0);
+        gfx::SetAddColor(0, 0, 0);
         Skin.Base->ModeSelect.Font.Modes.Draw({
         Skin.Base->ModeSelect.Config.ModesPos.X,
-        Skin.Base->ModeSelect.Config.ModesPos.Y + offset + (distance * i) }, GetColor(255, 255, 255), GetColor(0, 0, 0), magic_enum::enum_name((Mode)i).data());
+        Skin.Base->ModeSelect.Config.ModesPos.Y + offset + (distance * i) }, gfx::Rgb(255, 255, 255), gfx::Rgb(0, 0, 0), magic_enum::enum_name((Mode)i).data());
     }
 }
 

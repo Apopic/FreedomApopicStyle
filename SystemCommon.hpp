@@ -96,6 +96,7 @@ public:
         JSONDATA(SampleRate);
         JSONDATA(BufferSize);
         JSONDATA(ViewDebug);
+        JSONDATA(UseGpuRenderer);
 #ifndef __ANDROID__
         JSONDATA(KeyHoldProcInterval);
         JSONDATA(SoundDeviceType);
@@ -179,6 +180,7 @@ public:
                 JSONDATA(SampleRate),
                 JSONDATA(BufferSize),
                 JSONDATA(ViewDebug),
+                JSONDATA(UseGpuRenderer),
 #ifndef __ANDROID__
                 JSONDATA(KeyHoldProcInterval),
                 JSONDATA(SoundDeviceType),
@@ -272,6 +274,7 @@ public:
     bool Exclusive = false;
     bool FullScreen = false;
     bool ViewDebug = false;
+    bool UseGpuRenderer = false;
     bool MultiBoot = false;
 
     int RandomRate = 0;
@@ -374,21 +377,7 @@ public:
 
     bool IsLoading = false;
     bool TryLoad(const std::string& name, std::string* error = nullptr, bool strict = false) {
-#ifndef __ANDROID__
-        // 論理解像度の切り替えと、ユーザーが選んだウィンドウの大きさを分離する。
-        struct WindowGeometry {
-            HWND Window=nullptr;
-            WINDOWPLACEMENT Placement{sizeof(WINDOWPLACEMENT)};
-            int Width=0,Height=0;
-            explicit WindowGeometry(bool preserve) {
-                if(!preserve||!DxLib_IsInit()||!GetWindowModeFlag())return;
-                Window=GetMainWindowHandle();
-                if(!GetWindowPlacement(Window,&Placement)||GetWindowSize(&Width,&Height)<0){Window=nullptr;return;}
-                if(Width>0&&Height>0)SetWindowSize(Width,Height);
-            }
-            ~WindowGeometry(){if(Window){if(Width>0&&Height>0)SetWindowSize(Width,Height);SetWindowPlacement(Window,&Placement);}}
-        } geometry(Base!=nullptr);
-#endif
+        // SDL3 は論理解像度を変えてもウィンドウの大きさは変わらない (DxLib の SetGraphMode と違い、ウィンドウの大きさを保存して戻す必要は無い)
         _Skin replacement;
         replacement.Infos = Infos;
         replacement.RequireFiles = strict;
@@ -406,12 +395,10 @@ public:
             return true;
         } catch (const std::exception& e) { if (error) { *error=e.what(); } }
         catch (...) { if (error) { *error="不明なエラー"; } }
-        SetUseASyncLoadFlag(FALSE);
-        if (DxLib_IsInit()) { WaitHandleASyncLoadAll(); }
         replacement.Dispose();
         IsLoading = false;
         if (Base && Info.Resolution.X > 0 && Info.Resolution.Y > 0) {
-            SetGraphMode(Info.Resolution.X,Info.Resolution.Y,Info.ColorBit); SetDrawScreen(DX_SCREEN_BACK);
+            gfx::SetLogicalSize(Info.Resolution.X, Info.Resolution.Y);
         }
         return false;
     }
@@ -439,7 +426,7 @@ public:
     void Load(const std::string& name, _ConfigData& config) {
         const std::string requested = name; // Config.SkinName を変更しても参照を無効化しない
         auto fail = [&](const std::string& what) {
-            SetUseASyncLoadFlag(FALSE);
+            ((void)0);
             IsLoading = false;
             const std::string message = "スキン「" + name + "」を読み込めませんでした (" + what + ")";
 #ifndef __ANDROID__
@@ -509,15 +496,9 @@ public:
                 (float)Info.Resolution.X,
         };
 
-        SetGraphMode(
-            Info.Resolution.X,
-            Info.Resolution.Y,
-            Info.ColorBit
-        );
-        SetDrawMode(DX_DRAWMODE_BILINEAR);
-        SetDrawScreen(DX_SCREEN_BACK);
+        gfx::SetLogicalSize(Info.Resolution.X, Info.Resolution.Y);
 
-        if (!DxLib_IsInit()) {
+        if (!gfx::IsInit()) {
             return;
         }
 
@@ -529,7 +510,7 @@ public:
             validators.push_back([resource] {
                 if constexpr (requires { resource->Handles; }) {
                     if (resource->Handles.empty()) { return false; }
-                    for (int handle:resource->Handles) { int w=0,h=0; if (handle==-1 || GetGraphSize(handle,&w,&h)==-1 || w<1 || h<1) { return false; } }
+                    for (const auto& handle:resource->Handles) { if (!handle || handle.Width()<1 || handle.Height()<1) { return false; } }
                     return true;
                 } else { return resource->Handle!=-1; }
             });
@@ -562,8 +543,6 @@ public:
         ClearStrlenCache();
         Base = new _Base();
 
-        // 画像は DxLib の非同期読み込みで並列に読み込む (フォント・サウンドは各 Load 内で同期読み込みに切り替える)
-        SetUseASyncLoadFlag(TRUE);
 
 #pragma region Base
 
@@ -727,6 +706,9 @@ public:
         DataLoad(Playing, Image, PauseRestart);
         DataLoad(Playing, Image, PauseExit);
         DataLoad(Playing, Image, PauseCursor);
+        DataLoad(Playing, Image, PauseTestResume);
+        DataLoad(Playing, Image, PauseTestRestart);
+        DataLoad(Playing, Image, PauseTestExit);
         auto pauseFallback = [&](GraphData& image, const char* name, float x, float y, float w, float h) {
             if (!image.Handles.empty()) { return; }
             fs::path path = skinDirectory.parent_path()/"Default"/"Image"/"Playing"/"PauseMenu"/name;
@@ -743,6 +725,15 @@ public:
         pauseFallback(Base->Playing.Image.PauseRestart,"Restart.png",640,410,420,64);
         pauseFallback(Base->Playing.Image.PauseExit,"Exit.png",640,494,420,64);
         pauseFallback(Base->Playing.Image.PauseCursor,"Cursor.png",640,326,444,80);
+        // 譜面制作のテストプレイ用 (位置はスキンの通常のボタンと同じにする)
+        pauseFallback(Base->Playing.Image.PauseTestResume,"ResumeTest.png",640,326,420,64);
+        pauseFallback(Base->Playing.Image.PauseTestRestart,"RestartTest.png",640,410,420,64);
+        pauseFallback(Base->Playing.Image.PauseTestExit,"ExitTest.png",640,494,420,64);
+        for (auto [test, normal] : { std::pair{ &Base->Playing.Image.PauseTestResume, &Base->Playing.Image.PauseResume },
+                                     std::pair{ &Base->Playing.Image.PauseTestRestart, &Base->Playing.Image.PauseRestart },
+                                     std::pair{ &Base->Playing.Image.PauseTestExit, &Base->Playing.Image.PauseExit } }) {
+            if (!test->Handles.empty()) { test->Pos = normal->Pos; test->Size = normal->Size; }
+        }
         DataLoad(Playing, Image, KeyMapBox);
         DataLoad(Playing, Image, PlayerChar);
         ValLoad(Playing, Config, KeyMapDistance);
@@ -773,6 +764,7 @@ public:
         DataLoad(Playing, SE, DanFall);
         DataLoad(Playing, SE, FullComboVoice);
         ValLoad(Playing, Config, FullComboVoiceDelay);
+        ValLoad(Playing, Config, FullComboResultDelay);
         // コンボボイス
         Base->Playing.SE.ComboVoice.clear();
         Releasers.push_back([p = &Base->Playing.SE.ComboVoice] { for (auto& v : *p) { v.second->Delete(); } p->clear(); });
@@ -844,8 +836,8 @@ public:
 #undef ValLoad
 #undef DataLoad
 
-        SetUseASyncLoadFlag(FALSE);
-        WaitHandleASyncLoadAll();
+        ((void)0);
+        ((void)0);
         for (auto& check:validators) { if (!check()) { throw std::runtime_error("更新された画像・音声・フォントを読み込めません"); } }
 
         IsLoading = false;
@@ -1035,8 +1027,9 @@ public:
                 double LaneExtendRate = 0.948;
                 double JudgeUpperExplosionFrameTime = 12;
                 double GoGoFireFrameTime = 60;
-                double FullComboVoiceDelay = 1000;
-                float KeyMapDistance = 128;
+                double FullComboVoiceDelay = 1500;
+                double FullComboResultDelay = 800;
+                float KeyMapDistance = 84;
                 double PlayerCharFrameTime = 100;
                 double PlayerCharLoopBeats = 0, PlayerCharJumpBeats = 2;
                 float PlayerCharJumpHeight = 0;
@@ -1073,6 +1066,7 @@ public:
                 GraphData Back;
                 GraphData Pause;
                 GraphData PauseShade, PausePanel, PauseResume, PauseRestart, PauseExit, PauseCursor;
+                GraphData PauseTestResume, PauseTestRestart, PauseTestExit;     // 譜面制作のテストプレイのポーズ (無ければ通常のボタン)
                 GraphData KeyMapBox;
                 GraphData PlayerChar;
             } Image;
@@ -1193,20 +1187,10 @@ struct Ellipse {
     }
 
     void Draw() {
-        SetDrawBlendMode(DX_BLENDGRAPHTYPE_ALPHA, 255 / 3);
-        DrawOvalAA(
-            center.X, center.Y,
-            rx, ry,
-            angle,
-            GetColor(0, 0, 0),
-            FALSE);
-        DrawOvalAA(
-            center.X, center.Y,
-            rx - 10.0f, ry - 10.0f,
-            angle,
-            GetColor(255, 255, 255),
-            TRUE);
-        SetDrawBlendMode(DX_BLENDGRAPHTYPE_ALPHA, 255);
+        gfx::SetBlend(gfx::Blend::Alpha, 255 / 3);
+        gfx::Oval(center.X, center.Y, rx, ry, angle, gfx::Rgb(0, 0, 0), false);
+        gfx::Oval(center.X, center.Y, rx - 10.0f, ry - 10.0f, angle, gfx::Rgb(255, 255, 255), true);
+        gfx::SetBlend(gfx::Blend::Alpha, 255);
     }
 
     constexpr bool is_inside(int x, int y) {

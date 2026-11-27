@@ -140,7 +140,7 @@ Discord のプロフィールに、メニュー・選曲中・演奏中の曲と
 - 音符・連打の帯・レーンは、スキンの画像 (`Playing` の `Note` / `Lane`) で描きます (無いスキンでは色の丸で描きます)
 - 疑似再生の速度は「速度」ボタンで 0.25～2 倍に変えられます
 - **音源 (WAVE)**: 譜面からの相対パスで書きます。ゲームのフォルダの外にある音源を選んだ (または絶対パスを入力した) 時は、譜面のフォルダに複製します
-- **テストプレイ**: 編集中の譜面 (保存していなくてもよい) で演奏します。途中の小節から始める時はトレーニングモードと同じく開始を待つので、ドンで始めます。`F1` でオートプレイと通常のプレイをその場で切り替えられます。記録は残りません。`Esc` で編集画面に戻ります
+- **テストプレイ**: 編集中の譜面 (保存していなくてもよい) で演奏します。途中の小節から始める時はトレーニングモードと同じく開始を待つので、ドンで始めます。`F1` でオートプレイと通常のプレイをその場で切り替えられます。記録は残りません。`Esc` で編集画面に戻ります (`PauseDisplay` が ON の時はポーズの「編集に戻る」)
 - **保存**: 元の文字コードのまま保存します (Shift_JIS の譜面は Shift_JIS。Shift_JIS で表せない文字がある時は UTF-8)。
   初めて上書きする時に元のファイルを `.bak` として残します。小節ごとの音符の細かさは元のまま書き、変えた小節だけが必要に応じて細かくなります
 - 小節は書かれた順に並びます (分岐の #N/#E/#M の小節もそれぞれ表示)。音符の行の途中に書かれたコメント (`//`) は保存時に消えます
@@ -150,7 +150,13 @@ Discord のプロフィールに、メニュー・選曲中・演奏中の曲と
 マウス (クリック。ホイールは一覧のスクロール) とキーボード (`↑↓` 項目 / `←→` 変更 / `Enter` 決定 / `Tab` カテゴリ / `Esc` 戻る) で操作します。
 項目名は `config.json` のキー名と同じです。
 
+Windows 版はゲームライブラリを使わず、Direct3D 12 (描画)・DirectWrite (文字)・WASAPI (音声)・Win32 (ウィンドウと入力) で直接動きます。
+`ViewDebug` の `Renderer` 行で描画方式 (`DIRECT3D12`)、`Audio` 行で音声の出力 (WASAPI の排他・共有、サンプリングレート、バッファの長さ) を確認できます。
+`Exclusive` を ON にすると WASAPI の排他モードで出力し (使えない機器では共有モード)、`BufferSize` を小さくするほど遅延が短くなります。
+`UseGpuRenderer` は SDL3 版 (Android 向けの実装) だけで使い、ON にすると SDL GPU バックエンドで描画します（既定 OFF）。
+
 - **ゲーム**
+  - `TrainingMode` (トレーニングモード): 止まっている間に `PageUp` / `PageDown` で小節を移動します。押し続けると太鼓さん次郎のようにだんだん速くなり (最大 60 小節/秒)、`Home` / `End` で最初・最後へ、ドン・`Space`・`Enter` で再開します
   - `TitleName` (称号): 名札の名前の上に表示します (空欄なら表示しない)。スキンの `Playing` / `Result` に `Font.TitleName` と
     `Config.TitleNamePos` を書くとフォントと位置を変えられます (書かなければ名前のフォントの 3/4 の大きさで名前の上に置きます)
   - `Recommended` (おすすめ設定): 画面のリフレッシュレート・CPU のスレッド数・既定の音声デバイスを調べ、垂直同期・高速入力・描画タイミング・
@@ -186,7 +192,7 @@ UI は `Playing.Image` の `PauseShade`・`PausePanel`・`PauseResume`・`PauseR
 - **音声** (`RecordAudio`): 「ゲームの音を録音」(録れなかった・無音だった時は譜面から作る) / 「譜面から作る」(曲の音源と、叩いた時の効果音を記録した時刻に合わせて混ぜる。WASAPI の排他モードでも音が入る)
 
 - **ffmpeg が必要**です。無い時は `RecordPlay` を ON にした時に導入を提案します (下の「外部ツール」)。PATH にある ffmpeg も使えます
-- 映像は DxLib の Direct3D 11 のバックバッファを GPU 上でコピーし、1 つ前にコピーしたものを読むので、描画は待たされません。
+- 映像は Direct3D 12 の画面用テクスチャを GPU 上で読み出し用のバッファにコピーし、GPU が終わった前のフレームを読むので、描画は待たされません。
   決めたフレームレートの時だけコピーし、別スレッドで ffmpeg へ流して H.264 にします (`RecordCodec` 既定 `libx264` (`-preset veryfast`, 画質は `RecordCrf`)。
   NVIDIA / Intel / AMD の GPU エンコーダ `h264_nvenc` / `h264_qsv` / `h264_amf` も指定できます)。処理が追いつかずに捨てたフレームは保存時に表示します
 - 音声は WASAPI のプロセスループバックで**このゲームの音だけ**を録ります (Windows 10 2004 以降。使えない時は PC 全体の音)。WASAPI の排他モードの時は録れないことがあります
@@ -291,10 +297,10 @@ Android 版 (`Android/`) は PC 版と同じソースを NDK でビルドしま�
 
 ### 演奏用の任意素材
 
-- `Playing.Image.PlayerChar` は `Div` で区切ったコマを使います。`Playing.Config` の `PlayerCharFrames`、`PlayerCharGoGoFrames`、`PlayerCharClearFrames`、`PlayerCharMissFrames`、`PlayerCharJumpFrames` で状態別の表示順を指定します。通常周期は `PlayerCharLoopBeats`、ゴーゴー周期は `PlayerCharGoGoLoopBeats`、ジャンプの長さは `PlayerCharJumpBeats` です。マルチプレイ時は非表示です。
+- `Playing.Image.PlayerChar` は `Div` で区切ったコマを使います。`Playing.Config` の `PlayerCharFrames`、`PlayerCharGoGoFrames`、`PlayerCharClearFrames`、`PlayerCharMissFrames`、`PlayerCharJumpFrames` で状態別の表示順を指定します。通常周期は `PlayerCharLoopBeats`、ゴーゴー周期は `PlayerCharGoGoLoopBeats`、ジャンプの長さは `PlayerCharJumpBeats` です。4Pでは非表示、2Pでは上下に1体ずつ配置し、それぞれのプレイヤーの状態で動きます。
 - `Playing.SE.ComboVoice` は `[{ "Combo": 50, "FilePath": "Sound/Voice/Combo_50.wav" }]` の形式で登録します。`FullComboVoice` にはフルコンボ時の音源を指定します。
-- フルコンボ音源は、ダミーを除く判定対象の音符が連打・風船の終端まで通過してから、`Playing.Config.FullComboVoiceDelay` ms 待って再生します（標準 1000ms）。
-- `Playing.SE.DonBig` と `KaBig` には大音符専用の効果音を指定できます。`Playing.Image.KeyMapBox` は Windows でのキー表示に使います。
+- フルコンボ音源は、ダミーを除く判定対象の音符が連打・風船の終端まで通過してから、`Playing.Config.FullComboVoiceDelay` ms 待って再生します（標準 1500ms）。オフラインでは再生終了後さらに `Playing.Config.FullComboResultDelay` ms（標準 800ms）待ってからリザルト・段位の次の曲へ移行します。
+- `Playing.SE.DonBig` と `KaBig` には大音符専用の効果音を指定できます。`Playing.Image.KeyMapBox` は Windows でのキー表示に使います。標準の `KeyMapRounded.png` は角丸・半透明の背景で、上段が通常、下段が押下中です（表示は72×72px）。Onlineではキーマップと判定のずれメーターを非表示にします。
 
 ## 背景動画
 

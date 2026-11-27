@@ -696,10 +696,11 @@
         "LaneExtendRate": 0.948,
         "JudgeUpperExplosionFrameTime": 12,
         "GoGoFireFrameTime": 60,
-        "FullComboVoiceDelay": 1000,
+        "FullComboVoiceDelay": 1500,
+        "FullComboResultDelay": 800,
         "PlayerCharFrameTime": 100,
         "PlayerCharClearFrames": [],
-        "KeyMapDistance": 128,
+        "KeyMapDistance": 84,
         "PlayerCharMissFrames": [],
         "PlayerCharGoGoFrames": [],
         "PlayerCharFrames": [],
@@ -1024,14 +1025,14 @@
           }
         },
         "KeyMapBox": {
-          "FilePath": "Image/Playing/KeyMapBox.png",
+          "FilePath": "Image/Playing/KeyMapRounded.png",
           "Pos": {
             "X": 640,
             "Y": 660
           },
           "Size": {
-            "Width": 112,
-            "Height": 44
+            "Width": 72,
+            "Height": 72
           },
           "Div": {
             "X": 1,

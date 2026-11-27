@@ -82,11 +82,11 @@ uint64_t Game::AllNoteCounter(std::vector<std::string_view>& lines) {
 
 void Game::LoadingDraw() {
     if (PlayingBlackout.HideLoading) {
-        SetDrawBlendMode(0, 0);
-        DrawFillBox(0, 0, Skin.Info.Resolution.X, Skin.Info.Resolution.Y, GetColor(0, 0, 0));
+        gfx::SetBlend(gfx::Blend::None);
+        gfx::Box((float)(0), (float)(0), (float)(Skin.Info.Resolution.X), (float)(Skin.Info.Resolution.Y), gfx::Rgb(0, 0, 0), true);
         return;
     }
-    DrawFormatString(0, 8, GetColor(255, 255, 255), "ChartLoading...");
+    txt::DrawFormat((float)(0), (float)(8), gfx::Rgb(255, 255, 255), "ChartLoading...");
 }
 
 double Game::JiroMeasureValue(std::string_view arg) {
@@ -114,24 +114,24 @@ bool Game::RequiresJiroTiming(const std::vector<std::string_view>& lines) {
 
 bool Game::AskTemporaryJiroMode() {
 #ifndef __ANDROID__
-    const bool yes=MessageBox(GetMainWindowHandle(),"HBSCROLL / BMSCROLL を含む譜面です。\n今回のプレイだけ JiroChartMode を ON にしますか？\n終了後は元の設定へ戻ります。","JiroChartMode の確認",MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON1)==IDYES;
+    const bool yes=MessageBox(((HWND)sys::NativeWindow()),"HBSCROLL / BMSCROLL を含む譜面です。\n今回のプレイだけ JiroChartMode を ON にしますか？\n終了後は元の設定へ戻ります。","JiroChartMode の確認",MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON1)==IDYES;
     Input::GetInstance().ResyncKeys();return yes;
 #else
     bool previous=true;
-    while(ProcessMessage()!=-1) {
-        ClearDrawScreen();
-        DrawString(40,80,"HBSCROLL / BMSCROLL: JiroChartMode を今回のプレイだけ ON にしますか？",GetColor(255,255,255));
-        DrawBox(40,150,340,220,GetColor(60,100,150),TRUE);
-        DrawBox(380,150,680,220,GetColor(70,70,70),TRUE);
-        DrawString(65,175,"はい (Enter)",GetColor(255,255,255));
-        DrawString(405,175,"いいえ (Esc)",GetColor(255,255,255));
-        ScreenFlip();
-        int x=0,y=0;GetMousePoint(&x,&y);
-        bool click=(GetMouseInput()&MOUSE_INPUT_LEFT)!=0;
+    while(sys::PumpEvents()) {
+        gfx::Clear();
+        txt::Draw(txt::DefaultFont(), (float)(40), (float)(80), "HBSCROLL / BMSCROLL: JiroChartMode を今回のプレイだけ ON にしますか？", gfx::Rgb(255, 255, 255));
+        gfx::Box((float)(40), (float)(150), (float)(340), (float)(220), gfx::Rgb(60, 100, 150), true);
+        gfx::Box((float)(380), (float)(150), (float)(680), (float)(220), gfx::Rgb(70, 70, 70), true);
+        txt::Draw(txt::DefaultFont(), (float)(65), (float)(175), "はい (Enter)", gfx::Rgb(255, 255, 255));
+        txt::Draw(txt::DefaultFont(), (float)(405), (float)(175), "いいえ (Esc)", gfx::Rgb(255, 255, 255));
+        gfx::Present();
+        int x=0,y=0;sys::MousePos(x, y);
+        bool click=(sys::MouseButtons()&sys::MouseLeft)!=0;
 #ifdef __ANDROID__
         if(GetTouchInputNum()>0){int touchId=0,device=0;GetTouchInput(0,&x,&y,&touchId,&device);click=true;}
 #endif
-        const bool yes=CheckHitKey(KEY_INPUT_RETURN)!=0,no=CheckHitKey(KEY_INPUT_ESCAPE)!=0;
+        const bool yes=sys::KeyDown(sys::Key::Return)!=0,no=sys::KeyDown(sys::Key::Escape)!=0;
         const bool active=click||yes||no;
         if(active&&!previous){if(yes)return true;if(no)return false;if(click&&y>=150&&y<=220){if(x>=40&&x<=340)return true;if(x>=380&&x<=680)return false;}}
         previous=active;WaitTimer(16);
@@ -806,7 +806,7 @@ RollType = '\0'
                 if (MainData.NoteType == '0') {
                     MainData.HitFlag = true;
                 }
-                if (GetRand(99) < Config.RandomRate) {
+                if (sys::Rand(99) < Config.RandomRate) {
                     switch (MainData.NoteType) {
                     case '1':
                         MainData.NoteType = '2';
@@ -918,7 +918,7 @@ RollType = '\0'
     }
 
     // 演奏用の楽曲は全デコードしてメモリに置く (再生中のディスク I/O を無くし、開始位置の指定を正確にするため)
-    SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
+    ((void)0);
     if (!Chart.IsDanMode()) {
         if (!OnlineGuest) {
             Chart.SongData.Load(LoadData.SongPath.string());
@@ -939,7 +939,7 @@ RollType = '\0'
             Chart.SongData.Load(LoadData.DanSongs[Dan.SongIndex].WavePath.string());
         }
     }
-    SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
+    ((void)0);
 
     SetSpeed();
 
@@ -1024,7 +1024,6 @@ RollType = '\0'
         }
     }
     if (!Config.TrainingMode || Chart.IsDanMode()) {
-        WaitVSync(10);
         Chart.NowTime.Start();
         if (Editor.Testing && Training.Offset > Chart.SongBlankTime) {
             Chart.SongData.SetCurrent(Training.Offset - Chart.SongBlankTime);

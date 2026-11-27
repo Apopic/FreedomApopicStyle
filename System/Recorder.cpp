@@ -15,11 +15,12 @@ void Game::PlayHitSe(int kind,bool emphasized) {
     sound.Play();
     [[maybe_unused]] float gain=1.0f;
     if(emphasized && kind<2 && !dedicated) {
-        const int layer=DuplicateSoundMem(sound.Handle,1);
+        const int layer=snd::Duplicate(sound.Handle);
         if(layer!=-1) {
-            ChangeVolumeSoundMem(numeric::Cast<int>(std::clamp(Chart.OriginalData.SeVolume*Config.SEVolume*.0255,0.0,255.0)),layer);
-            if(SetPlayFinishDeleteSoundMem(TRUE,layer)<0 || PlaySoundMem(layer,DX_PLAYTYPE_BACK,TRUE)<0) DeleteSoundMem(layer);
-            else gain=2.0f;
+            snd::SetVolume(layer, numeric::Cast<int>(std::clamp(Chart.OriginalData.SeVolume*Config.SEVolume*.0255,0.0,255.0)));
+            snd::SetDeleteOnFinish(layer, true);
+            snd::Play(layer, true);
+            gain=2.0f;
         }
     }
 #ifndef __ANDROID__
@@ -41,10 +42,7 @@ void Game::RecorderStatus(std::string text, int seconds) {
 }
 
 void Game::RecorderRelease() {
-    for (auto*& t : Recorder.Staging) { if (t) { t->Release(); t = nullptr; } }
-    if (Recorder.Resolve) { Recorder.Resolve->Release(); Recorder.Resolve = nullptr; }
-    Recorder.Context = nullptr;
-    Recorder.BackBuffer = nullptr;
+    Recorder.PendingCounts.clear();
 }
 
 void Game::RecorderStart() {
@@ -66,34 +64,10 @@ void Game::RecorderStart() {
     Recorder.SePath[4] = U8ToPath(Skin.Base->Playing.SE.KaBig.FilePath);
     Recorder.Ffmpeg = rec::FindFfmpeg(GetExecutablePath());
     if (Recorder.Ffmpeg.empty()) { RecorderStatus("ffmpeg が見つからないため録画できません (Config の「録画とツール」から導入できます)"); return; }
-    auto* device = (ID3D11Device*)GetUseDirect3D11Device();
-    Recorder.Context = (ID3D11DeviceContext*)GetUseDirect3D11DeviceContext();
-    Recorder.BackBuffer = (ID3D11Texture2D*)GetUseDirect3D11BackBufferTexture2D();
-    if (device == nullptr || Recorder.Context == nullptr || Recorder.BackBuffer == nullptr) { RecorderStatus("Direct3D 11 で動いていないため録画できません"); RecorderRelease(); return; }
-    D3D11_TEXTURE2D_DESC desc{};
-    Recorder.BackBuffer->GetDesc(&desc);
-    if (desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM || desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) { Recorder.Bgra = false; }
-    else if (desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM || desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB || desc.Format == DXGI_FORMAT_B8G8R8X8_UNORM) { Recorder.Bgra = true; }
-    else { RecorderStatus("画面の形式に対応していないため録画できません"); RecorderRelease(); return; }
-    Recorder.Width = (int)desc.Width;
-    Recorder.Height = (int)desc.Height;
-    D3D11_TEXTURE2D_DESC sd = desc;
-    sd.MipLevels = 1;
-    sd.ArraySize = 1;
-    sd.SampleDesc = { 1, 0 };
-    sd.Usage = D3D11_USAGE_STAGING;
-    sd.BindFlags = 0;
-    sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    sd.MiscFlags = 0;
-    bool ok = SUCCEEDED(device->CreateTexture2D(&sd, nullptr, &Recorder.Staging[0])) && SUCCEEDED(device->CreateTexture2D(&sd, nullptr, &Recorder.Staging[1]));
-    if (ok && desc.SampleDesc.Count > 1) {
-        D3D11_TEXTURE2D_DESC rd = desc;
-        rd.SampleDesc = { 1, 0 };
-        rd.BindFlags = 0;
-        rd.MiscFlags = 0;
-        ok = SUCCEEDED(device->CreateTexture2D(&rd, nullptr, &Recorder.Resolve));
-    }
-    if (!ok) { RecorderStatus("録画の準備に失敗しました"); RecorderRelease(); return; }
+    // 画面用テクスチャ (スキンの解像度) をそのまま録画する。読み出す形式は ARGB8888 (メモリ上は B, G, R, A の順)
+    Recorder.Bgra = true;
+    Recorder.Width = gfx::LogicalWidth();
+    Recorder.Height = gfx::LogicalHeight();
 
     // 保存先: recordings/日時_曲名.mp4
     std::error_code ec;
@@ -119,25 +93,31 @@ void Game::RecorderStart() {
     }
     Recorder.StartedAt = std::chrono::steady_clock::now();
     Recorder.Scheduled = 0;
-    Recorder.Pending = false;
+    Recorder.PendingCounts.clear();
+    for (gfx::Image stale; gfx::TakeReadPixels(stale, true);) {}      // 前の録画を途中で止めた時の読み残しを捨てる
     Recorder.Cur = 0;
     Recorder.Active = true;
 }
 
-void Game::RecorderReadPending() {
-    if (!Recorder.Pending) { return; }
-    ID3D11Texture2D* tex = Recorder.Staging[Recorder.Cur ^ 1];
-    D3D11_MAPPED_SUBRESOURCE map{};
-    if (SUCCEEDED(Recorder.Context->Map(tex, 0, D3D11_MAP_READ, 0, &map))) {
-        const size_t row = (size_t)Recorder.Width * 4;
-        std::vector<uint8_t> frame(row * Recorder.Height);
-        for (int y = 0; y < Recorder.Height; ++y) {
-            std::memcpy(frame.data() + row * y, (const uint8_t*)map.pData + (size_t)map.RowPitch * y, row);
+namespace {
+    std::vector<uint8_t> FramePixels(const gfx::Image& frame, int width, int height) {
+        const size_t row = (size_t)width * 4;
+        std::vector<uint8_t> pixels(row * height);
+        for (int y = 0; y < height && y < frame.H; ++y) {
+            std::memcpy(pixels.data() + row * y, frame.Pixels.data() + (size_t)frame.W * y, std::min(row, (size_t)frame.W * 4));
         }
-        Recorder.Context->Unmap(tex, 0);
-        Recorder.Video.Push(std::move(frame), Recorder.PendingCount);
+        return pixels;
     }
-    Recorder.Pending = false;
+}
+
+// GPU の読み出しが終わったフレームをエンコーダに渡す。wait なら残りをすべて待って渡す (録画の終わり)
+void Game::RecorderReadPending(bool wait) {
+    gfx::Image frame;
+    while (!Recorder.PendingCounts.empty() && gfx::TakeReadPixels(frame, wait)) {
+        Recorder.Video.Push(FramePixels(frame, Recorder.Width, Recorder.Height), Recorder.PendingCounts.front());
+        Recorder.PendingCounts.pop_front();
+    }
+    if (wait) { Recorder.PendingCounts.clear(); }
 }
 
 void Game::RecorderCapture() {
@@ -147,26 +127,14 @@ void Game::RecorderCapture() {
     if (target <= Recorder.Scheduled) { return; }
     const int count = (int)std::min<uint64_t>(target - Recorder.Scheduled, (uint64_t)Recorder.Fps);   // 止まっていた分は同じ画で埋める
     Recorder.Scheduled = target;
-    RenderVertex();     // DxLib の描画待ちを先に出し切る
-    ID3D11Texture2D* dst = Recorder.Staging[Recorder.Cur];
-    if (Recorder.Resolve) {
-        D3D11_TEXTURE2D_DESC desc{};
-        Recorder.BackBuffer->GetDesc(&desc);
-        Recorder.Context->ResolveSubresource(Recorder.Resolve, 0, Recorder.BackBuffer, 0, desc.Format);
-        Recorder.Context->CopyResource(dst, Recorder.Resolve);
-    }
-    else {
-        Recorder.Context->CopyResource(dst, Recorder.BackBuffer);
-    }
-    RecorderReadPending();          // 1 つ前にコピーしたフレーム (もう GPU の処理は終わっている)
-    Recorder.Pending = true;
-    Recorder.PendingCount = count;
-    Recorder.Cur ^= 1;
+    // 録画のフレームレートの時だけ画面用テクスチャを GPU 上でコピーし、GPU が終わった前のフレームを受け取る (描画は待たない。エンコードは別スレッド)
+    if (gfx::ReadPixelsAsync(0, 0, Recorder.Width, Recorder.Height)) { Recorder.PendingCounts.push_back(count); }
+    RecorderReadPending(false);
 }
 
 void Game::RecorderStop() {
     if (!Recorder.Active) { return; }
-    RecorderReadPending();          // 最後にコピーしたフレームを読む
+    RecorderReadPending(true);      // 最後にコピーしたフレームまで読む
     Recorder.Active = false;
     RecorderRelease();
     Recorder.Duration = RecorderSeconds();
@@ -189,27 +157,16 @@ void Game::RecorderStop() {
 }
 
 fs::path Game::RecorderPrepareAudio() {
-    // 譜面から作る: 曲と効果音をメインスレッドでデコードし (DxLib)、混ぜて WAV にする
+    // 譜面から作る: 曲と効果音をデコードし、混ぜて WAV にする
     auto load = [](const fs::path& path) {
         rec::Pcm pcm;
         std::error_code e;
         if (path.empty() || !fs::is_regular_file(path, e)) { return pcm; }
-        const int handle = LoadAlignedSoftSound(PathToU8(path).c_str());
-        if (handle == -1) { return pcm; }
-        ScopedSoftSound sound{handle};
-        int channels = 0, bits = 0, rate = 0, isfloat = 0;
-        GetSoftSoundFormat(handle, &channels, &bits, &rate, &isfloat);
-        const LONGLONG count = GetSoftSoundSampleNum(handle);
-        const void* image = GetSoftSoundDataImage(handle);
-        if (image != nullptr && count > 0 && channels > 0 && channels <= 32 && uint64_t(count) <= pcm.Data.max_size() / channels && (bits == 16 || bits == 8 || (bits == 32 && isfloat))) {
-            pcm.Channels = channels;
-            pcm.Rate = rate;
-            pcm.Data.resize((size_t)count * channels);
-            for (size_t i = 0; i < pcm.Data.size(); ++i) {
-                pcm.Data[i] = bits == 16 ? ((const int16_t*)image)[i] / 32768.0f
-                    : bits == 8 ? (((const uint8_t*)image)[i] - 128) / 128.0f
-                    : ((const float*)image)[i];
-            }
+        const auto decoded = LoadAlignedPcm(PathToU8(path));
+        if (decoded && decoded->Frames() > 0) {
+            pcm.Channels = decoded->Channels;
+            pcm.Rate = decoded->Rate;
+            pcm.Data = decoded->Samples;
         }
 
         return pcm;
@@ -290,8 +247,8 @@ void Game::RecorderPromptProc() {
     if (NowScene != Scene::Result) { if (Recorder.AwaitingDecision) { RecorderDecide(true); } return; }
     const bool y = (__gotkeyboardinput['Y'] & 1) != 0, n = (__gotkeyboardinput['N'] & 1) != 0;
     int mx = 0, my = 0;
-    GetMousePoint(&mx, &my);
-    const bool click = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
+    sys::MousePos(mx, my);
+    const bool click = (sys::MouseButtons() & sys::MouseLeft) != 0;
     static bool prevclick = true;
     const bool pressed = click && !prevclick;
     prevclick = click;
@@ -308,24 +265,24 @@ void Game::RecorderOverlay() {
     const FontData& sfont = ConfigSmallFont();
     if ((Recorder.Active || Recorder.AwaitingDecision) && NowScene == Scene::Result) {
         const float cx = Skin.Info.Resolution.X * 0.5f, cy = Skin.Info.Resolution.Y * 0.5f;
-        UIBox({ cx - 240.0f, cy - 60.0f, cx + 240.0f, cy + 70.0f }, GetColor(16, 18, 28), 230);
-        UIBox({ cx - 240.0f, cy - 60.0f, cx + 240.0f, cy + 70.0f }, GetColor(255, 200, 40), 255, false);
-        UIText(sfont, cx, cy - 30.0f, "録画を保存しますか? (" + std::string(rec::FindFormat(Config.RecordFormat).Ext) + ")", GetColor(255, 255, 255), 1);
+        UIBox({ cx - 240.0f, cy - 60.0f, cx + 240.0f, cy + 70.0f }, gfx::Rgb(16, 18, 28), 230);
+        UIBox({ cx - 240.0f, cy - 60.0f, cx + 240.0f, cy + 70.0f }, gfx::Rgb(255, 200, 40), 255, false);
+        UIText(sfont, cx, cy - 30.0f, "録画を保存しますか? (" + std::string(rec::FindFormat(Config.RecordFormat).Ext) + ")", gfx::Rgb(255, 255, 255), 1);
         const char* labels[] = { "保存する (Y)", "破棄する (N)" };
         for (int i = 0; i < 2; ++i) {
             const UIRect r = RecorderPromptButton(i);
-            UIBox(r, i == 0 ? GetColor(214, 116, 20) : GetColor(60, 64, 84), 240);
-            UIText(sfont, (r.L + r.R) * 0.5f, (r.T + r.B) * 0.5f, labels[i], i == 0 ? GetColor(0, 0, 0) : GetColor(255, 255, 255), 1);
+            UIBox(r, i == 0 ? gfx::Rgb(214, 116, 20) : gfx::Rgb(60, 64, 84), 240);
+            UIText(sfont, (r.L + r.R) * 0.5f, (r.T + r.B) * 0.5f, labels[i], i == 0 ? gfx::Rgb(0, 0, 0) : gfx::Rgb(255, 255, 255), 1);
         }
     }
     if (Recorder.Active) {
         const float x = (float)Skin.Info.Resolution.X - 16.0f;
-        DrawCircleAA(x - ConfigTextWidth("REC") - 14.0f, 18.0f, 6.0f, 16, GetColor(240, 40, 40), TRUE);
-        UIText(sfont, x, 18.0f, "REC", GetColor(255, 255, 255), 2);
+        gfx::Circle(x - ConfigTextWidth("REC") - 14.0f, 18.0f, 6.0f, 16, gfx::Rgb(240, 40, 40), true);
+        UIText(sfont, x, 18.0f, "REC", gfx::Rgb(255, 255, 255), 2);
     }
     std::lock_guard lock(Recorder.StatusMutex);
     if (!Recorder.Status.empty() && std::chrono::steady_clock::now() < Recorder.StatusUntil && (Recorder.Muxing || !Recorder.Active)) {
-        UIText(sfont, 16, (float)Skin.Info.Resolution.Y - sfont.Size * 1.2f, FitText(Recorder.Status, sfont.Handle, (float)Skin.Info.Resolution.X - 32, false), GetColor(255, 220, 90));
+        UIText(sfont, 16, (float)Skin.Info.Resolution.Y - sfont.Size * 1.2f, FitText(Recorder.Status, sfont.Handle, (float)Skin.Info.Resolution.X - 32, false), gfx::Rgb(255, 220, 90));
     }
 }
 
@@ -347,10 +304,10 @@ void Game::PlayHitSe(int kind,bool emphasized) {
     sound.Play();
     [[maybe_unused]] float gain=1.0f;
     if(emphasized && kind<2 && !dedicated) {
-        const int layer=DuplicateSoundMem(sound.Handle,1);
+        const int layer=snd::Duplicate(sound.Handle);
         if(layer!=-1) {
-            ChangeVolumeSoundMem(numeric::Cast<int>(std::clamp(Chart.OriginalData.SeVolume*Config.SEVolume*.0255,0.0,255.0)),layer);
-            if(SetPlayFinishDeleteSoundMem(TRUE,layer)<0 || PlaySoundMem(layer,DX_PLAYTYPE_BACK,TRUE)<0) DeleteSoundMem(layer);
+            snd::SetVolume(layer, numeric::Cast<int>(std::clamp(Chart.OriginalData.SeVolume*Config.SEVolume*.0255,0.0,255.0)));
+            if(snd::SetDeleteOnFinish(layer, true)<0 || snd::Play(layer, true, 0 == 1)<0) snd::Delete(layer);
             else gain=2.0f;
         }
     }

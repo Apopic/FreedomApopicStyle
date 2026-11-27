@@ -142,7 +142,7 @@ void Game::OnlineUpdatePreview() {
     if (Online.PreviewSerial == Online.LoadedSerial) { return; }
     OnlineStopPreview();
     Online.PreviewSerial = Online.LoadedSerial;
-    const double duration = std::max(0.0, (double)GetSoundTotalTime(Chart.SongData.Handle) - Chart.SongData.StartMilliseconds);
+    const double duration = std::max(0.0, snd::TotalMs(Chart.SongData.Handle) - Chart.SongData.StartMilliseconds);
     const double start = Chart.OriginalData.DemoStart * 1000.0;
     if (duration <= 0.0) { return; }
     Chart.SongData.SetVolume(numeric::Cast<float>(Chart.OriginalData.SongVolume * (Config.SongVolume / 100.0)));

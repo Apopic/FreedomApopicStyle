@@ -11,6 +11,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_  HINSTANCE hPrevInstance, 
 		ShowErrorDialog(std::string("エラーのため終了します。\n原因: ") + DescribeException(e));
 		return 1;
 	}
+	catch (...) {
+		ShowErrorDialog("エラーのため終了します。\n原因: 不明な例外");
+		return 1;
+	}
 	return 0;
 }
 #else

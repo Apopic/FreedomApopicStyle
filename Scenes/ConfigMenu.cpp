@@ -80,12 +80,13 @@ std::vector<std::string> Game::WrapText(const std::string& str, int handle, floa
 
 void Game::DrawFitScreen(FontData& font, Pos2D<float> pos, const std::string& str) const {
     if (font.Handle == -1 || str.empty()) { return; }
-    const float resx = (float)Skin.Info.Resolution.X, margin = 12.0f;
-    float width = resx - pos.X - margin;
-    if (font.Position == FontData::Right) { width = pos.X - margin; }
-    else if (font.Position == FontData::Center) { width = 2.0f * std::min(pos.X, resx - pos.X) - margin * 2.0f; }
-    const std::string text = FitText(str, font.Handle, std::max(width, 32.0f), false);
-    font.Draw(pos, GetColor(255, 255, 255), GetColor(0, 0, 0), (unsigned int)GetStrlenCached(text, font.Handle), text);
+    // Song headings keep their right edge inside the screen. Long headings may
+    // extend off the left; keep the complete text instead of adding an ellipsis.
+    const float screenRight = Skin.Info.Resolution.X - 12.0f - std::max(0.0f, font.Edge);
+    const float right = font.Position == FontData::Right ? std::min(pos.X, screenRight) : screenRight;
+    const float width = GetStrlenCached(str, font.Handle) * font.WidthScale;
+    txt::Draw(font.Handle, right - width, pos.Y - font.Size * .5f, str,
+        gfx::Rgb(255, 255, 255), gfx::Rgb(0, 0, 0), font.WidthScale, 1);
 }
 
 std::string Game::FitText(const std::string& str, int handle, float width, bool front) const {
@@ -252,7 +253,7 @@ void Game::BuildConfigItems() {
     auto& play = game;      // 演奏の設定も同じカテゴリ
     play.Items.push_back(Bool("AutoPlay", "譜面を自動で演奏する", Config.AutoPlay));
     play.Items.push_back(Bool("PauseDisplay", "オフライン演奏中に TAB / Esc でポーズ画面を開く (オンラインでは無効)", Config.PauseDisplay));
-    play.Items.push_back(Bool("TrainingMode", "小節単位で移動しながら練習する", Config.TrainingMode));
+    play.Items.push_back(Bool("TrainingMode", "小節単位で移動しながら練習する (PageUp / PageDown で移動。押し続けると速くなる)", Config.TrainingMode));
     play.Items.push_back(Number("RandomRate", "音符の色を入れ替える割合 (%)", Config.RandomRate, 0, 100, 5, 0));
     play.Items.push_back(Number("ChartSpeed", "譜面のスクロール速度", Config.ChartSpeed, 0.1, 10.0, 0.1, 1));
     play.Items.push_back(Number("SongSpeed", "曲の再生速度", Config.SongSpeed, 0.5, 2.0, 0.05, 2));
@@ -317,6 +318,7 @@ void Game::BuildConfigItems() {
     view.Items.push_back(Bool("MultiBoot", "複数のウィンドウで同時に起動できるようにする", Config.MultiBoot, true));
 #endif
     view.Items.push_back(Bool("ViewDebug", "FPS や内部の時間を表示する", Config.ViewDebug));
+    view.Items.push_back(Bool("UseGpuRenderer", "SDL3 版 (Android) のみ: SDL GPU で描画する (Windows 版は常に Direct3D 12)", Config.UseGpuRenderer, true));
 
 
     // ---- サウンド ----
@@ -644,7 +646,7 @@ void Game::FolderBrowse(int target) {
     auto state = std::make_shared<FolderPickState>();
     ConfigUI.Picker = state;
     ConfigUI.PickerTarget = target;
-    const HWND owner = GetMainWindowHandle();
+    const HWND owner = ((HWND)sys::NativeWindow());
     std::thread([state, owner, initial] {
         try { state->Result = PickFolderDialog(owner, initial); }
         catch (...) { state->Result.clear(); }
@@ -688,7 +690,7 @@ const FontData& Game::ConfigSmallFont() const {
         ConfigSmallSourceSize = base.Size;
         const float size = std::max(12.0f, std::round((base.Size > 1 ? base.Size : 28.0f) * 0.7f));
         ConfigSmall.Size = size;
-        ConfigSmall.Handle = CreateFontToHandle(nullptr, (int)size, 3, DX_FONTTYPE_ANTIALIASING_EDGE_8X8, DX_CHARSET_UTF8, 1);
+        ConfigSmall.Handle = txt::OpenFont({ "", "", size, 3, 1, 0 });
     }
     return ConfigSmall.Handle != -1 ? ConfigSmall : base;
 }
@@ -843,13 +845,13 @@ auto Game::ReadPointer() -> PointerState {
     PointerState pt;
     bool right = false, middle = false;
 #ifndef __ANDROID__
-    GetMousePoint(&pt.X, &pt.Y);
+    sys::MousePos(pt.X, pt.Y);
     // タイトルバーをドラッグしてウィンドウを動かしている間は、クリックとして扱わない
     if (!IsWindowDragging()) {
-        const int buttons = GetMouseInput();
-        pt.Left = (buttons & MOUSE_INPUT_LEFT) != 0;
-        right = (buttons & MOUSE_INPUT_RIGHT) != 0;
-        middle = (buttons & MOUSE_INPUT_MIDDLE) != 0;
+        const int buttons = sys::MouseButtons();
+        pt.Left = (buttons & sys::MouseLeft) != 0;
+        right = (buttons & sys::MouseRight) != 0;
+        middle = (buttons & sys::MouseMiddle) != 0;
     }
     pt.Wheel = Input::GetInstance().GetMouseWheel();
 #else
@@ -904,13 +906,13 @@ void Game::UIText(const FontData& font, float x, float y, const std::string& str
     if (font.Handle == -1 || str.empty()) { return; }
     const float w = (float)GetStrlenCached(str, font.Handle);
     const float dx = align == 1 ? w * 0.5f : (align == 2 ? w : 0.0f);
-    DrawStringFToHandle(x - dx, y - font.Size * 0.5f, str.c_str(), color, font.Handle, GetColor(0, 0, 0));
+    txt::Draw(font.Handle, x - dx, y - font.Size * 0.5f, str.c_str(), color, gfx::Rgb(0, 0, 0));
 }
 
 void Game::UIBox(const UIRect& r, unsigned int color, int alpha, bool fill) {
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, alpha);
-    DrawBoxAA(r.L, r.T, r.R, r.B, color, fill ? TRUE : FALSE, 2.0f);
-    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+    gfx::SetBlend(gfx::Blend::Alpha, alpha);
+    gfx::Box(r.L, r.T, r.R, r.B, color, fill ? TRUE : FALSE, 2.0f);
+    gfx::SetBlend(gfx::Blend::None);
 }
 
 auto Game::ConfigItems() -> std::vector<ConfigItem>& {
@@ -962,11 +964,11 @@ void Game::ConfigBeginEdit(ConfigItem& item) {
     if (!item.Set) { return; }
     Skin.Base->Title.SE.Don.Play();
 #ifndef __ANDROID__
-    if (ConfigUI.Editing) { DeleteKeyInput(ConfigUI.EditHandle); ConfigUI.Editing = false; }
-    ConfigUI.EditHandle = MakeKeyInput(1024, TRUE, FALSE, FALSE);
-    SetKeyInputString(item.Get().c_str(), ConfigUI.EditHandle);
-    SetActiveKeyInput(ConfigUI.EditHandle);
-    SetKeyInputStringFont(ConfigSmallFont().Handle);
+    if (ConfigUI.Editing) { sys::EndTextInput(ConfigUI.EditHandle); ConfigUI.Editing = false; }
+    ConfigUI.EditHandle = sys::BeginTextInput("", (size_t)(1024), false);
+    sys::SetTextInputString(ConfigUI.EditHandle, item.Get().c_str());
+    ((void)0);
+    sys::SetTextInputFont(ConfigSmallFont().Handle);
     ConfigUI.Editing = true;
 #else
     if (item.Set(GetInputText(item.Name))) {
@@ -979,18 +981,17 @@ void Game::ConfigEndEdit(bool apply) {
 #ifndef __ANDROID__
     if (!ConfigUI.Editing) { return; }
     if (apply) {
-        std::vector<char> buf(4096, '\0');
-        GetKeyInputString(buf.data(), ConfigUI.EditHandle);
+        const std::string buf = sys::TextInputString(ConfigUI.EditHandle);
         auto& item = ConfigItems()[ConfigUI.Selected];
         const auto before = ConfigUI.MessageUntil;
-        if (item.Set && item.Set(buf.data())) {
+        if (item.Set && item.Set(buf)) {
             ConfigChanged();
         }
         else if (item.Set && ConfigUI.MessageUntil == before) {
             ShowConfigMessage("入力した値は使えません (長すぎる・空欄・数値でないなど)");
         }
     }
-    DeleteKeyInput(ConfigUI.EditHandle);
+    sys::EndTextInput(ConfigUI.EditHandle);
     ConfigUI.EditHandle = 0;
     ConfigUI.Editing = false;
 #endif
@@ -1209,7 +1210,7 @@ void Game::ConfigRecommendProc(const PointerState& pt) {
             restart = restart || change.Restart;
         }
         Config.Write();
-        SetWaitVSyncFlag(Config.WaitVSync);
+        gfx::SetVSync(Config.WaitVSync);
         Skin.Base->Title.SE.Don.Play();
         ShowConfigMessage(std::to_string(ConfigUI.Recommend.size()) + " 項目を変更しました" + (restart ? " (* の項目は再起動後に反映されます)" : ""));
         ConfigUI.RecommendOpen = false;
@@ -1232,10 +1233,10 @@ void Game::ConfigRecommendProc(const PointerState& pt) {
 }
 
 void Game::DrawRecommendPanel(const FontData& font) {
-    const unsigned int white = GetColor(255, 255, 255), black = GetColor(0, 0, 0), accent = GetColor(255, 200, 40);
+    const unsigned int white = gfx::Rgb(255, 255, 255), black = gfx::Rgb(0, 0, 0), accent = gfx::Rgb(255, 200, 40);
     const UIRect r = RecommendPanelRect();
     UIBox({ 0, 0, (float)Skin.Info.Resolution.X, (float)Skin.Info.Resolution.Y }, black, 130);
-    UIBox(r, GetColor(18, 20, 32), 240);
+    UIBox(r, gfx::Rgb(18, 20, 32), 240);
     UIBox(r, white, 200, false);
     const float lh = ConfigLineHeight();
     float y = r.T + 20.0f + lh * 0.5f;
@@ -1254,7 +1255,7 @@ void Game::DrawRecommendPanel(const FontData& font) {
 #endif
     for (int i = 0; i < 2; ++i) {
         const UIRect b = RecommendButtonRect(i);
-        UIBox(b, i == 0 ? GetColor(214, 116, 20) : GetColor(50, 54, 70), 230);
+        UIBox(b, i == 0 ? gfx::Rgb(214, 116, 20) : gfx::Rgb(50, 54, 70), 230);
         UIBox(b, white, 160, false);
         UIText(font, (b.L + b.R) * 0.5f, (b.T + b.B) * 0.5f, labels[i], white, 1);
     }
@@ -1279,7 +1280,7 @@ void Game::ConfigMenuInit() {
     ConfigUI.TitleOnEnter = Config.TitleName;
     PointerPrev.Left = true;       // 画面を開いたクリックを項目の操作として扱わない
 #ifndef __ANDROID__
-    SetMouseDispFlag(TRUE);
+    sys::ShowCursor(true);
 #endif
 }
 
@@ -1288,9 +1289,9 @@ void Game::PrepareConfigSkin() {
     Skin.Init(Skin.Root);
     if (std::ranges::find(Skin.Infos,Config.SkinName,&_Skin::SkinInfo::Name)==Skin.Infos.end()) { Config.SkinName="Default"; }
     if (Config.SkinName==ConfigUI.SkinOnEnter && Skin.Info.Name==Config.SkinName) { return; }
-    ClearDrawScreen(); DrawString(24,24,"スキンを読み込んでいます...",GetColor(255,255,255)); ScreenFlip();
+    gfx::Clear(); txt::Draw(txt::DefaultFont(), (float)(24), (float)(24), "スキンを読み込んでいます...", gfx::Rgb(255, 255, 255)); gfx::Present();
     Skin.Load(Config.SkinName, Config);
-    WaitHandleASyncLoadAll();
+    ((void)0);
     FinishSkinReload();
     ConfigUI.SkinOnEnter=Config.SkinName;
     Config.Write();
@@ -1300,7 +1301,7 @@ void Game::PrepareConfigSkin() {
 #endif
     PointerPrev.Left=PointerPrev.Right=PointerPrev.Middle=true;
     // 読み込み前の説明欄や別解像度の画面を、戻る先の初回描画に残さない。
-    ClearDrawScreen();
+    gfx::Clear();
 }
 
 void Game::ConfigMenuEnd() {
@@ -1325,7 +1326,7 @@ void Game::ConfigMenuEnd() {
         Online.Net.Send(fasnet::Msg::SetTitle, fasnet::Text{ Config.TitleName });
     }
 #ifndef __ANDROID__
-    SetMouseDispFlag(!Config.FullScreen);
+    sys::ShowCursor(!Config.FullScreen);
 #endif
     ConfigUI.Categories.clear();
 }
@@ -1336,10 +1337,10 @@ void Game::ConfigMenuDraw() {
     }
     auto& font = Skin.Base->ConfigMenu.Font.String;
     auto& sfont = ConfigSmallFont();
-    const unsigned int white = GetColor(255, 255, 255);
-    const unsigned int black = GetColor(0, 0, 0);
-    const unsigned int gray = GetColor(150, 150, 150);
-    const unsigned int accent = GetColor(255, 200, 40);
+    const unsigned int white = gfx::Rgb(255, 255, 255);
+    const unsigned int black = gfx::Rgb(0, 0, 0);
+    const unsigned int gray = gfx::Rgb(150, 150, 150);
+    const unsigned int accent = gfx::Rgb(255, 200, 40);
     const float resx = (float)Skin.Info.Resolution.X;
     const float resy = (float)Skin.Info.Resolution.Y;
 
@@ -1350,7 +1351,7 @@ void Game::ConfigMenuDraw() {
     for (int i = 0; i < (int)ConfigUI.Categories.size(); ++i) {
         const UIRect r = ConfigTabRect(i);
         const bool active = i == ConfigUI.Category;
-        UIBox(r, active ? GetColor(214, 116, 20) : black, active ? 220 : 140);
+        UIBox(r, active ? gfx::Rgb(214, 116, 20) : black, active ? 220 : 140);
         UIBox(r, white, 160, false);
         UIText(sfont, (r.L + r.R) * 0.5f, (r.T + r.B) * 0.5f, FitText(ConfigUI.Categories[i].Name, sfont.Handle, r.R - r.L - 8, false), white, 1);
     }
@@ -1358,7 +1359,7 @@ void Game::ConfigMenuDraw() {
     // 項目
     auto& items = ConfigItems();
     const UIRect area = ConfigListArea();
-    SetDrawArea((int)area.L, (int)area.T, (int)area.R, (int)area.B);
+    gfx::SetClip((int)area.L, (int)area.T, (int)area.R, (int)area.B);
     const int last = std::min((int)items.size(), ConfigUI.Scroll + ConfigVisibleRows() + 1);
     for (int i = ConfigUI.Scroll; i < last; ++i) {
         auto& item = items[i];
@@ -1366,9 +1367,9 @@ void Game::ConfigMenuDraw() {
         const bool selected = i == ConfigUI.Selected;
 
         const unsigned int add = selected ? 100 : 0;
-        SetDrawAddColor(add, add, add);
+        gfx::SetAddColor(add, add, add);
         Skin.Base->ConfigMenu.Image.Box.Draw({ 0, cy - Skin.Base->ConfigMenu.Image.Box.Pos.Y });
-        SetDrawAddColor(0, 0, 0);
+        gfx::SetAddColor(0, 0, 0);
 
         float namex = Skin.Base->ConfigMenu.Config.StringPos.X;
         if (namex <= 0) { namex = area.L + 24; }
@@ -1379,7 +1380,7 @@ void Game::ConfigMenuDraw() {
         case ConfigItemType::Bool: {
             const bool on = item.Get() == "ON";
             const UIRect pill{ v.L, v.T, v.L + 140, v.B };
-            UIBox(pill, on ? GetColor(40, 200, 90) : GetColor(90, 90, 90), 230);
+            UIBox(pill, on ? gfx::Rgb(40, 200, 90) : gfx::Rgb(90, 90, 90), 230);
             UIText(sfont, (pill.L + pill.R) * 0.5f, cy, on ? "ON" : "OFF", white, 1);
             break;
         }
@@ -1413,7 +1414,7 @@ void Game::ConfigMenuDraw() {
                 const UIRect r = ConfigKeySlotRect(i, slot, count);
                 const bool current = selected && slot == ConfigUI.KeySlot;
                 const bool addslot = slot >= (int)item.Keys->size();
-                UIBox(r, current ? GetColor(214, 116, 20) : black, current ? 200 : (addslot ? 90 : 150));
+                UIBox(r, current ? gfx::Rgb(214, 116, 20) : black, current ? 200 : (addslot ? 90 : 150));
                 if (addslot) { UIBox(r, white, 110, false); }
                 std::string label = addslot ? std::string("+") : (names != nullptr && slot < (int)names->size() ? (*names)[slot] : std::string("?"));
                 if (current && ConfigUI.Capturing) { label = "..."; }
@@ -1426,16 +1427,16 @@ void Game::ConfigMenuDraw() {
             const UIRect path = ConfigFolderPartRect(i, item.Type, 0);
             const bool exists = item.Index >= 0 && item.Index < (int)ConfigUI.FolderExists.size() && ConfigUI.FolderExists[item.Index];
             UIBox(path, black, 150);
-            UIText(sfont, path.L + 12, cy, FitText(item.Get(), sfont.Handle, path.R - path.L - 24, true), exists ? white : GetColor(255, 120, 120));
+            UIText(sfont, path.L + 12, cy, FitText(item.Get(), sfont.Handle, path.R - path.L - 24, true), exists ? white : gfx::Rgb(255, 120, 120));
             const UIRect del = ConfigFolderPartRect(i, item.Type, 1);
             const bool current = selected && ConfigUI.KeySlot == 1;
-            UIBox(del, current ? GetColor(214, 116, 20) : GetColor(44, 48, 64), 225);
+            UIBox(del, current ? gfx::Rgb(214, 116, 20) : gfx::Rgb(44, 48, 64), 225);
             UIBox(del, white, 120, false);
             UIText(sfont, (del.L + del.R) * 0.5f, cy, "削除", white, 1);
             break;
         }
         case ConfigItemType::Action: {
-            UIBox(v, selected ? GetColor(214, 116, 20) : GetColor(44, 48, 64), 225);
+            UIBox(v, selected ? gfx::Rgb(214, 116, 20) : gfx::Rgb(44, 48, 64), 225);
             UIBox(v, white, 120, false);
             UIText(sfont, (v.L + v.R) * 0.5f, cy, FitText(item.Get(), sfont.Handle, v.R - v.L - 16, false), white, 1);
             break;
@@ -1444,7 +1445,7 @@ void Game::ConfigMenuDraw() {
             for (int part = 0; part < FolderAddParts; ++part) {
                 const UIRect r = ConfigFolderPartRect(i, item.Type, part);
                 const bool current = selected && ConfigUI.KeySlot == part;
-                UIBox(r, current ? GetColor(214, 116, 20) : GetColor(44, 48, 64), 225);
+                UIBox(r, current ? gfx::Rgb(214, 116, 20) : gfx::Rgb(44, 48, 64), 225);
                 UIBox(r, white, 120, false);
                 if (!(ConfigUI.Editing && selected)) {
                     UIText(sfont, (r.L + r.R) * 0.5f, cy, FitText(FolderAddLabel(part), sfont.Handle, r.R - r.L - 12, false), white, 1);
@@ -1454,7 +1455,7 @@ void Game::ConfigMenuDraw() {
         }
         }
     }
-    SetDrawAreaFull();
+    gfx::ResetClip();
 
     // スクロールバー
     const int n = (int)items.size();
@@ -1472,9 +1473,9 @@ void Game::ConfigMenuDraw() {
         const UIRect v = ConfigEditRect(ConfigUI.Selected);
         UIBox(v, black, 230);
         UIBox(v, accent, 255, false);
-        SetDrawArea((int)v.L + 4, (int)v.T, (int)v.R - 4, (int)v.B);
+        gfx::SetClip((int)v.L + 4, (int)v.T, (int)v.R - 4, (int)v.B);
         DrawTextInput((int)v.L + 12, (int)(((v.T + v.B) * 0.5f) - font.Size * 0.5f), ConfigUI.EditHandle);
-        SetDrawAreaFull();
+        gfx::ResetClip();
     }
 #endif
 
@@ -1571,7 +1572,7 @@ void Game::ConfigMenuProc() {
 #ifndef __ANDROID__
     // ---- 文字入力中 ----
     if (ConfigUI.Editing) {
-        const int state = CheckKeyInput(ConfigUI.EditHandle);
+        const int state = sys::TextInputState(ConfigUI.EditHandle);
         const bool clickout = pt.LeftPressed && !ConfigEditRect(ConfigUI.Selected).Contains(pt.X, pt.Y);
         if (state != 0 || clickout) {
             ConfigEndEdit(state == 1 || clickout);

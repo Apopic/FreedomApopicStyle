@@ -140,21 +140,18 @@ int Game::DanCrown() const {
 
 void Game::SetDrawBranchArea(Pos2D<float> DelayPos) const {
     if (Chart.IsBranchChart()) {
-        SetDrawArea(
-            numeric::Cast<int>(Skin.Base->Playing.Image.Lane.Pos.X - Skin.Base->Playing.Image.Lane.Size.Width / 2),
-            numeric::Cast<int>(Skin.Base->Playing.Image.Lane.Pos.Y - Skin.Base->Playing.Image.Lane.Size.Height / 2 + DelayPos.Y),
-            numeric::Cast<int>(Skin.Base->Playing.Image.Lane.Pos.X + Skin.Base->Playing.Image.Lane.Size.Width / 2),
-            numeric::Cast<int>(Skin.Base->Playing.Image.Lane.Pos.Y + Skin.Base->Playing.Image.Lane.Size.Height / 2 + DelayPos.Y));
+        gfx::SetClip(numeric::Cast<int>(Skin.Base->Playing.Image.Lane.Pos.X - Skin.Base->Playing.Image.Lane.Size.Width / 2), numeric::Cast<int>(Skin.Base->Playing.Image.Lane.Pos.Y - Skin.Base->Playing.Image.Lane.Size.Height / 2 + DelayPos.Y), numeric::Cast<int>(Skin.Base->Playing.Image.Lane.Pos.X + Skin.Base->Playing.Image.Lane.Size.Width / 2), numeric::Cast<int>(Skin.Base->Playing.Image.Lane.Pos.Y + Skin.Base->Playing.Image.Lane.Size.Height / 2 + DelayPos.Y));
     }
 }
 
-bool Game::HasImage(const GraphData& g) { return !g.Handles.empty() && g.Handles[0] != -1 && g.Size.Width > 0 && g.Size.Height > 0; }
+bool Game::HasImage(const GraphData& g) { return !g.Handles.empty() && (bool)g.Handles[0] && g.Size.Width > 0 && g.Size.Height > 0; }
 
 
 
 void Game::SkinVoiceReset() {
     SkinVoice = SkinVoiceState();
     PlayerCharAnim = {};
+    RemotePlayerCharAnim = {};
     // Keep the judgement targets before hit processing clears NoteType. In Jiro
     // charts, notes written behind a later judgement time are visual dummies.
     double furthest[3] = {-std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
@@ -175,7 +172,11 @@ void Game::SkinVoiceReset() {
 void Game::UpdateFullComboVoice(std::chrono::steady_clock::time_point now) {
     if(Chart.Judge.empty())return;
     auto& pl=Skin.Base->Playing;
-    if (SkinVoice.FullComboPlayed || !Chart.NowTime.IsRunning()) { return; }
+    if (SkinVoice.FullComboPlayed) {
+        if (!pl.SE.FullComboVoice.IsPlay() && !SkinVoice.FullComboEndedAt) { SkinVoice.FullComboEndedAt = now; }
+        return;
+    }
+    if (!Chart.NowTime.IsRunning()) { return; }
     bool complete = true, hasNormal = false;
     double end = -std::numeric_limits<double>::infinity();
     for (const auto& note : Chart.RawNoteDatas) {
@@ -191,6 +192,15 @@ void Game::UpdateFullComboVoice(std::chrono::steady_clock::time_point now) {
         pl.SE.FullComboVoice.SetVolume(numeric::Cast<float>(Chart.OriginalData.SeVolume*(Config.SEVolume/100.0)));
         pl.SE.FullComboVoice.Play();SkinVoice.FullComboPlayed=true;
     }
+}
+
+bool Game::WaitForFullComboVoice(std::chrono::steady_clock::time_point now) {
+    if (IsMulti || !snd::IsValid(Skin.Base->Playing.SE.FullComboVoice.Handle)) { return false; }
+    UpdateFullComboVoice(now);
+    if (!SkinVoice.FullComboAt) { return false; }
+    if (!SkinVoice.FullComboPlayed || !SkinVoice.FullComboEndedAt) { return true; }
+    return std::chrono::duration<double, std::milli>(now - *SkinVoice.FullComboEndedAt).count()
+        < std::max(0.0, Skin.Base->Playing.Config.FullComboResultDelay);
 }
 
 void Game::SkinVoiceUpdate() {
@@ -214,34 +224,36 @@ float Game::DrawKeyMap() {
     float top=float(Skin.Info.Resolution.Y);
 #ifndef __ANDROID__
     auto& box=Skin.Base->Playing.Image.KeyMapBox;
-    if(!Config.KeyMapView||!HasImage(box))return top;
+    if(IsMulti||!Config.KeyMapView||!HasImage(box))return top;
     const auto keys=keymapview::Layout({Config.KaInputLeft,Config.DonInputLeft,Config.DonInputRight,Config.KaInputRight},
         float(Skin.Info.Resolution.X),box.Size.Width,box.Size.Height,Skin.Base->Playing.Config.KeyMapDistance,box.Pos.X,box.Pos.Y);
     const auto& font=ConfigSmallFont();
-    const bool acceptsInput=!Config.AutoPlay&&GetForegroundWindow()==GetMainWindowHandle();
+    const bool acceptsInput=!Config.AutoPlay&&GetForegroundWindow()==((HWND)sys::NativeWindow());
     for(const auto& key:keys){
         top=std::min(top,key.Y-box.Size.Height*.5f);
         const bool pressed=acceptsInput&&(GetAsyncKeyState(key.Code)&0x8000)!=0;
         box.Draw({key.X-box.Pos.X,key.Y-box.Pos.Y},pressed&&box.Handles.size()>1?1:0);
-        const auto color=pressed?GetColor(255,240,120):GetColor(255,255,255);
+        const auto color=pressed?gfx::Rgb(255, 240, 120):gfx::Rgb(255,255,255);
         const auto names=Config.GetKeyName({key.Code});
         const auto text=names.empty()?std::to_string(key.Code):names.front();
         const float measured=numeric::Cast<float>(GetStrlenCached(text,font.Handle));
         const float scale=measured>0?std::clamp((box.Size.Width-10)/measured,.01f,1.0f):1;
-        if(font.Handle!=-1)DrawExtendStringFToHandle(key.X-measured*scale*.5f,key.Y-font.Size*.5f,scale,1,text.c_str(),color,font.Handle,0);
+        if(font.Handle!=-1)txt::Draw(font.Handle, key.X-measured*scale*.5f, key.Y-font.Size*.5f, text.c_str(), color, 0, (float)(scale), (float)(1));
     }
 #endif
     return top;
 }
-void Game::DrawPlayerChar(double now) {
-    if(IsMulti||!Skin.Base)return;
+void Game::DrawPlayerChar(double now, size_t lane, Pos2D<float> offset) {
+    if(!Skin.Base||lane>=4||(IsMulti&&LaneCount()>=4))return;
     auto& pl=Skin.Base->Playing;auto& image=pl.Image.PlayerChar;
     if(!HasImage(image))return;
     const auto& cf=pl.Config;
-    PlayerCharAnim.Update(now,Chart.NowBPM,Chart.Judge.empty()?0:Chart.Judge[0].Combo,cf.PlayerCharJumpBeats,!Chart.NowGoGo);
+    auto& animation = lane == 0 ? PlayerCharAnim : RemotePlayerCharAnim[lane-1];
+    const auto* judge = lane < Chart.Judge.size() ? &Chart.Judge[lane] : nullptr;
+    animation.Update(now,Chart.NowBPM,judge?judge->Combo:0,cf.PlayerCharJumpBeats,!Chart.NowGoGo);
     const auto* sequence=&cf.PlayerCharFrames;
-    const double accuracy=Chart.Judge.empty()||Chart.AllNoteCount==0?0:Chart.Judge[0].Accuracy*Chart.Judge[0].HitNote/Chart.AllNoteCount;
-    if(!Chart.Judge.empty()&&Chart.Judge[0].Combo==0&&Chart.Judge[0].Bad>0&&!cf.PlayerCharMissFrames.empty())sequence=&cf.PlayerCharMissFrames;
+    const double accuracy=!judge||Chart.AllNoteCount==0?0:judge->Accuracy*judge->HitNote/Chart.AllNoteCount;
+    if(judge&&judge->Combo==0&&judge->Bad>0&&!cf.PlayerCharMissFrames.empty())sequence=&cf.PlayerCharMissFrames;
     else if(Chart.NowGoGo&&!cf.PlayerCharGoGoFrames.empty())sequence=&cf.PlayerCharGoGoFrames;
     else if(accuracy>=75&&!cf.PlayerCharClearFrames.empty())sequence=&cf.PlayerCharClearFrames;
     const auto count=sequence->empty()?image.Handles.size():sequence->size();
@@ -249,16 +261,16 @@ void Game::DrawPlayerChar(double now) {
     const double interval=std::isfinite(cf.PlayerCharFrameTime)?std::max(1.0,cf.PlayerCharFrameTime):100;
     struct Tint {
         int R=255,G=255,B=255;
-        explicit Tint(uint32_t color){GetDrawBright(&R,&G,&B);SetDrawBright(R*int((color>>16)&255)/255,G*int((color>>8)&255)/255,B*int(color&255)/255);}
-        ~Tint(){SetDrawBright(R,G,B);}
+        explicit Tint(uint32_t color){gfx::GetBright(R,G,B);gfx::SetBright(R*int((color>>16)&255)/255, G*int((color>>8)&255)/255, B*int(color&255)/255);}
+        ~Tint(){gfx::SetBright(R, G, B);}
     } tint(cf.PlayerCharColor);
-    const double jump=PlayerCharAnim.Beats-PlayerCharAnim.JumpAt;
+    const double jump=animation.Beats-animation.JumpAt;
     if(!cf.PlayerCharJumpFrames.empty()&&std::isfinite(jump)&&cf.PlayerCharJumpBeats>0&&jump>=0&&jump<cf.PlayerCharJumpBeats){
         const auto i=std::min(cf.PlayerCharJumpFrames.size()-1,static_cast<size_t>(jump/cf.PlayerCharJumpBeats*cf.PlayerCharJumpFrames.size()));
         const float lift=std::isfinite(cf.PlayerCharJumpHeight)?cf.PlayerCharJumpHeight*float(std::sin(jump/cf.PlayerCharJumpBeats*3.141592653589793)):0;
         const int frame=cf.PlayerCharJumpFrames[i];
         if(frame>=0&&size_t(frame)<image.Handles.size()){
-            image.Draw({0,-lift},frame);
+            image.Draw({offset.X,offset.Y-lift},frame);
         }
         return;
     }
@@ -266,16 +278,15 @@ void Game::DrawPlayerChar(double now) {
     const double loop=!missed&&Chart.NowGoGo&&cf.PlayerCharGoGoLoopBeats>0?cf.PlayerCharGoGoLoopBeats:cf.PlayerCharLoopBeats;
     // 不可時も通常のコマ数を基準に進め、1 コマあたりの表示時間を揃える。
     const auto cadence=missed?(cf.PlayerCharFrames.empty()?image.Handles.size():cf.PlayerCharFrames.size()):count;
-    const double phase=std::isfinite(loop)&&loop>0?PlayerCharAnim.Beats/loop*cadence:std::max(0.0,now)/interval;
+    const double phase=std::isfinite(loop)&&loop>0?animation.Beats/loop*cadence:std::max(0.0,now)/interval;
     if(!std::isfinite(phase))return;
     const auto index=static_cast<size_t>(std::fmod(phase,double(count)));
-    image.Draw({},sequence->empty()?numeric::Cast<int>(index):(*sequence)[index]);
+    image.Draw(offset,sequence->empty()?numeric::Cast<int>(index):(*sequence)[index]);
 }
 
 void Game::DrawSliced(const GraphData& g, Pos2D<float> pos, float slice, int index) {
     if (slice <= 0 || index < 0 || index >= (int)g.Handles.size()) { DrawFrame(g, pos, index); return; }
-    int sw = 0, sh = 0;
-    GetGraphSize(g.Handles[index], &sw, &sh);
+    const int sw = (int)g.Handles[(size_t)index].Width(), sh = (int)g.Handles[(size_t)index].Height();
     const float l = g.Pos.X + pos.X - g.Size.Width * 0.5f, t = g.Pos.Y + pos.Y - g.Size.Height * 0.5f;
     const float w = g.Size.Width, h = g.Size.Height;
     const float c = std::min({ slice, w * 0.5f, h * 0.5f, sw * 0.5f, sh * 0.5f });
@@ -285,7 +296,7 @@ void Game::DrawSliced(const GraphData& g, Pos2D<float> pos, float slice, int ind
     for (int y = 0; y < 3; ++y) {
         for (int x = 0; x < 3; ++x) {
             if (sx[x + 1] <= sx[x] || sy[y + 1] <= sy[y]) { continue; }
-            DrawRectExtendGraphF(dx[x], dy[y], dx[x + 1], dy[y + 1], sx[x], sy[y], sx[x + 1] - sx[x], sy[y + 1] - sy[y], g.Handles[index], TRUE);
+            gfx::DrawTexturePart(g.Handles[index], dx[x], dy[y], dx[x + 1], dy[y + 1], (float)(sx[x]), (float)(sy[y]), (float)(sx[x + 1] - sx[x]), (float)(sy[y + 1] - sy[y]));
         }
     }
 }
@@ -307,6 +318,7 @@ void Game::PlayingInit() {
     PlayingPauseNextAllowed = {};
     PlayingBlackout = {};
     SkinVoiceReset();
+    Chart.PrepareJudgementWindow();
     BeginPlayStats();
 #ifndef __ANDROID__
     RecorderStart();
@@ -352,6 +364,11 @@ void Game::PlayingEnd() {
 
 const GraphData& Game::PlayingPauseButton(int index) const {
     const auto& images = Skin.Base->Playing.Image;
+    // 譜面制作のテストプレイ: 「テストを続ける / もう一度テスト / 編集に戻る」 (スキンに無ければ通常のボタン)
+    if (Editor.Testing) {
+        const GraphData& test = index == 0 ? images.PauseTestResume : index == 1 ? images.PauseTestRestart : images.PauseTestExit;
+        if (HasImage(test)) { return test; }
+    }
     return index == 0 ? images.PauseResume : index == 1 ? images.PauseRestart : images.PauseExit;
 }
 
@@ -369,7 +386,7 @@ bool Game::EnterPlayingPause() {
     for (auto& timer : MiniTaikoFlash) { stop(timer); }
     PlayingPause.SongWasPlaying = Chart.SongData.IsPlay();
     if (PlayingPause.SongWasPlaying) {
-        PlayingPause.SongPosition = GetSoundCurrentTime(Chart.SongData.Handle) - Chart.SongData.StartMilliseconds;
+        PlayingPause.SongPosition = snd::PositionMs(Chart.SongData.Handle) - Chart.SongData.StartMilliseconds;
         Chart.SongData.Stop();
     }
     return true;
@@ -385,6 +402,7 @@ void Game::ResumePlayingPause() {
         Chart.SongData.Play(FALSE);
     }
     if (SkinVoice.FullComboAt) { *SkinVoice.FullComboAt += duration; }
+    if (SkinVoice.FullComboEndedAt) { *SkinVoice.FullComboEndedAt += duration; }
 #ifndef __ANDROID__
     if (Recorder.Active) { Recorder.StartedAt += duration; }
     LastHitTick = RawKeyboard::Now();
@@ -434,9 +452,9 @@ bool Game::UpdatePlayingBlackout() {
 void Game::DrawPlayingBlackout() {
     if (PlayingBlackout.Kind == PlayingBlackoutKind::None) { return; }
     const float opacity = std::clamp(std::chrono::duration<float>(std::chrono::steady_clock::now() - PlayingBlackout.StartedAt).count() / 0.25f, 0.0f, 1.0f);
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(opacity * 255));
-    DrawFillBox(0, 0, Skin.Info.Resolution.X, Skin.Info.Resolution.Y, GetColor(0, 0, 0));
-    SetDrawBlendMode(0, 0);
+    gfx::SetBlend(gfx::Blend::Alpha, (int)(opacity * 255));
+    gfx::Box((float)(0), (float)(0), (float)(Skin.Info.Resolution.X), (float)(Skin.Info.Resolution.Y), gfx::Rgb(0, 0, 0), true);
+    gfx::SetBlend(gfx::Blend::None);
     if (opacity >= 1 && !PlayingBlackout.FullBlackAt) { PlayingBlackout.FullBlackAt = std::chrono::steady_clock::now(); }
 }
 
@@ -506,13 +524,13 @@ void Game::PlayingPauseDraw() {
     if (!PlayingPause.Active || IsMulti) { return; }
     auto& images = Skin.Base->Playing.Image;
     const float opacity = std::clamp(std::chrono::duration<float>(std::chrono::steady_clock::now() - PlayingPause.StartedAt).count() / 0.18f, 0.0f, 1.0f);
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(opacity * 255));
+    gfx::SetBlend(gfx::Blend::Alpha, (int)(opacity * 255));
     images.PauseShade.Draw({});
     images.PausePanel.Draw({});
-    images.PauseResume.Draw({}); images.PauseRestart.Draw({}); images.PauseExit.Draw({});
+    for (int i = 0; i < 3; ++i) { const_cast<GraphData&>(PlayingPauseButton(i)).Draw({}); }
     const auto& button = PlayingPauseButton(PlayingPause.Selection);
     images.PauseCursor.Draw({button.Pos.X - images.PauseResume.Pos.X, button.Pos.Y - images.PauseResume.Pos.Y});
-    SetDrawBlendMode(0, 0);
+    gfx::SetBlend(gfx::Blend::None);
 }
 
 void Game::PlayingDraw() {
@@ -530,9 +548,9 @@ void Game::PlayingDraw() {
 
         if (Config.BGBrightness > 0) {
             Chart.Movie.Draw(0.0f, 0.0f, (float)Skin.Info.Resolution.X, (float)Skin.Info.Resolution.Y);
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255 * (1 - (Config.BGBrightness / 100))));
-            DrawFillBox(0, 0, Skin.Info.Resolution.X, Skin.Info.Resolution.Y, GetColor(0, 0, 0));
-            SetDrawBlendMode(0, 0);
+            gfx::SetBlend(gfx::Blend::Alpha, (int)(255 * (1 - (Config.BGBrightness / 100))));
+            gfx::Box((float)(0), (float)(0), (float)(Skin.Info.Resolution.X), (float)(Skin.Info.Resolution.Y), gfx::Rgb(0, 0, 0), true);
+            gfx::SetBlend(gfx::Blend::None);
         }
     }
 #endif
@@ -581,14 +599,14 @@ void Game::PlayingDraw() {
         Pos2D<float> DelayPos = { 0.0f, idx * laneDistance + laneOffset };
 
 #ifndef __ANDROID__
-        if (Chart.Movie.Handle != -1) {
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 225);
+        if (Chart.Movie.IsLoaded()) {
+            gfx::SetBlend(gfx::Blend::Alpha, 225);
         }
         Skin.Base->Playing.Image.LaneFrame.Draw(DelayPos);
         Skin.Base->Playing.Image.Lane.Draw(DelayPos);
-        SetDrawBlendMode(0, 0);
+        gfx::SetBlend(gfx::Blend::None);
 #else
-        SetDrawBlendMode(0, 0);
+        gfx::SetBlend(gfx::Blend::None);
         Skin.Base->Playing.Image.LaneFrame.Draw(DelayPos);
         Skin.Base->Playing.Image.Lane.Draw(DelayPos);
 #endif
@@ -617,35 +635,32 @@ void Game::PlayingDraw() {
                 Chart.NowBranchAnimation = ABranchType::Null;
                 Chart.BranchAnimationTimer.Reset();
             }
+            // 音符と同じ向きに動かす: 前の分岐の背景が motion だけずれて出ていき、次の分岐の背景が反対側から入ってくる
+            auto laneOf = [&](BranchType type) -> GraphData* {
+                switch (type) {
+                case BranchType::Normal: return &Skin.Base->Playing.Image.NormalLane;
+                case BranchType::Expert: return &Skin.Base->Playing.Image.ExpertLane;
+                case BranchType::Master: return &Skin.Base->Playing.Image.MasterLane;
+                default: return nullptr;
+                }
+            };
+            BranchType from = BranchType::Null, to = BranchType::Null;
+            float dir = 1;      // 1: 下へ動く (上の分岐へ) / -1: 上へ動く (下の分岐へ)
             switch (Chart.NowBranchAnimation) {
-            case ABranchType::Normal_Expert:
-                Skin.Base->Playing.Image.NormalLane.Draw({ 0, _motiony + DelayPos.Y });
-                Skin.Base->Playing.Image.ExpertLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
-                break;
-            case ABranchType::Normal_Master:
-                Skin.Base->Playing.Image.NormalLane.Draw({ 0, _motiony + DelayPos.Y });
-                Skin.Base->Playing.Image.MasterLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
-                break;
-            case ABranchType::Expert_Normal:
-                Skin.Base->Playing.Image.ExpertLane.Draw({ 0, _motiony + DelayPos.Y });
-                Skin.Base->Playing.Image.NormalLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
-                break;
-            case ABranchType::Expert_Master:
-                Skin.Base->Playing.Image.ExpertLane.Draw({ 0, _motiony + DelayPos.Y });
-                Skin.Base->Playing.Image.MasterLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
-                break;
-            case ABranchType::Master_Normal:
-                Skin.Base->Playing.Image.MasterLane.Draw({ 0, _motiony + DelayPos.Y });
-                Skin.Base->Playing.Image.NormalLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
-                break;
-            case ABranchType::Master_Expert:
-                Skin.Base->Playing.Image.MasterLane.Draw({ 0, _motiony + DelayPos.Y });
-                Skin.Base->Playing.Image.ExpertLane.Draw({ 0, Skin.Base->Playing.Image.Lane.Size.Height + _motiony + DelayPos.Y });
-                break;
+            case ABranchType::Normal_Expert: from = BranchType::Normal; to = BranchType::Expert; dir = 1; break;
+            case ABranchType::Normal_Master: from = BranchType::Normal; to = BranchType::Master; dir = 1; break;
+            case ABranchType::Expert_Master: from = BranchType::Expert; to = BranchType::Master; dir = 1; break;
+            case ABranchType::Expert_Normal: from = BranchType::Expert; to = BranchType::Normal; dir = -1; break;
+            case ABranchType::Master_Normal: from = BranchType::Master; to = BranchType::Normal; dir = -1; break;
+            case ABranchType::Master_Expert: from = BranchType::Master; to = BranchType::Expert; dir = -1; break;
+            default: break;
             }
+            const float laneHeight = Skin.Base->Playing.Image.Lane.Size.Height;
+            if (GraphData* lane = laneOf(from)) { lane->Draw({ DelayPos.X, DelayPos.Y + dir * _motiony }); }
+            if (GraphData* lane = laneOf(to)) { lane->Draw({ DelayPos.X, DelayPos.Y + dir * (_motiony - laneHeight) }); }
         }
-        SetDrawAreaFull();
-        SetDrawBlendMode(0, 0);
+        gfx::ResetClip();
+        gfx::SetBlend(gfx::Blend::None);
 
         Skin.Base->Playing.Image.ProgressBar.Draw(DelayPos, 0);
         if (Chart.Judge[idx].HitNote > 0) {
@@ -656,7 +671,7 @@ void Game::PlayingDraw() {
 
             Skin.Base->Playing.Image.ProgressBar.RectDraw(
                 DelayPos,
-                { 0, Skin.Base->Playing.Image.ProgressBar.Size.Height },
+                { 0, 0 },
                 { Width < MaxWidth ? Width : MaxWidth,
                   Skin.Base->Playing.Image.ProgressBar.Size.Height },
                 1
@@ -678,9 +693,9 @@ void Game::PlayingDraw() {
         auto DrawJudgeString = [&](HitNoteData& data) {
             if (!data.JudgeString.IsActive || data.MoveElapsedTime >= data.JudgeString.MoveTime()) { return; }
             const double alpha = 255 * (1 - GetEasingRate(data.MoveElapsedTime / data.JudgeString.MoveTime(), ease::Base::In, ease::Line::Cubic));
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)alpha);
+            gfx::SetBlend(gfx::Blend::Alpha, (int)alpha);
             Skin.Base->Playing.Image.JudgeString.Draw(DelayPos, (size_t)data.JudgeString.Type);
-            SetDrawBlendMode(0, 0);
+            gfx::SetBlend(gfx::Blend::None);
             };
 
         {
@@ -725,7 +740,7 @@ void Game::PlayingDraw() {
                 alpha = numeric::Cast<int>(alpha * (1 - _one));
                 break;
             }
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, numeric::Cast<int>(alpha));
+            gfx::SetBlend(gfx::Blend::Alpha, numeric::Cast<int>(alpha));
             };
 
         const Pos2D<double>& NoteOrigin = {
@@ -876,15 +891,9 @@ void Game::PlayingDraw() {
 
             if (!NoteBranch) { continue; }
             if (data.BarlineDisplay && (!Chart.IsOsuChart || barlinesOnly)) {
-                SetDrawBlendMode(0, 0);
+                gfx::SetBlend(gfx::Blend::None);
                 if (InRange(NotePos.X, NotePos.Y)) {
-                    DrawLineAA(
-                        numeric::Cast<float>(NotePos.X),
-                        numeric::Cast<float>(NotePos.Y - 65),
-                        numeric::Cast<float>(NotePos.X),
-                        numeric::Cast<float>(NotePos.Y + 65),
-                        GetColor(255, 255, 255 * !data.Section)
-                    );
+                    gfx::Line(numeric::Cast<float>(NotePos.X), numeric::Cast<float>(NotePos.Y - 65), numeric::Cast<float>(NotePos.X), numeric::Cast<float>(NotePos.Y + 65), gfx::Rgb(255, 255, 255 * !data.Section));
                 }
             }
 
@@ -903,8 +912,8 @@ void Game::PlayingDraw() {
                     bool multiflag = (IsMulti && idx >= 1);
                     if (hiddenflag || suddenflag || multiflag) {
                         double _abs = std::abs(std::complex<double>{ NotePos.X - NoteOrigin.X, NotePos.Y - NoteOrigin.Y })* (data.AbsTime < NowTime ? -1 : 1);
-                        double leveling = (Skin.Base->Playing.Image.Lane.Size.Width / DX_PI);
-                        double feedrange = (Skin.Base->Playing.Image.Lane.Size.Width / DX_TWO_PI);
+                        double leveling = (Skin.Base->Playing.Image.Lane.Size.Width / 3.14159265358979323846);
+                        double feedrange = (Skin.Base->Playing.Image.Lane.Size.Width / 6.28318530717958647692);
                         if (multiflag) {
                             NoteAlpha((_abs - (leveling * 0.025)) / feedrange, AlphaType::Hidden);
                         }
@@ -923,11 +932,11 @@ void Game::PlayingDraw() {
                         data.NoteType - 48
                     );
                     // Note alpha must not leak into the next note or lane UI.
-                    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                    gfx::SetBlend(gfx::Blend::None);
                 }
                 continue;
             }
-            SetDrawBlendMode(0, 0);
+            gfx::SetBlend(gfx::Blend::None);
 
             if (data.NoteType >= '5' &&
                 data.NoteType <= '6') {
@@ -954,42 +963,9 @@ void Game::PlayingDraw() {
                     n3 = std::polar(n0r, narr[2] + RollTheta);
                     n4 = std::polar(n0r, narr[3] + RollTheta);
 
-                    DrawModiGraphF(
-                        numeric::Cast<float>(cnote.X + facing.real() + n1.real()),
-                        numeric::Cast<float>(cnote.Y + facing.imag() + n1.imag()),
-                        numeric::Cast<float>(dnote.X - facing.real() + n2.real()),
-                        numeric::Cast<float>(dnote.Y - facing.imag() + n2.imag()),
-                        numeric::Cast<float>(dnote.X - facing.real() + n3.real()),
-                        numeric::Cast<float>(dnote.Y - facing.imag() + n3.imag()),
-                        numeric::Cast<float>(cnote.X + facing.real() + n4.real()),
-                        numeric::Cast<float>(cnote.Y + facing.imag() + n4.imag()),
-                        Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 9 : 6],
-                        TRUE
-                    );
-                    DrawModiGraphF(
-                        numeric::Cast<float>(dnote.X + n1.real()),
-                        numeric::Cast<float>(dnote.Y + n1.imag()),
-                        numeric::Cast<float>(dnote.X + n2.real()),
-                        numeric::Cast<float>(dnote.Y + n2.imag()),
-                        numeric::Cast<float>(dnote.X + n3.real()),
-                        numeric::Cast<float>(dnote.Y + n3.imag()),
-                        numeric::Cast<float>(dnote.X + n4.real()),
-                        numeric::Cast<float>(dnote.Y + n4.imag()),
-                        Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 10 : 7],
-                        TRUE
-                    );
-                    DrawModiGraphF(
-                        numeric::Cast<float>(cnote.X + n1.real()),
-                        numeric::Cast<float>(cnote.Y + n1.imag()),
-                        numeric::Cast<float>(cnote.X + n2.real()),
-                        numeric::Cast<float>(cnote.Y + n2.imag()),
-                        numeric::Cast<float>(cnote.X + n3.real()),
-                        numeric::Cast<float>(cnote.Y + n3.imag()),
-                        numeric::Cast<float>(cnote.X + n4.real()),
-                        numeric::Cast<float>(cnote.Y + n4.imag()),
-                        Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 8 : 5],
-                        TRUE
-                    );
+                    gfx::DrawTextureQuad(Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 9 : 6], numeric::Cast<float>(cnote.X + facing.real() + n1.real()), numeric::Cast<float>(cnote.Y + facing.imag() + n1.imag()), numeric::Cast<float>(dnote.X - facing.real() + n2.real()), numeric::Cast<float>(dnote.Y - facing.imag() + n2.imag()), numeric::Cast<float>(dnote.X - facing.real() + n3.real()), numeric::Cast<float>(dnote.Y - facing.imag() + n3.imag()), numeric::Cast<float>(cnote.X + facing.real() + n4.real()), numeric::Cast<float>(cnote.Y + facing.imag() + n4.imag()));
+                    gfx::DrawTextureQuad(Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 10 : 7], numeric::Cast<float>(dnote.X + n1.real()), numeric::Cast<float>(dnote.Y + n1.imag()), numeric::Cast<float>(dnote.X + n2.real()), numeric::Cast<float>(dnote.Y + n2.imag()), numeric::Cast<float>(dnote.X + n3.real()), numeric::Cast<float>(dnote.Y + n3.imag()), numeric::Cast<float>(dnote.X + n4.real()), numeric::Cast<float>(dnote.Y + n4.imag()));
+                    gfx::DrawTextureQuad(Skin.Base->Playing.Image.Note.Handles[BigRollFlag ? 8 : 5], numeric::Cast<float>(cnote.X + n1.real()), numeric::Cast<float>(cnote.Y + n1.imag()), numeric::Cast<float>(cnote.X + n2.real()), numeric::Cast<float>(cnote.Y + n2.imag()), numeric::Cast<float>(cnote.X + n3.real()), numeric::Cast<float>(cnote.Y + n3.imag()), numeric::Cast<float>(cnote.X + n4.real()), numeric::Cast<float>(cnote.Y + n4.imag()));
 
                 }
             }
@@ -1022,55 +998,37 @@ void Game::PlayingDraw() {
                     n3 = std::polar(n0r, narr[2] + NoteTheta);
                     n4 = std::polar(n0r, narr[3] + NoteTheta);
 
-                    DrawModiGraphF(
-                        numeric::Cast<float>(NotePos.X + n1.real()),
-                        numeric::Cast<float>(NotePos.Y + n1.imag()),
-                        numeric::Cast<float>(NotePos.X + n2.real()),
-                        numeric::Cast<float>(NotePos.Y + n2.imag()),
-                        numeric::Cast<float>(NotePos.X + n3.real()),
-                        numeric::Cast<float>(NotePos.Y + n3.imag()),
-                        numeric::Cast<float>(NotePos.X + n4.real()),
-                        numeric::Cast<float>(NotePos.Y + n4.imag()),
-                        Skin.Base->Playing.Image.Note.Handles[KusudamaFlag ? 13 : 11],
-                        TRUE
-                    );
-                    DrawModiGraphF(
-                        numeric::Cast<float>(NotePos.X + facing.real() + n1.real()),
-                        numeric::Cast<float>(NotePos.Y + facing.imag() + n1.imag()),
-                        numeric::Cast<float>(NotePos.X + facing.real() + n2.real()),
-                        numeric::Cast<float>(NotePos.Y + facing.imag() + n2.imag()),
-                        numeric::Cast<float>(NotePos.X + facing.real() + n3.real()),
-                        numeric::Cast<float>(NotePos.Y + facing.imag() + n3.imag()),
-                        numeric::Cast<float>(NotePos.X + facing.real() + n4.real()),
-                        numeric::Cast<float>(NotePos.Y + facing.imag() + n4.imag()),
-                        Skin.Base->Playing.Image.Note.Handles[KusudamaFlag ? 14 : 12],
-                        TRUE
-                    );
+                    gfx::DrawTextureQuad(Skin.Base->Playing.Image.Note.Handles[KusudamaFlag ? 13 : 11], numeric::Cast<float>(NotePos.X + n1.real()), numeric::Cast<float>(NotePos.Y + n1.imag()), numeric::Cast<float>(NotePos.X + n2.real()), numeric::Cast<float>(NotePos.Y + n2.imag()), numeric::Cast<float>(NotePos.X + n3.real()), numeric::Cast<float>(NotePos.Y + n3.imag()), numeric::Cast<float>(NotePos.X + n4.real()), numeric::Cast<float>(NotePos.Y + n4.imag()));
+                    gfx::DrawTextureQuad(Skin.Base->Playing.Image.Note.Handles[KusudamaFlag ? 14 : 12], numeric::Cast<float>(NotePos.X + facing.real() + n1.real()), numeric::Cast<float>(NotePos.Y + facing.imag() + n1.imag()), numeric::Cast<float>(NotePos.X + facing.real() + n2.real()), numeric::Cast<float>(NotePos.Y + facing.imag() + n2.imag()), numeric::Cast<float>(NotePos.X + facing.real() + n3.real()), numeric::Cast<float>(NotePos.Y + facing.imag() + n3.imag()), numeric::Cast<float>(NotePos.X + facing.real() + n4.real()), numeric::Cast<float>(NotePos.Y + facing.imag() + n4.imag()));
                 }
             }
         }
 #undef InRange
-        SetDrawAreaFull();
+        gfx::ResetClip();
         // Always draw the lane UI independently of note fading.
-        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        gfx::SetBlend(gfx::Blend::None);
 
         Skin.Base->Playing.Image.Base.Draw(DelayPos);
         Skin.Base->Playing.Image.NamePlate.Draw(DelayPos);
-        if(idx==0)DrawPlayerChar(NowTime);
+        auto charOffset = DelayPos;
+        if (IsMulti && LaneCount() == 2) {
+            charOffset.Y = idx == 0 ? 0.0f : Skin.Info.Resolution.Y - 2 * playing.Image.PlayerChar.Pos.Y;
+        }
+        DrawPlayerChar(NowTime, (size_t)idx, charOffset);
         if (const std::string& title = LaneTitle(idx); !title.empty()) {
             Skin.Base->Playing.Font.TitleName.Draw({
                 Skin.Base->Playing.Config.TitleNamePos.X,
                 Skin.Base->Playing.Config.TitleNamePos.Y + (IsMulti ? DelayPos.Y : 0.0f) },
-                GetColor(255, 255, 255),
-                GetColor(0, 0, 0),
+                gfx::Rgb(255, 255, 255),
+                gfx::Rgb(0, 0, 0),
                 title
             );
         }
         if (!IsMulti) {
             Skin.Base->Playing.Font.PlayerName.Draw(
                 Skin.Base->Playing.Config.PlayerNamePos,
-                GetColor(255, 255, 255),
-                GetColor(0, 0, 0),
+                gfx::Rgb(255, 255, 255),
+                gfx::Rgb(0, 0, 0),
                 Config.PlayerName
             );
         }
@@ -1078,8 +1036,8 @@ void Game::PlayingDraw() {
             Skin.Base->Playing.Font.PlayerName.Draw({
             Skin.Base->Playing.Config.PlayerNamePos.X,
             Skin.Base->Playing.Config.PlayerNamePos.Y + DelayPos.Y },
-            GetColor(255, 255, 255),
-            GetColor(0, 0, 0),
+            gfx::Rgb(255, 255, 255),
+            gfx::Rgb(0, 0, 0),
             Names[idx]
             );
         }
@@ -1135,7 +1093,7 @@ void Game::PlayingDraw() {
         auto TaikoAlpha = [&](size_t index) {
             double alpha = 255 * (1 - GetEasingRate(MiniTaikoFlash[index].GetElapsed().MilliSecond() / MiniTaikoFlashTime, ease::Base::In, ease::Line::Cubic));
             if (alpha < 0) { MiniTaikoFlash[index].Reset(); }
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, numeric::Cast<int>(alpha));
+            gfx::SetBlend(gfx::Blend::Alpha, numeric::Cast<int>(alpha));
             };
 
         if (MiniTaikoFlash[0 + (4 * idx)].IsRunning()) {
@@ -1154,7 +1112,7 @@ void Game::PlayingDraw() {
             TaikoAlpha(3 + (4 * idx));
             Skin.Base->Playing.Image.MiniTaiko_Ka.Draw({ Skin.Base->Playing.Image.MiniTaiko_Ka.Size.Width * 0.5f, DelayPos.Y }, 1);
         }
-        SetDrawBlendMode(0, 0);
+        gfx::SetBlend(gfx::Blend::None);
 
         auto ComboDraw = [&](uint64_t num) {
             auto& img = Skin.Base->Playing.Image.ComboNumber;
@@ -1230,10 +1188,10 @@ void Game::PlayingDraw() {
     if (!IsMulti) {
         if (Config.TrainingMode) {
             if (!Chart.NowTime.IsRunning()) {
-                DrawFormatStringF(
+                txt::DrawFormat(
                     Skin.Base->Playing.Image.Note.Pos.X,
                     Skin.Base->Playing.Image.Note.Pos.Y - 100,
-                    GetColor(255, 255, 255),
+                    gfx::Rgb(255, 255, 255),
                     "(%d/%d)",
                     Training.BarlineIndex, Chart.AllBarlineCount
                 );
@@ -1259,14 +1217,14 @@ void Game::PlayingDraw() {
                 const double shown = less ? std::max(0.0, red - e.Value) : e.Value;
                 const double ratio = red > 0 ? std::clamp(shown / red, 0.0, 1.0) : 1.0;
                 if (e.Status != ExamStatus::Fail) {
-                    bar.RectDraw({ 0, y }, { 0, bar.Size.Height }, { (float)(bar.Size.Width * ratio), bar.Size.Height }, 1);
+                    bar.RectDraw({ 0, y }, { 0, 0 }, { (float)(bar.Size.Width * ratio), bar.Size.Height }, 1);
                 }
 
-                unsigned int color = GetColor(255, 255, 255);
+                unsigned int color = gfx::Rgb(255, 255, 255);
                 switch (e.Status) {
-                case ExamStatus::Red: color = GetColor(255, 110, 110); break;
-                case ExamStatus::Gold: color = GetColor(255, 215, 0); break;
-                case ExamStatus::Fail: color = GetColor(128, 128, 128); break;
+                case ExamStatus::Red: color = gfx::Rgb(255, 110, 110); break;
+                case ExamStatus::Gold: color = gfx::Rgb(255, 215, 0); break;
+                case ExamStatus::Fail: color = gfx::Rgb(128, 128, 128); break;
                 default: break;
                 }
                 const std::string name = std::string(e.Song >= 0 ? "[曲] " : "") + ExamLabel(e.Exam.ExamType)
@@ -1275,11 +1233,11 @@ void Game::PlayingDraw() {
 
                 Skin.Base->Playing.Font.ExamName.Draw(
                     { Skin.Base->Playing.Config.ExamNamePos.X, Skin.Base->Playing.Config.ExamNamePos.Y + y },
-                    GetColor(255, 255, 255), GetColor(0, 0, 0),
+                    gfx::Rgb(255, 255, 255), gfx::Rgb(0, 0, 0),
                     GetStrlenCached(name, Skin.Base->Playing.Font.ExamName.Handle), name);
                 Skin.Base->Playing.Font.ExamVal.Draw(
                     { Skin.Base->Playing.Config.ExamValPos.X, Skin.Base->Playing.Config.ExamValPos.Y + y },
-                    color, GetColor(0, 0, 0),
+                    color, gfx::Rgb(0, 0, 0),
                     GetStrlenCached(value, Skin.Base->Playing.Font.ExamVal.Handle), value);
             }
         }
@@ -1299,7 +1257,7 @@ void Game::PlayingDraw() {
         const std::string text = "まもなく開始 " + std::to_string(std::max<int64_t>(0, (remain + 999) / 1000));
         Skin.Base->Playing.Font.Title.Draw(
             { Skin.Info.Resolution.X * 0.5f, Skin.Info.Resolution.Y * 0.5f },
-            GetColor(255, 255, 255), GetColor(0, 0, 0),
+            gfx::Rgb(255, 255, 255), gfx::Rgb(0, 0, 0),
             GetStrlenCached(text, Skin.Base->Playing.Font.Title.Handle) / 2, text);
     }
 
@@ -1307,23 +1265,20 @@ void Game::PlayingDraw() {
     if (Calib.Active) {
         const FontData& sfont = ConfigSmallFont();
         const float helpY=std::min(Skin.Info.Resolution.Y-sfont.Size*2.2f,keyMapTop-sfont.Size*.5f-8);
-        UIText(sfont, 16, helpY, "オフセット調整: クリック音に合わせてドンを叩いてください (Esc: やめる)", GetColor(255, 220, 90));
+        UIText(sfont, 16, helpY, "オフセット調整: クリック音に合わせてドンを叩いてください (Esc: やめる)", gfx::Rgb(255, 220, 90));
     }
     else if (Editor.Testing) {
         const FontData& sfont = ConfigSmallFont();
         const float helpY=std::min(Skin.Info.Resolution.Y-sfont.Size*2.2f,keyMapTop-sfont.Size*.5f-8);
-        UIText(sfont, 16, helpY, std::string("テストプレイ  オート: ") + (Config.AutoPlay ? "ON" : "OFF") + "  (F1: 切り替え / Esc: 編集に戻る)", GetColor(255, 220, 90));
+        UIText(sfont, 16, helpY, std::string("テストプレイ  オート: ") + (Config.AutoPlay ? "ON" : "OFF") + (Config.PauseDisplay ? "  (F1: 切り替え / Esc: ポーズ)" : "  (F1: 切り替え / Esc: 編集に戻る)"), gfx::Rgb(255, 220, 90));
     }
     // スコアメーター: 画面の中央・最下部
-    if (Config.ScoreMeter) {
+    if (Config.ScoreMeter && !IsMulti) {
         const float width = std::min(360.0f, Skin.Info.Resolution.X - 32.0f);
         const HitErrorSummary summary = SummarizeHitErrors(HitStats.Play, HitErrorLimit());
         DrawHitErrorMeter(Skin.Info.Resolution.X * 0.5f, Skin.Info.Resolution.Y - 16.0f, width, &summary, true, nullptr);
     }
 
-    if (Config.ViewDebug) {
-        DrawFormatString(0, 0, GetColor(255, 255, 255), "\n\n\nNowTime:%lf\nBPM:%lf", ChartNowTime(1) / Chart.SongSpeed, Chart.NowBPM * Chart.SongSpeed);
-    }
     PlayingPauseDraw();
 }
 
@@ -1522,14 +1477,7 @@ void Game::BranchChange(const BranchData& branchdata) {
         ? (value < branchdata.ExpertBranch ? BranchType::Normal : BranchType::Expert)
         : BranchType::Master;
 
-    auto animation = [](BranchType from, BranchType to) {
-        if (from == to) { return ABranchType::Null; }
-        if (from == BranchType::Normal) { return to == BranchType::Expert ? ABranchType::Normal_Expert : ABranchType::Normal_Master; }
-        if (from == BranchType::Expert) { return to == BranchType::Normal ? ABranchType::Expert_Normal : ABranchType::Expert_Master; }
-        if (from == BranchType::Master) { return to == BranchType::Normal ? ABranchType::Master_Normal : ABranchType::Master_Expert; }
-        return ABranchType::Null;
-    };
-    Chart.NowBranchAnimation = animation(Chart.NowBranchFlag, next);
+    Chart.NowBranchAnimation = BranchAnimationOf(Chart.NowBranchFlag, next);
     Chart.NowBranchFlag = next;
 }
 
@@ -1566,6 +1514,8 @@ void Game::PlayingProc() {
             }
         }
         else if (Chart.SongBlankTime + 5000 < NowTime && !Chart.SongData.IsPlay()) {
+            if (!Calib.Active && (!Config.TrainingMode || Dan.Active)
+                && WaitForFullComboVoice(std::chrono::steady_clock::now())) { return; }
             if (Dan.Active) {
                 // 曲の終わり: この曲の個別条件 (最終曲なら全体条件も) を確定し、次の曲かリザルトへ
                 UpdateDanExams(true);
@@ -1633,38 +1583,61 @@ void Game::PlayingProc() {
     else {
         if (Config.TrainingMode && !Chart.IsDanMode()) {
             if (!Chart.NowTime.IsRunning()) {
+#ifndef __ANDROID__
+                // 小節移動のキー (PageUp: 先へ / PageDown: 前へ) を押し続けると、太鼓さん次郎のようにだんだん速く進む。
+                // 押してから 0.4 秒後に 6 小節/秒で動き始め、1 秒ごとに 14 小節/秒ずつ速くする (最大 60 小節/秒)
+                {
+                    const auto now = std::chrono::steady_clock::now();
+                    const int dir = __gotkeyboardinput[VK_PRIOR] ? 1 : __gotkeyboardinput[VK_NEXT] ? -1 : 0;
+                    if (dir != Training.HoldDir) {
+                        Training.HoldDir = dir;
+                        Training.HoldStart = Training.HoldLast = now;
+                        Training.HoldAccum = 0;
+                        Training.HoldRate = 0;
+                        Training.BarlineMoveTime = 0.05;
+                    }
+                    else if (dir != 0) {
+                        const double held = std::chrono::duration<double>(now - Training.HoldStart).count();
+                        const double dt = std::min(std::chrono::duration<double>(now - Training.HoldLast).count(), 0.1);
+                        Training.HoldLast = now;
+                        if (held > 0.4) {
+                            Training.HoldRate = std::min(6.0 + 14.0 * (held - 0.4), 60.0);
+                            Training.HoldAccum = std::min(Training.HoldAccum + Training.HoldRate * dt, 16.0);
+                        }
+                    }
+                }
+#endif
                 if (!Training.BarlineMoveTimer.IsRunning()) {
 
-                    auto MoveInputProc = [&](bool direction) {
-                        if (direction) {
-                            if (Training.BarlineIndex < Chart.AllBarlineCount) {
+                    // steps 小節だけ進める (端に着いたらそこで止める)。動いた時だけ移動の動きを始める
+                    auto MoveInputProc = [&](bool direction, int steps = 1) {
+                        bool moved = false;
+                        for (int i = 0; i < steps; ++i) {
+                            if (direction) {
+                                if (Training.BarlineIndex >= Chart.AllBarlineCount) { break; }
                                 auto find = std::ranges::find_if(std::next(
                                     Chart.RawNoteDatas.begin() + Training.NoteDataIndex),
                                     Chart.RawNoteDatas.end(),
                                     &NoteData::BarlineDisplay);
-                                if (find != Chart.RawNoteDatas.end()) {
-                                    Training.NoteDataIndex = std::distance(
-                                        Chart.RawNoteDatas.begin(), find);
-                                    ++Training.BarlineIndex;
-                                    Training.MemNowTime = NowTime;
-                                    Training.BarlineMoveTimer.Start();
-                                }
+                                if (find == Chart.RawNoteDatas.end()) { break; }
+                                Training.NoteDataIndex = std::distance(Chart.RawNoteDatas.begin(), find);
+                                ++Training.BarlineIndex;
                             }
-                        }
-                        else {
-                            if (Training.BarlineIndex > 0) {
+                            else {
+                                if (Training.BarlineIndex == 0) { break; }
                                 auto find = std::ranges::find_if(std::reverse_iterator(
                                     Chart.RawNoteDatas.begin() + Training.NoteDataIndex),
                                     Chart.RawNoteDatas.rend(),
                                     &NoteData::BarlineDisplay);
-                                if (find != Chart.RawNoteDatas.rend()) {
-                                    Training.NoteDataIndex = std::distance(
-                                        Chart.RawNoteDatas.begin(), std::prev(find.base()));
-                                    --Training.BarlineIndex;
-                                    Training.MemNowTime = NowTime;
-                                    Training.BarlineMoveTimer.Start();
-                                }
+                                if (find == Chart.RawNoteDatas.rend()) { break; }
+                                Training.NoteDataIndex = std::distance(Chart.RawNoteDatas.begin(), std::prev(find.base()));
+                                --Training.BarlineIndex;
                             }
+                            moved = true;
+                        }
+                        if (moved) {
+                            Training.MemNowTime = NowTime;
+                            Training.BarlineMoveTimer.Start();
                         }
                         };
 
@@ -1727,8 +1700,15 @@ void Game::PlayingProc() {
                         };
 
 #ifndef __ANDROID__
-                    Input::GetInstance().HitKeyProcess(VK_NEXT, KeyState::Down, [&] { MoveInputProc(false); }, Config.KeyHoldProcInterval);
-                    Input::GetInstance().HitKeyProcess(VK_PRIOR, KeyState::Down, [&] { MoveInputProc(true); }, Config.KeyHoldProcInterval);
+                    // 押した瞬間に 1 小節。押し続けている間は上で決めた速さで進める (速いほど移動の動きを短くする)
+                    Input::GetInstance().HitKeyProcess(VK_NEXT, KeyState::Down, [&] { MoveInputProc(false); });
+                    Input::GetInstance().HitKeyProcess(VK_PRIOR, KeyState::Down, [&] { MoveInputProc(true); });
+                    if (Training.HoldDir != 0 && Training.HoldAccum >= 1.0) {
+                        const int steps = (int)Training.HoldAccum;
+                        Training.HoldAccum -= steps;
+                        Training.BarlineMoveTime = std::clamp(0.6 / std::max(Training.HoldRate, 1.0), 0.01, 0.05);
+                        MoveInputProc(Training.HoldDir > 0, steps);
+                    }
                     Input::GetInstance().HitKeyProcess(VK_DOWN, KeyState::Down, [&] { BranchChangeProc(false); });
                     Input::GetInstance().HitKeyProcess(VK_UP, KeyState::Down, [&] { BranchChangeProc(true); });
                     Input::GetInstance().HitKeyProcess(VK_END, KeyState::Down, [&] { WarpInputProc(false); });
@@ -1765,7 +1745,7 @@ void Game::PlayingProc() {
             const size_t next = Dan.SongIndex + 1;
             if (Chart.NowTime.IsRunning() && !Dan.Failed && next < Dan.Course.DanSongs.size() && Dan.NextSongIndex != next) {
                 Dan.NextSongIndex = next;
-                SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
+                ((void)0);
                 Dan.NextSong.LoadAsync(Dan.Course.DanSongs[next].WavePath.string());
             }
         }
@@ -1812,7 +1792,7 @@ void Game::PlayingProc() {
 
         bool NextImage = false;
 
-        for (auto&& data : Chart.ActiveNotes()) {
+        for (auto&& data : Chart.JudgementNotes(nowtime, Config.JudgeBad + std::max(0.0, -Config.JudgeOffset))) {
 
             bool NoteBranch = data.IsBranch == Chart.NowBranchFlag || data.IsBranch == BranchType::Null;
 
@@ -1960,7 +1940,7 @@ void Game::PlayingProc() {
         JiroPassNotes(NowTime);
     }
 
-    for (auto&& data : Chart.ActiveNotes()) {
+    for (auto&& data : Chart.JudgementNotes(NowTime, Config.JudgeBad)) {
 
         bool NoteBranch = data.IsBranch == Chart.NowBranchFlag || data.IsBranch == BranchType::Null;
         bool HitFlag = data.AbsTime < NowTime;
@@ -2030,7 +2010,7 @@ void Game::PlayingProc() {
             NoteData* BalloonData = nullptr;
             bool NextImage = false;
 
-            for (auto&& data : Chart.ActiveNotes()) {
+            for (auto&& data : Chart.JudgementNotes(NowTime, Config.JudgeBad)) {
 
                 bool NoteBranch = data.IsBranch == Chart.NowBranchFlag || data.IsBranch == BranchType::Null;
                 bool HitFlag = data.AbsTime < NowTime;

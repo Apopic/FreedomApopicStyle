@@ -1,14 +1,23 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
-    <FasDxLib Condition="'$(FasDxLib)' == ''">C:\DxLib_VC\プロジェクトに追加すべきファイル_VC用</FasDxLib>
+    <!-- stb・dr_libs・zlib (と SDL 版の SDL3・SDL3_ttf・SDL3_image)。vcpkg の x64-windows-static。/MT に合わせた静的リンク -->
+    <FasSdl3 Condition="'$(FasSdl3)' == ''">C:\vcpkg\installed\x64-windows-static</FasSdl3>
     <FasSocketHeaders Condition="'$(FasSocketHeaders)' == ''">C:\Socket_h-main\include</FasSocketHeaders>
     <FasJsonHeaders Condition="'$(FasJsonHeaders)' == ''">C:\json\include</FasJsonHeaders>
     <FasMagicEnumHeaders Condition="'$(FasMagicEnumHeaders)' == ''">C:\magic_enum-v0.9.8\include</FasMagicEnumHeaders>
     <FasLibarrierHeaders Condition="'$(FasLibarrierHeaders)' == ''">C:\libarrier-main\include</FasLibarrierHeaders>
     <FasZipHeaders Condition="'$(FasZipHeaders)' == ''">C:\cppunzip-main</FasZipHeaders>
-    <FasZlibHeaders Condition="'$(FasZlibHeaders)' == ''">C:\vcpkg\packages\zlib_x64-windows\include</FasZlibHeaders>
+    <FasZlibHeaders Condition="'$(FasZlibHeaders)' == ''">C:\vcpkg\installed\x64-windows-static\include</FasZlibHeaders>
     <FasFastFloatHeaders Condition="'$(FasFastFloatHeaders)' == ''">C:\fast_float</FasFastFloatHeaders>
     <FasIcuLibs Condition="'$(FasIcuLibs)' == ''">C:\ICU\lib64</FasIcuLibs>
+    <!-- 描画・音声・入力の実装。Win: Direct3D 12 / DirectWrite / WASAPI / Win32 (ゲームライブラリなし)。SDL: SDL3 (Android と同じ実装の確認用) -->
+    <FasBackend Condition="'$(FasBackend)' == ''">Win</FasBackend>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(FasBackend)' == 'Win'">
+    <FasBackendLibs>zs.lib;d3d12.lib;dxgi.lib;d3dcompiler.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;avrt.lib;winmm.lib;imm32.lib;version.lib</FasBackendLibs>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(FasBackend)' == 'SDL'">
+    <FasBackendLibs>SDL3_ttf-static.lib;SDL3_image-static.lib;SDL3-static.lib;freetype.lib;libpng16.lib;jpeg.lib;turbojpeg.lib;zs.lib;bz2.lib;brotlidec.lib;brotlicommon.lib;winmm.lib;imm32.lib;version.lib;setupapi.lib;cfgmgr32.lib;hid.lib</FasBackendLibs>
   </PropertyGroup>
 </Project>

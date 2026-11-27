@@ -11,13 +11,8 @@
         fs::path Ffmpeg, VideoPath, AudioPath, OutPath;
         int Fps = 60, Width = 0, Height = 0;
         bool Bgra = false;
-        ID3D11DeviceContext* Context = nullptr;
-        ID3D11Texture2D* BackBuffer = nullptr;
-        ID3D11Texture2D* Staging[2]{};
-        ID3D11Texture2D* Resolve = nullptr;     // バックバッファがマルチサンプルの時
         int Cur = 0;
-        bool Pending = false;                   // 前回コピーしたフレームをまだ読んでいない
-        int PendingCount = 0;
+        std::deque<int> PendingCounts;          // GPU で読み出し中のフレーム (古い順) ごとの書く数
         uint64_t Scheduled = 0;                 // 書くと決めたフレーム数
         std::chrono::steady_clock::time_point StartedAt{};
         std::thread Muxer;
@@ -50,7 +45,7 @@
     void RecorderStatus(std::string text, int seconds = 6);
     void RecorderRelease();
     void RecorderStart();
-    void RecorderReadPending();
+    void RecorderReadPending(bool wait);
     // Draw の後、ScreenFlip の前に呼ぶ。録画のフレームレートの時刻を過ぎた時だけ GPU でコピーし、前回のコピーを読む
     void RecorderCapture();
     void RecorderStop();

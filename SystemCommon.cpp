@@ -77,7 +77,7 @@ std::string GetInputText(std::string theme, std::string initial, bool* accepted)
 
     InputEnd = 0;
 
-    while (ProcessMessage() == 0 && InputEnd == 0) {
+    while (sys::PumpEvents() && InputEnd == 0) {
 
         if (NativeActivity->vm->AttachCurrentThreadAsDaemon(&env, NULL) != JNI_OK) {
             return "";
@@ -120,7 +120,7 @@ bool AskYesNo(const std::string& title, const std::string& message) {
     }
     bool yes = false;
     int end = 0;
-    while (ProcessMessage() == 0 && end == 0) {
+    while (sys::PumpEvents() && end == 0) {
         if (NativeActivity->vm->AttachCurrentThreadAsDaemon(&env, NULL) != JNI_OK) { return false; }
         jclass cls = env->GetObjectClass(NativeActivity->clazz);
         end = env->GetIntField(NativeActivity->clazz, env->GetFieldID(cls, "InputEnd", "I"));
@@ -143,7 +143,7 @@ bool AskYesNo(const std::string& title, const std::string& message) {
 // エラーの内容をダイアログで出す (Android はトースト)
 void ShowErrorDialog(const std::string& text) {
 #ifndef __ANDROID__
-    MessageBox(GetMainWindowHandle(), text.c_str(), "エラー", MB_ICONERROR);
+    MessageBox(((HWND)sys::NativeWindow()), text.c_str(), "エラー", MB_ICONERROR);
 #else
     ShowToast(text);
 #endif

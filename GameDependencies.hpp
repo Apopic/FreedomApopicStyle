@@ -49,7 +49,11 @@
 
 // Socket.h must precede the Windows API headers (Winsock include order).
 #include "Library/Net.hpp"
-#include "DxLib.h"
+#include "Platform/Gfx.hpp"
+#include "Platform/Text.hpp"
+#include "Platform/Audio.hpp"
+#include "Platform/Sys.hpp"
+#include "Platform/Movie.hpp"
 #ifndef __ANDROID__
 #include <windows.h>
 #include <windowsx.h>

@@ -25,6 +25,7 @@
     int SongSelectWrapIndex(int slot) const;
     void UpdateSongSelectAnimation(int now);
     void SetSongSelectBox(int index, int steps = 0);
+    bool SelectRandomChartBox();
     int SongSelectTransitionStart = -1;
     bool SongSelectTransitionTarget = false;
     int SongSelectResultStart = 0;

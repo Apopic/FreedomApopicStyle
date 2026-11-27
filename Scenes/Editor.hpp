@@ -20,6 +20,8 @@
         char Note = 0;                  // Icon == Note の時の音符の種類
     };
     struct EditorState {
+        // 絵のボタンの画像 (キー: 絵の種類と大きさ)。図形を 4 倍の解像度で描いて縮小し、縁を滑らかにしたもの
+        std::map<uint64_t, gfx::Texture> IconCache;
         tja::Document Doc;
         fs::path Path;
         bool Open = false;
@@ -210,7 +212,7 @@
     UIRect EditorLane(int row) const;
     float EditorX(const UIRect& lane, double pos) const;
     mutable std::string EditorNoteBoundsPath;
-    mutable int EditorNoteBoundsHandle = -2;
+    mutable const void* EditorNoteBoundsHandle = nullptr;
     mutable std::vector<float> EditorNoteWidthFractions;
     float EditorNoteWidthPerHeight(char type) const;
     float EditorGridNoteHeight() const;
@@ -394,11 +396,7 @@
     void EditorEnd();
 
     void EditorDraw();
-#ifndef __ANDROID__
-    std::optional<RECT> TextInputArea;
     void DrawTextInput(int x,int y,int handle);
-    void DrawTextCandidates(const IMEINPUTDATA* ime);
-#endif
     void EditorDrawKeyInput(int x, int y, int handle);
     void EditorDrawFields();
     UIRect EditorFieldsRect() const;
@@ -423,6 +421,8 @@
     void EditorDrawNote(float x, float cy, float lane_h, char type, int alpha);
     // ボタンの絵 (図形で描く。音符はスキンの画像)
     void EditorDrawIcon(const EditorButton& b, unsigned int color);
+    // 絵のボタンの図形を直接描く (EditorDrawIcon が 4 倍の解像度で描いて縮小した画像を作る時に使う)
+    void EditorDrawIconShape(const EditorButton& b, unsigned int color, bool text = true);
     // 連打の帯 (スキンの帯の画像を伸ばす。無ければ単色)
     void EditorDrawRollBody(float x0, float x1, float cy, float lane_h, char type);
     void EditorDrawGrid(const FontData& sfont);

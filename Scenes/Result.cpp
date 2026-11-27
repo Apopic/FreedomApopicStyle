@@ -109,7 +109,7 @@ void Game::ResultEnd() {
 
 void Game::ResultDraw() {
 
-    SetDrawBlendMode(0, 0);
+    gfx::SetBlend(gfx::Blend::None);
     Skin.Base->Result.Image.BackGround.Draw({});
     Skin.Base->Result.Image.JudgeScore.Draw({});
     Skin.Base->Result.Image.Accuracy.Draw({});
@@ -196,20 +196,20 @@ void Game::ResultDraw() {
         CrownIndex = DanCrown();
 
         // 各条件の結果を一覧表示する
-        const int lineheight = GetFontSize() + 6;
+        const int lineheight = 16 + 6;
         const int y0 = Skin.Info.Resolution.Y - 24 - lineheight * (int)Dan.Exams.size();
         for (size_t i = 0; i < Dan.Exams.size(); ++i) {
             const auto& e = Dan.Exams[i];
             const char* status = "";
-            unsigned int color = GetColor(255, 255, 255);
+            unsigned int color = gfx::Rgb(255, 255, 255);
             switch (e.Status) {
-            case ExamStatus::Gold: status = "金合格"; color = GetColor(255, 215, 0); break;
-            case ExamStatus::Red: status = "合格"; color = GetColor(255, 110, 110); break;
-            default: status = "不合格"; color = GetColor(160, 160, 160); break;
+            case ExamStatus::Gold: status = "金合格"; color = gfx::Rgb(255, 215, 0); break;
+            case ExamStatus::Red: status = "合格"; color = gfx::Rgb(255, 110, 110); break;
+            default: status = "不合格"; color = gfx::Rgb(160, 160, 160); break;
             }
             const std::string prefix = e.Song >= 0 ? std::to_string(e.Song + 1) + "曲目 " : "全体 ";
             const std::string line = prefix + ExamConditionText(e.Exam) + "  結果: " + ExamValueText(e.Exam.ExamType, e.Value) + "  " + status;
-            DrawString(24, y0 + lineheight * (int)i, line.c_str(), color);
+            txt::Draw(txt::DefaultFont(), (float)(24), (float)(y0 + lineheight * (int)i), line.c_str(), color);
         }
     }
 
@@ -219,8 +219,8 @@ void Game::ResultDraw() {
     if (const std::string& title = LaneTitle(IsMulti ? (size_t)ResultIndex : 0); !title.empty()) {
         Skin.Base->Result.Font.TitleName.Draw(
             Skin.Base->Result.Config.TitleNamePos,
-            GetColor(255, 255, 255),
-            GetColor(0, 0, 0),
+            gfx::Rgb(255, 255, 255),
+            gfx::Rgb(0, 0, 0),
             GetStrlenCached(title, Skin.Base->Result.Font.TitleName.Handle),
             title
         );
@@ -228,8 +228,8 @@ void Game::ResultDraw() {
     if (!IsMulti) {
         Skin.Base->Result.Font.PlayerName.Draw(
             Skin.Base->Result.Config.PlayerNamePos,
-            GetColor(255, 255, 255),
-            GetColor(0, 0, 0),
+            gfx::Rgb(255, 255, 255),
+            gfx::Rgb(0, 0, 0),
             GetStrlenCached(Config.PlayerName, Skin.Base->Result.Font.PlayerName.Handle),
             Config.PlayerName
         );
@@ -237,14 +237,14 @@ void Game::ResultDraw() {
     else if (IsMulti) {
         Skin.Base->Result.Font.PlayerName.Draw(
             Skin.Base->Result.Config.PlayerNamePos,
-            GetColor(255, 255, 255),
-            GetColor(0, 0, 0),
+            gfx::Rgb(255, 255, 255),
+            gfx::Rgb(0, 0, 0),
             GetStrlenCached(Names[ResultIndex], Skin.Base->Result.Font.PlayerName.Handle),
             Names[ResultIndex]
         );
     }
 
-    if (Config.ScoreMeter && (!IsMulti || ResultIndex == 0) && HitStats.LastPlay.Count > 0) {
+    if (Config.ScoreMeter && !IsMulti && HitStats.LastPlay.Count > 0) {
         auto& font = ConfigSmallFont();
         const float resx = (float)Skin.Info.Resolution.X, resy = (float)Skin.Info.Resolution.Y;
         DrawHitErrorMeter(resx * 0.5f, resy - font.Size * 2.0f - 30.0f, 420.0f, &HitStats.LastPlay, false, &font);

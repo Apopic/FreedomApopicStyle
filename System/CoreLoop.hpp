@@ -49,20 +49,14 @@
         std::optional<Scene> PendingScene;
         std::chrono::steady_clock::time_point StartedAt{};
         std::optional<std::chrono::steady_clock::time_point> FullBlackAt;
-        int FrameGraph = -1;
+        gfx::Texture FrameGraph;    // 最後に表示した画面 (場面の切り替えでフェードする)
         void Capture(const _Skin& skin) {
-            int width = 0, height = 0;
-            if (FrameGraph == -1 || GetGraphSize(FrameGraph, &width, &height) < 0
-                || width != skin.Info.Resolution.X || height != skin.Info.Resolution.Y) {
-                if (FrameGraph != -1) { DeleteGraph(FrameGraph); }
-                FrameGraph = MakeGraph(skin.Info.Resolution.X, skin.Info.Resolution.Y);
-            }
-            if (FrameGraph != -1) { GetDrawScreenGraph(0, 0, skin.Info.Resolution.X, skin.Info.Resolution.Y, FrameGraph); }
+            gfx::CaptureScreen(FrameGraph, skin.Info.Resolution.X, skin.Info.Resolution.Y);
         }
         void DrawPrevious(const _Skin& skin) {
-            SetDrawBlendMode(0, 0);
-            DrawFillBox(0, 0, skin.Info.Resolution.X, skin.Info.Resolution.Y, GetColor(0, 0, 0));
-            if (FrameGraph != -1) { DrawExtendGraph(0, 0, skin.Info.Resolution.X, skin.Info.Resolution.Y, FrameGraph, FALSE); }
+            gfx::SetBlend(gfx::Blend::None);
+            gfx::Box(0.0f, 0.0f, (float)skin.Info.Resolution.X, (float)skin.Info.Resolution.Y, gfx::Rgb(0, 0, 0), true);
+            if (FrameGraph) { gfx::DrawTexture(FrameGraph, 0.0f, 0.0f, (float)skin.Info.Resolution.X, (float)skin.Info.Resolution.Y); }
         }
         void Draw(const _Skin& skin) {
             const auto now = std::chrono::steady_clock::now();
@@ -73,9 +67,9 @@
             const double opacity = PendingScene
                 ? std::clamp(std::chrono::duration<double>(now - StartedAt).count() / Time, 0.0, 1.0)
                 : std::clamp(1 - Timer.GetElapsed().Second() / Time, 0.0, 1.0);
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255 * opacity));
-            DrawFillBox(0, 0, skin.Info.Resolution.X, skin.Info.Resolution.Y, GetColor(0, 0, 0));
-            SetDrawBlendMode(0, 0);
+            gfx::SetBlend(gfx::Blend::Alpha, (int)(255 * opacity));
+            gfx::Box((float)(0), (float)(0), (float)(skin.Info.Resolution.X), (float)(skin.Info.Resolution.Y), gfx::Rgb(0, 0, 0), true);
+            gfx::SetBlend(gfx::Blend::None);
             if (PendingScene && opacity >= 1 && !FullBlackAt) { FullBlackAt = now; }
         }
     } Fade;

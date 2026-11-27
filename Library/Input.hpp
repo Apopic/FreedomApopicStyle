@@ -1,5 +1,13 @@
 ﻿#pragma once
-#include "DxLib.h"
+#include "../Platform/Sys.hpp"
+#include "RawInputQueue.hpp"
+#include <cstdint>
+#ifndef __ANDROID__
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #include "libarrier/timer.hpp"
 #include <vector>
 #include <algorithm>
@@ -19,6 +27,15 @@ inline bool ApplyDarkWindowMode(HWND window) {
     return SUCCEEDED(result);
 }
 inline LRESULT CaptionHitTest(HWND window, POINT point) {
+    // DWM may report only the glyph area. Use the native button rectangles for
+    // the entire visible hit area, including their padding and DPI scaling.
+    TITLEBARINFOEX titlebar{};
+    titlebar.cbSize = sizeof(titlebar);
+    SendMessageW(window, WM_GETTITLEBARINFOEX, 0, (LPARAM)&titlebar);
+    for (const auto& button : {std::pair{2, HTMINBUTTON}, std::pair{3, HTMAXBUTTON}, std::pair{5, HTCLOSE}}) {
+        if (!(titlebar.rgstate[button.first] & (STATE_SYSTEM_INVISIBLE | STATE_SYSTEM_UNAVAILABLE | STATE_SYSTEM_OFFSCREEN))
+            && PtInRect(&titlebar.rgrect[button.first], point)) { return button.second; }
+    }
     LRESULT hit = 0;
     const LPARAM position = MAKELPARAM((short)point.x, (short)point.y);
     if (DwmDefWindowProc(window, WM_NCHITTEST, 0, position, &hit)) { return hit; }
@@ -69,6 +86,10 @@ inline void ReleaseCaptionButton(HWND hWnd, POINT released) {
     if (GetCapture() == hWnd) { ReleaseCapture(); }
     FinishCaptionButton(hWnd, button, released);
 }
+
+// WndProc が「処理済み」(SDL・Windows の既定の処理を行わせない) にした通知か
+inline bool __wndprochandled = false;
+inline void SetUseHookWinProcReturnValue(int handled) { __wndprochandled = handled != 0; }
 
 inline LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     // 前の通知で設定した「処理済み」を次の通知へ持ち越さない。
@@ -242,9 +263,7 @@ public:
 
     // 前回呼び出し以降のイベントを取り出す (out は上書き)
     void Drain(std::vector<Event>& out) {
-        out.clear();
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        out.swap(m_Events);
+        m_Events.Drain(out);
     }
 
     static int64_t Now() {
@@ -355,17 +374,15 @@ private:
         }
         m_KeyDown[vkey] = down;
 
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        m_Events.push_back({ static_cast<uint8_t>(vkey), down, time });
+        m_Events.Push({ static_cast<uint8_t>(vkey), down, time });
     }
 
     std::thread m_Thread;
     std::atomic<HWND> m_Window = nullptr;
     HWND m_Foreground = nullptr;
-    bool m_Active = false;
+    std::atomic_bool m_Active = false;
     bool m_KeyDown[256]{};          // 入力スレッド専用
-    std::mutex m_Mutex;
-    std::vector<Event> m_Events;
+    RawInputQueue<Event> m_Events;
 };
 
 enum class KeyState {
@@ -384,7 +401,12 @@ class Input {
     bool IsFirstInput = false;
 
     Input() {
-        SetHookWinProc(WndProc);
+        // SDL のウィンドウの通知を先に受け取る (処理済みにした通知は SDL に渡さない)
+        sys::SetMessageHandler([](void* hwnd, unsigned msg, uintptr_t wp, intptr_t lp, bool& handled) -> intptr_t {
+            const LRESULT result = WndProc((HWND)hwnd, (UINT)msg, (WPARAM)wp, (LPARAM)lp);
+            handled = __wndprochandled;
+            return (intptr_t)result;
+        });
     }
     ~Input() = default;
 
@@ -465,7 +487,7 @@ public:
         }
     }
 
-    int GetMouseWheel() { return GetMouseWheelRotVol(); }
+    int GetMouseWheel() { return sys::TakeWheel(); }
 };
 
 #else
@@ -481,11 +503,13 @@ class Input {
 
     std::vector<TouchState> GetCurrentTouches() {
         std::vector<TouchState> current_touches;
-        int touch_num = GetTouchInputNum();
+        const int touch_num = sys::TouchCount();
 
         for (int i = 0; i < touch_num; ++i) {
             TouchState t{};
-            GetTouchInput(i, &t.x, &t.y, &t.id, &t.device);
+            sys::Touch touch;
+            if (!sys::GetTouch(i, touch)) { continue; }
+            t.x = touch.X; t.y = touch.Y; t.id = (int)touch.Id; t.device = 0;
             t.is_pressed = false;
             current_touches.push_back(t);
         }

@@ -50,13 +50,15 @@ std::wstring Game::EditorFileDialog(HWND owner, bool save, bool audio, const std
         const auto releaseDialog=[](IFileDialog* p){p->Release();};
         std::unique_ptr<IFileDialog,decltype(releaseDialog)> dialogGuard(dialog,releaseDialog);
         const COMDLG_FILTERSPEC tjafilter[] = { { L"譜面 (*.tja;*.osu)", L"*.tja;*.osu" } };
+        const COMDLG_FILTERSPEC tjasavefilter[] = { { L"TJA譜面 (*.tja)", L"*.tja" } };
         const COMDLG_FILTERSPEC audiofilter[] = { { L"音源 (*.ogg;*.wav;*.mp3)", L"*.ogg;*.wav;*.mp3" } };
         const COMDLG_FILTERSPEC videofilter[] = { { L"動画 (*.mp4;*.webm;*.avi;*.wmv)", L"*.mp4;*.webm;*.avi;*.wmv" } };
-        dialog->SetFileTypes(1, video ? videofilter : audio ? audiofilter : tjafilter);
+        dialog->SetFileTypes(1, video ? videofilter : audio ? audiofilter : save ? tjasavefilter : tjafilter);
         if (!audio) { dialog->SetDefaultExtension(L"tja"); }
         DWORD options = 0;
         dialog->GetOptions(&options);
-        dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR | (save ? FOS_OVERWRITEPROMPT : FOS_FILEMUSTEXIST));
+        dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR | (save ? FOS_OVERWRITEPROMPT : FOS_FILEMUSTEXIST)
+            | (save && !audio && !video ? FOS_STRICTFILETYPES : 0));
         if (!name.empty()) { dialog->SetFileName(name.c_str()); }
         if (!folder.empty()) {
             IShellItem* item = nullptr;
@@ -92,7 +94,7 @@ void Game::EditorPick(int kind, bool save, bool audio, const fs::path& folder, c
     auto state = std::make_shared<FolderPickState>();
     Editor.Picker = state;
     Editor.PickerKind = kind;
-    const HWND owner = GetMainWindowHandle();
+    const HWND owner = ((HWND)sys::NativeWindow());
     const std::wstring dir = folder.wstring();
     std::thread([state, owner, save, audio, dir, name, kind] {
         try { state->Result = EditorFileDialog(owner, save, audio, dir, name, kind == 5); }
@@ -141,16 +143,16 @@ void Game::EditorBrowseProc(const PointerState& pt) {
 }
 
 void Game::EditorBrowseDraw(const FontData& sfont) {
-    const unsigned int white = GetColor(255, 255, 255), gray = GetColor(150, 150, 150);
+    const unsigned int white = gfx::Rgb(255, 255, 255), gray = gfx::Rgb(150, 150, 150);
     UIText(sfont, 24, EditorLine(), "開く譜面を選んでください (上下にドラッグでスクロール)", white);
     const UIRect back{ EditorResX() - 200.0f, 8.0f, EditorResX() - 24.0f, EditorLine() * 2.0f };
-    UIBox(back, GetColor(60, 64, 84), 230);
+    UIBox(back, gfx::Rgb(60, 64, 84), 230);
     UIText(sfont, (back.L + back.R) * 0.5f, (back.T + back.B) * 0.5f, "戻る", white, 1);
     const int n = (int)Editor.BrowseList.size(), rows = EditorBrowseRows();
     for (int r = 0; r < rows && Editor.BrowseTop + r < n; ++r) {
         const UIRect row = EditorBrowseRow(r);
         const fs::path& p = Editor.BrowseList[Editor.BrowseTop + r];
-        UIBox(row, GetColor(44, 48, 64), 230);
+        UIBox(row, gfx::Rgb(44, 48, 64), 230);
         UIText(sfont, row.L + 12, row.T + (row.B - row.T) * 0.33f, FitText(PathToU8(p.stem()), sfont.Handle, row.R - row.L - 24, false), white);
         UIText(sfont, row.L + 12, row.T + (row.B - row.T) * 0.75f, FitText(PathToU8(p.parent_path().filename()), sfont.Handle, row.R - row.L - 24, false), gray);
     }
@@ -316,23 +318,16 @@ std::pair<std::vector<float>, int> Game::EditorReadMono() {
     const fs::path path = (Editor.Path.parent_path() / U8ToPath(wave)).lexically_normal();
     std::error_code ec;
     if (wave.empty() || !fs::is_regular_file(path, ec)) { EditorMessage("WAVE の音源が見つかりません (ヘッダーで音源を指定してください)"); return {}; }
-    // 音源のデコードは DxLib で行い (メインスレッド)、解析は別スレッドで行う
-    const int handle = LoadAlignedSoftSound(PathToU8(path).c_str());
-    if (handle == -1) { EditorMessage("音源を読み込めませんでした"); return {}; }
-    ScopedSoftSound sound{handle};
-    int channels = 0, bits = 0, rate = 0, isfloat = 0;
-    GetSoftSoundFormat(handle, &channels, &bits, &rate, &isfloat);
-    const LONGLONG count = GetSoftSoundSampleNum(handle);
-    const void* image = GetSoftSoundDataImage(handle);
+    // 音源をデコードし (mp3 の前後の無音を除く)、解析は別スレッドで行う
+    const auto pcm = LoadAlignedPcm(PathToU8(path));
+    if (!pcm) { EditorMessage("音源を読み込めませんでした"); return {}; }
+    const int channels = pcm->Channels;
     std::vector<float> mono;
-    if (image != nullptr && count > 0 && channels > 0 && channels <= 32 && (bits == 8 || bits == 16 || (bits == 32 && isfloat))) {
-        mono = tempo::PrepareMono((size_t)count, channels, [&](size_t frame, int channel) {
-            const size_t index = frame * channels + channel;
-            return bits == 16 ? ((const int16_t*)image)[index] / 32768.0f : bits == 8 ? (((const uint8_t*)image)[index] - 128) / 128.0f : ((const float*)image)[index];
-        });
+    if (pcm->Frames() > 0 && channels > 0) {
+        mono = tempo::PrepareMono((size_t)pcm->Frames(), channels, [&](size_t frame, int channel) { return pcm->Samples[frame * channels + channel]; });
     }
     if (mono.empty()) { EditorMessage("この音源の形式は解析できません"); return {}; }
-    return { std::move(mono), rate };
+    return { std::move(mono), pcm->Rate };
 }
 
 void Game::EditorSetDemoStart() {
@@ -525,14 +520,9 @@ void Game::EditorFitAudioLength() {
     const auto wave = tja::Document::GetValue(Editor.Doc.Header, "WAVE");
     if (wave.empty()) { EditorMessage("ヘッダーで音源を指定してください"); return; }
     const auto path = (Editor.Path.parent_path() / U8ToPath(wave)).lexically_normal();
-    ScopedSyncLoad sync;
-    const int sound = LoadAlignedSoftSound(PathToU8(path).c_str());
-    if (sound == -1) { EditorMessage("音源を読み込めませんでした"); return; }
-    int channels = 0, bits = 0, rate = 0, isFloat = 0;
-    GetSoftSoundFormat(sound, &channels, &bits, &rate, &isFloat);
-    const auto samples = GetSoftSoundSampleNum(sound);
-    DeleteSoftSound(sound);
-    EditorResizeForAudioLength(rate > 0 ? (double)samples / rate : 0);
+    const auto pcm = LoadAlignedPcm(PathToU8(path));
+    if (!pcm) { EditorMessage("音源を読み込めませんでした"); return; }
+    EditorResizeForAudioLength(pcm->Rate > 0 ? (double)pcm->Frames() / pcm->Rate : 0);
 }
 
 std::string Game::EditorWaveValue(const fs::path& audio, const fs::path& chartdir) {
@@ -562,6 +552,10 @@ std::string Game::EditorWaveValue(const fs::path& audio, const fs::path& chartdi
 }
 
 void Game::EditorNewChart(const fs::path& path, const fs::path& audio) {
+    if (ToLower(PathToU8(path.extension())) != ".tja") {
+        EditorMessage("新規作成は TJA 形式 (*.tja) を指定してください");
+        return;
+    }
     std::string wave;
     if (!audio.empty()) {
         wave = EditorWaveValue(audio, path.parent_path());
@@ -617,7 +611,7 @@ const FontData& Game::EditorPanelFont() const {
         EditorPanelFontData.Delete();
         EditorPanelFontSize = size;
         EditorPanelFontData.Size = (float)size;
-        EditorPanelFontData.Handle = CreateFontToHandle(nullptr, size, 2, DX_FONTTYPE_ANTIALIASING_EDGE_8X8, DX_CHARSET_UTF8, 1);
+        EditorPanelFontData.Handle = txt::OpenFont({ "", "", (float)size, 2, 1, 0 });
     }
     return EditorPanelFontData.Handle != -1 ? EditorPanelFontData : EditorFont();
 }
@@ -628,7 +622,7 @@ const FontData& Game::EditorFont() const {
         EditorFontData.Delete();
         EditorFontSize = size;
         EditorFontData.Size = (float)size;
-        EditorFontData.Handle = CreateFontToHandle(nullptr, size, 2, DX_FONTTYPE_ANTIALIASING_EDGE_8X8, DX_CHARSET_UTF8, 1);
+        EditorFontData.Handle = txt::OpenFont({ "", "", (float)size, 2, 1, 0 });
     }
     return EditorFontData.Handle != -1 ? EditorFontData : ConfigSmallFont();
 }
@@ -849,30 +843,28 @@ float Game::EditorNoteWidthPerHeight(char type) const {
     if (index < 0 || index >= (int)img.Handles.size() || img.Size.Height <= 0) {
         return type == '3' || type == '4' || type == '6' || type == '9' ? 0.84f : 0.6f;
     }
-    const int first = img.Handles.empty() ? -1 : img.Handles.front();
+    const void* first = img.Handles.empty() ? nullptr : (const void*)img.Handles.front().Tex.get();
     if (EditorNoteBoundsPath != img.SourcePath || EditorNoteBoundsHandle != first) {
         EditorNoteBoundsPath = img.SourcePath; EditorNoteBoundsHandle = first;
         EditorNoteWidthFractions.assign(img.Handles.size(), 1.0f);
         // 画像の透明な余白を除き、実際に見える音符の幅を一度だけ調べる。
-        ScopedSyncLoad sync;
-        const int soft = img.SourcePath.empty() ? -1 : LoadSoftImage(img.SourcePath.c_str());
-        if (soft != -1) {
-            int width = 0, height = 0; GetSoftImageSize(soft, &width, &height);
+        int width = 0, height = 0;
+        const std::vector<uint32_t> pixels = img.SourcePath.empty() ? std::vector<uint32_t>() : gfx::LoadPixels(img.SourcePath, width, height);
+        if (!pixels.empty()) {
             const int columns = std::max(1, img.Div.X), rows = std::max(1, img.Div.Y);
             const int w = width / columns, h = height / rows;
             if (w > 0 && h > 0 && (int64_t)width * height <= 16000000) {
                 for (int i = 0; i < (int)img.Handles.size() && i < columns * rows; ++i) {
                     float radius = 0;
                     for (int y = 0; y < h; ++y) for (int x = 0; x < w; ++x) {
-                        int r = 0, g = 0, b = 0, a = 0;
-                        if (GetPixelSoftImage(soft, (i % columns) * w + x, (i / columns) * h + y, &r, &g, &b, &a) == 0 && a > 0) {
+                        const int px = (i % columns) * w + x, py = (i / columns) * h + y;
+                        if ((pixels[(size_t)py * width + px] >> 24) > 0) {
                             radius = std::max(radius, std::abs(x + 0.5f - w * 0.5f) + 0.5f);
                         }
                     }
                     if (radius > 0) { EditorNoteWidthFractions[i] = std::min(1.0f, 2 * radius / w); }
                 }
             }
-            DeleteSoftImage(soft);
         }
     }
     const float fraction = index < (int)EditorNoteWidthFractions.size() ? EditorNoteWidthFractions[index] : 1.0f;
@@ -1285,11 +1277,11 @@ auto Game::EditorCommandRects() -> std::vector<EditorCommandHit> {
 
 void Game::EditorBeginEdit(std::string label, std::string initial, std::function<void(const std::string&)> done) {
 #ifndef __ANDROID__
-    if (Editor.Editing) { DeleteKeyInput(Editor.EditHandle); Editor.Editing = false; }     // 入力中にもう 1 つ開いても前のハンドルを残さない
-    Editor.EditHandle = MakeKeyInput(1024, TRUE, FALSE, FALSE);
-    SetKeyInputString(initial.c_str(), Editor.EditHandle);
-    SetActiveKeyInput(Editor.EditHandle);
-    SetKeyInputStringFont(EditorFont().Handle);
+    if (Editor.Editing) { sys::EndTextInput(Editor.EditHandle); Editor.Editing = false; }     // 入力中にもう 1 つ開いても前のハンドルを残さない
+    Editor.EditHandle = sys::BeginTextInput("", (size_t)(1024), false);
+    sys::SetTextInputString(Editor.EditHandle, initial.c_str());
+    ((void)0);
+    sys::SetTextInputFont(EditorFont().Handle);
     Editor.Editing = true;
     Editor.EditLabel = std::move(label);
     Editor.OnEdit = std::move(done);
@@ -1303,7 +1295,7 @@ void Game::EditorBeginEdit(std::string label, std::string initial, std::function
 std::string Game::EditorFieldValue(int index) const {
     const auto& field = Editor.FormFields[index];
 #ifndef __ANDROID__
-    if (field.Handle != -1) { std::vector<char> text(4096, '\0'); GetKeyInputString(text.data(), field.Handle); return text.data(); }
+    if (field.Handle != -1) { return sys::TextInputString(field.Handle); }
 #endif
     return field.Value;
 }
@@ -1313,7 +1305,7 @@ void Game::EditorFinishFields(bool apply, std::vector<std::string> values) {
     if (apply && values.empty()) { for (int i = 0; i < (int)Editor.FormFields.size(); ++i) { values.push_back(EditorFieldValue(i)); } }
     for (auto& field : Editor.FormFields) {
 #ifndef __ANDROID__
-        if (field.Handle != -1) { DeleteKeyInput(field.Handle); }
+        if (field.Handle != -1) { sys::EndTextInput(field.Handle); }
 #endif
     }
     auto done = std::move(Editor.FormDone);
@@ -1328,7 +1320,7 @@ void Game::EditorFocusField(int index) {
     if (Editor.FormFields.empty()) { return; }
     Editor.FormActive = (index + (int)Editor.FormFields.size()) % (int)Editor.FormFields.size();
 #ifndef __ANDROID__
-    SetActiveKeyInput(Editor.FormFields[Editor.FormActive].Handle);
+    ((void)0);
 #endif
 }
 
@@ -1347,11 +1339,11 @@ void Game::EditorBeginFields(std::string title, std::vector<editform::Field> fie
 #ifndef __ANDROID__
     for (auto& field : Editor.FormFields) {
         if (!field.Choices.empty()) { continue; }
-        field.Handle = MakeKeyInput(1024, TRUE, FALSE, FALSE);
+        field.Handle = sys::BeginTextInput("", (size_t)(1024), false);
         if (field.Handle == -1) { EditorFinishFields(false); EditorMessage("入力欄を作れませんでした"); return; }
-        SetKeyInputString(field.Value.c_str(), field.Handle);
+        sys::SetTextInputString(field.Handle, field.Value.c_str());
     }
-    SetKeyInputStringFont(EditorFont().Handle);
+    sys::SetTextInputFont(EditorFont().Handle);
     EditorFocusField(0); Input::GetInstance().ResyncKeys();
 #else
     json schema = json::array();
@@ -2036,7 +2028,7 @@ int Game::EditorActiveSong() const {
 }
 
 void Game::EditorStopSong() {
-    for (int h : { Editor.SongHandle, Editor.StretchHandle }) { if (h != -1) { StopSoundMem(h); } }
+    for (int h : { Editor.SongHandle, Editor.StretchHandle }) { if (h != -1) { snd::Stop(h); } }
     Editor.SongStarted = false;
 }
 
@@ -2048,13 +2040,14 @@ void Game::EditorLoadSong() {
     Editor.SongPath = path;
     std::error_code ec;
     if (!path.empty() && fs::is_regular_file(path, ec)) {
-        ScopedSyncLoad sync;
-        const int previous = GetCreateSoundDataType();
-        struct SoundTypeGuard { int Previous; ~SoundTypeGuard(){SetCreateSoundDataType(Previous);} } restore{previous};
-        SetCreateSoundDataType(DX_SOUNDDATATYPE_MEMNOPRESS);
-        const int soft = LoadAlignedSoftSound(PathToU8(path).c_str());
-        ScopedSoftSound sound{soft};
-        if (soft != -1) { Editor.SongHandle = LoadSoundMemFromSoftSound(soft); }
+        // 前後の無音を除いた波形を 1 回だけ作り、再生と速度の変更 (WSOLA) の両方で使う
+        if (auto pcm = LoadAlignedPcm(PathToU8(path))) {
+            Editor.SongHandle = snd::Create(pcm);
+            Editor.SongPcm = pcm->Samples;
+            Editor.SongPcmChannels = pcm->Channels;
+            Editor.SongPcmRate = pcm->Rate;
+            Editor.SongPcmTried = true;
+        }
     }
 }
 
@@ -2064,23 +2057,12 @@ void Game::EditorRequestStretch() {
     EditorLoadSong();
     if (Editor.SongPath.empty()) { return; }
     if (!Editor.SongPcmTried) {
-        // デコードは DxLib で (メインスレッド)。1 回だけ行い、速度を変えるたびに使い回す
+        // デコードは 1 回だけ行い、速度を変えるたびに使い回す
         Editor.SongPcmTried = true;
-        const int handle = LoadAlignedSoftSound(PathToU8(Editor.SongPath).c_str());
-        ScopedSoftSound sound{handle};
-        if (handle != -1) {
-            int channels = 0, bits = 0, rate = 0, isfloat = 0;
-            GetSoftSoundFormat(handle, &channels, &bits, &rate, &isfloat);
-            const LONGLONG count = GetSoftSoundSampleNum(handle);
-            const void* image = GetSoftSoundDataImage(handle);
-            if (image != nullptr && count > 0 && channels > 0 && channels <= 32 && uint64_t(count) <= Editor.SongPcm.max_size() / channels && (bits == 16 || (bits == 32 && isfloat))) {
-                Editor.SongPcm.resize((size_t)count * channels);
-                for (size_t i = 0; i < Editor.SongPcm.size(); ++i) {
-                    Editor.SongPcm[i] = bits == 16 ? ((const int16_t*)image)[i] / 32768.0f : ((const float*)image)[i];
-                }
-                Editor.SongPcmChannels = channels;
-                Editor.SongPcmRate = rate;
-            }
+        if (auto pcm = LoadAlignedPcm(PathToU8(Editor.SongPath))) {
+            Editor.SongPcm = pcm->Samples;
+            Editor.SongPcmChannels = pcm->Channels;
+            Editor.SongPcmRate = pcm->Rate;
         }
     }
     if (Editor.SongPcm.empty()) { return; }
@@ -2099,21 +2081,18 @@ void Game::EditorPollStretch() {
     try { out = Editor.StretchTask.get(); }
     catch (const std::exception& e) { EditorMessage(std::string("速度変更に失敗しました: ") + e.what()); return; }
     if (out.empty() || Editor.SongPcmChannels <= 0) { return; }
-    if (Editor.StretchHandle != -1) { DeleteSoundMem(Editor.StretchHandle); Editor.StretchHandle = -1; }
+    if (Editor.StretchHandle != -1) { snd::Delete(Editor.StretchHandle); Editor.StretchHandle = -1; }
     const int ch = std::min(Editor.SongPcmChannels, 2);
     const int frames = (int)(out.size() / Editor.SongPcmChannels);
-    const int soft = MakeSoftSoundCustom(ch, 16, Editor.SongPcmRate, frames, FALSE);
-    if (soft == -1) { return; }
-    if (auto* dst = (int16_t*)GetSoftSoundDataImage(soft)) {
-        for (int f = 0; f < frames; ++f) {
-            for (int c = 0; c < ch; ++c) {
-                dst[(size_t)f * ch + c] = (int16_t)std::lround(std::clamp(out[(size_t)f * Editor.SongPcmChannels + c], -1.0f, 1.0f) * 32767.0f);
-            }
-        }
-        Editor.StretchHandle = LoadSoundMemFromSoftSound(soft);
-        Editor.StretchSpeed = Editor.StretchHandle != -1 ? Editor.StretchTaskSpeed : 0;
+    auto stretched = std::make_shared<snd::Pcm>();
+    stretched->Channels = ch;
+    stretched->Rate = Editor.SongPcmRate;
+    stretched->Samples.resize((size_t)frames * ch);
+    for (int f = 0; f < frames; ++f) {
+        for (int c = 0; c < ch; ++c) { stretched->Samples[(size_t)f * ch + c] = std::clamp(out[(size_t)f * Editor.SongPcmChannels + c], -1.0f, 1.0f); }
     }
-    DeleteSoftSound(soft);
+    Editor.StretchHandle = snd::Create(stretched);
+    Editor.StretchSpeed = Editor.StretchHandle != -1 ? Editor.StretchTaskSpeed : 0;
 }
 
 double Game::EditorSongPosition(double charttime) const {
@@ -2137,8 +2116,8 @@ void Game::EditorFreeSong() {
     EditorStopSong();
     if (Editor.StretchCancel) { *Editor.StretchCancel = true; }
     if (Editor.StretchTask.valid()) { Editor.StretchTask.wait(); Editor.StretchTask = {}; }
-    if (Editor.SongHandle != -1) { DeleteSoundMem(Editor.SongHandle); Editor.SongHandle = -1; }
-    if (Editor.StretchHandle != -1) { DeleteSoundMem(Editor.StretchHandle); Editor.StretchHandle = -1; }
+    if (Editor.SongHandle != -1) { snd::Delete(Editor.SongHandle); Editor.SongHandle = -1; }
+    if (Editor.StretchHandle != -1) { snd::Delete(Editor.StretchHandle); Editor.StretchHandle = -1; }
     Editor.StretchSpeed = 0;
     Editor.SongPcm.clear();
     Editor.SongPcm.shrink_to_fit();
@@ -2204,9 +2183,9 @@ void Game::EditorUpdatePreview() {
     if (const int song = EditorActiveSong(); song != -1 && !Editor.SongStarted) {
         const double pos = EditorSongPosition(now);
         if (pos >= 0) {
-            ChangeVolumeSoundMem((int)(255 * Config.SongVolume / 100), song);
-            SetSoundCurrentTime((LONGLONG)pos, song);
-            PlaySoundMem(song, DX_PLAYTYPE_BACK, FALSE);
+            snd::SetVolume(song, (int)(255 * Config.SongVolume / 100));
+            snd::SetPositionMs(song, (double)((LONGLONG)pos));
+            snd::Play(song, false, 0 == 1);
             Editor.SongStarted = true;
         }
     }
@@ -2219,10 +2198,11 @@ void Game::EditorUpdatePreview() {
         const auto& sound=dedicated?big:normal;
         sound.SetVolume(numeric::Cast<float>(volume));sound.Play();
         if(emphasized&&!dedicated) {
-            const int layer=DuplicateSoundMem(sound.Handle,1);
+            const int layer=snd::Duplicate(sound.Handle);
             if(layer!=-1) {
-                ChangeVolumeSoundMem(numeric::Cast<int>(volume*2.55),layer);
-                if(SetPlayFinishDeleteSoundMem(TRUE,layer)<0||PlaySoundMem(layer,DX_PLAYTYPE_BACK,TRUE)<0)DeleteSoundMem(layer);
+                snd::SetVolume(layer, numeric::Cast<int>(volume*2.55));
+                snd::SetDeleteOnFinish(layer, true);
+                snd::Play(layer, true);
             }
         }
     }};
@@ -2353,7 +2333,7 @@ void Game::EditorInit() {
     }
     PointerPrev.Left = PointerPrev.Right = true;
 #ifndef __ANDROID__
-    SetMouseDispFlag(TRUE);
+    sys::ShowCursor(true);
 #endif
 }
 
@@ -2362,11 +2342,11 @@ void Game::EditorEnd() {
     EditorFinishFields(false);
 #ifndef __ANDROID__
     if (Editor.Editing) {
-        DeleteKeyInput(Editor.EditHandle);
+        sys::EndTextInput(Editor.EditHandle);
         Editor.Editing = false;
     }
     if (!Editor.Testing) {
-        SetMouseDispFlag(!Config.FullScreen);
+        sys::ShowCursor(!Config.FullScreen);
     }
 #endif
     if (Editor.Rescan && !Editor.Testing) {
@@ -2378,9 +2358,9 @@ void Game::EditorEnd() {
 void Game::EditorDraw() {
     const FontData& font = ConfigFont();
     const FontData& sfont = EditorFont();
-    const unsigned int white = GetColor(255, 255, 255), black = GetColor(0, 0, 0), gray = GetColor(150, 150, 150), accent = GetColor(255, 200, 40);
+    const unsigned int white = gfx::Rgb(255, 255, 255), black = gfx::Rgb(0, 0, 0), gray = gfx::Rgb(150, 150, 150), accent = gfx::Rgb(255, 200, 40);
     const float resx = EditorResX(), resy = EditorResY(), lh = EditorLine();
-    DrawBox(0, 0, (int)resx, (int)resy, GetColor(22, 24, 34), TRUE);
+    gfx::Box((float)(0), (float)(0), (float)((int)resx), (float)((int)resy), gfx::Rgb(22, 24, 34), true);
 
     if (!Editor.Open && Editor.Browsing) {
         EditorBrowseDraw(sfont);
@@ -2390,7 +2370,7 @@ void Game::EditorDraw() {
         const char* labels[] = { "新しい譜面を作る…", "譜面を開く…", "戻る" };
         for (int i = 0; i < 3; ++i) {
             const UIRect b = EditorStartButton(i);
-            UIBox(b, GetColor(50, 54, 70), 230);
+            UIBox(b, gfx::Rgb(50, 54, 70), 230);
             UIBox(b, white, 160, false);
             UIText(EditorPanelFont(), (b.L + b.R) * 0.5f, (b.T + b.B) * 0.5f, labels[i], white, 1);
         }
@@ -2400,15 +2380,15 @@ void Game::EditorDraw() {
         // ボタン
         const auto buttons = EditorButtons();
         for (const auto& g : EditorGroups) {
-            UIBox(g.Rect, GetColor(34, 37, 50), 255);
-            UIBox(g.Rect, GetColor(80, 86, 110), 255, false);
-            UIText(sfont, g.Rect.L + 10.0f, (g.Rect.T + g.Rect.B) * 0.5f, g.Label, GetColor(170, 175, 195));
+            UIBox(g.Rect, gfx::Rgb(34, 37, 50), 255);
+            UIBox(g.Rect, gfx::Rgb(80, 86, 110), 255, false);
+            UIText(sfont, g.Rect.L + 10.0f, (g.Rect.T + g.Rect.B) * 0.5f, g.Label, gfx::Rgb(170, 175, 195));
         }
         const EditorButton* hovered = nullptr;
         for (const auto& b : buttons) {
             const bool over = b.Rect.Contains(PointerPrev.X, PointerPrev.Y) && Editor.Panel == EditorState::PanelType::None;
             if (over) { hovered = &b; }
-            UIBox(b.Rect, b.Active ? GetColor(214, 116, 20) : over ? GetColor(72, 78, 100) : GetColor(50, 54, 70), 230);
+            UIBox(b.Rect, b.Active ? gfx::Rgb(214, 116, 20) : over ? gfx::Rgb(72, 78, 100) : gfx::Rgb(50, 54, 70), 230);
             UIBox(b.Rect, white, over ? 200 : 120, false);
             if (b.Icon == EditorIcon::None) {
                 UIText(sfont, (b.Rect.L + b.Rect.R) * 0.5f, (b.Rect.T + b.Rect.B) * 0.5f, b.Label, white, 1);
@@ -2420,7 +2400,7 @@ void Game::EditorDraw() {
         if (hovered != nullptr) {
             const float w = EditorTextWidth(hovered->Label) + 16.0f, th = sfont.Size + 10.0f;
             const float x = std::min(hovered->Rect.L, resx - w - 8.0f), y = hovered->Rect.B + 4.0f;
-            UIBox({ x, y, x + w, y + th }, GetColor(44, 48, 66), 255);
+            UIBox({ x, y, x + w, y + th }, gfx::Rgb(44, 48, 66), 255);
             UIText(sfont, x + 8.0f, y + th * 0.5f, hovered->Label, white);
         }
     }
@@ -2465,7 +2445,7 @@ void Game::EditorDraw() {
     if (Editor.Open && Editor.Panel != EditorState::PanelType::None) {
         const UIRect p = EditorPanelRect();
         UIBox({ 0, 0, resx, resy }, black, 110);
-        UIBox(p, GetColor(18, 20, 32), 240);
+        UIBox(p, gfx::Rgb(18, 20, 32), 240);
         UIBox(p, white, 200, false);
         if (Editor.Panel == EditorState::PanelType::Commands) {
             const std::string where = Editor.Selecting
@@ -2477,7 +2457,7 @@ void Game::EditorDraw() {
             for (const auto& [name, hy] : layout.Headers) { UIText(sfont, p.L + 18, hy, name, accent); }
             for (int i = 0; i < (int)list.size(); ++i) {
                 const UIRect r = layout.Items[i];
-                UIBox(r, GetColor(50, 54, 70), 230);
+                UIBox(r, gfx::Rgb(50, 54, 70), 230);
                 UIText(EditorPanelFont(), (r.L + r.R) * 0.5f, (r.T + r.B) * 0.5f, FitText(list[i].first, EditorPanelFont().Handle, r.R - r.L - 8, false), white, 1);
             }
         }
@@ -2500,7 +2480,7 @@ void Game::EditorDraw() {
             const char* labels[] = { "適用 (Enter)", "キャンセル (Esc)" };
             for (int i = 0; i < 2; ++i) {
                 const UIRect b = EditorHeaderButton(i);
-                UIBox(b, i == 0 ? GetColor(214, 116, 20) : GetColor(60, 64, 84), 230);
+                UIBox(b, i == 0 ? gfx::Rgb(214, 116, 20) : gfx::Rgb(60, 64, 84), 230);
                 UIText(sfont, (b.L + b.R) * 0.5f, (b.T + b.B) * 0.5f, labels[i], white, 1);
             }
         }
@@ -2516,7 +2496,7 @@ void Game::EditorDraw() {
                 const UIRect r = layout.Items[i];
                 const bool over = r.Contains(PointerPrev.X, PointerPrev.Y);
                 if (over) { hover = i; }
-                UIBox(r, over ? GetColor(80, 86, 110) : GetColor(50, 54, 70), 230);
+                UIBox(r, over ? gfx::Rgb(80, 86, 110) : gfx::Rgb(50, 54, 70), 230);
                 UIText(EditorPanelFont(), (r.L + r.R) * 0.5f, (r.T + r.B) * 0.5f, FitText(list[i].Name, EditorPanelFont().Handle, r.R - r.L - 8, false), white, 1);
             }
             const std::string help = hover >= 0 ? std::string(list[hover].Help) : std::string("次郎形式再生ボタンで、次郎形式の時刻・疑似再生に切り替えられます");
@@ -2531,25 +2511,25 @@ void Game::EditorDraw() {
                 if (i > (int)grids.size()) {
                     const bool previous = i == (int)grids.size() + 1;
                     const int page = EditorGridPageIndex(), last = ((int)EditorGridChoices().size() - 1) / EditorGridsPerPage;
-                    UIBox(r, GetColor(50, 54, 70), 230);
+                    UIBox(r, gfx::Rgb(50, 54, 70), 230);
                     UIText(sfont, (r.L + r.R) * 0.5f, (r.T + r.B) * 0.5f,
                         previous ? "◀ 前へ" : "次へ ▶  " + std::to_string(page + 1) + "/" + std::to_string(last + 1),
                         previous ? (page > 0 ? white : gray) : (page < last ? white : gray), 1);
                     continue;
                 }
                 if (i == (int)grids.size()) {
-                    UIBox(r, GetColor(60, 90, 110), 230);
+                    UIBox(r, gfx::Rgb(60, 90, 110), 230);
                     UIText(EditorPanelFont(), (r.L + r.R) * 0.5f, (r.T + r.B) * 0.5f, "+ 任意の分割数", white, 1); continue;
                 }
                 const int g = grids[i];
                 const bool fav = std::ranges::find(favorites, g) != favorites.end();
                 const bool current = g == Editor.Division;
-                UIBox(r, current ? GetColor(214, 116, 20) : GetColor(50, 54, 70), 230);
+                UIBox(r, current ? gfx::Rgb(214, 116, 20) : gfx::Rgb(50, 54, 70), 230);
                 const auto remove = EditorGridDeleteButton(i);
                 const float right = EditorDefaultGrid(g) ? r.R : remove.L;
                 UIText(EditorPanelFont(), (r.L + right) * 0.5f, (r.T + r.B) * 0.5f, FitText((fav ? "★ " : "") + std::to_string(g) + " 分割", EditorPanelFont().Handle, right - r.L - 8, false), white, 1);
                 if (!EditorDefaultGrid(g)) {
-                    UIBox(remove, GetColor(116, 48, 60), 255);
+                    UIBox(remove, gfx::Rgb(116, 48, 60), 255);
                     UIText(sfont, (remove.L + remove.R) * 0.5f, (remove.T + remove.B) * 0.5f, "×", white, 1);
                 }
             }
@@ -2565,18 +2545,18 @@ void Game::EditorDraw() {
                 const auto& f = fields[i];
                 std::string value = tja::Document::GetValue(f.CourseField ? EditorCourse()->Header : Editor.Doc.Header, f.Key);
                 if (value.empty() && (std::string_view(f.Key) == "SONGVOL" || std::string_view(f.Key) == "SEVOL")) { value = "100"; }
-                UIBox(r, GetColor(36, 40, 54), 230);
+                UIBox(r, gfx::Rgb(36, 40, 54), 230);
                 const bool button = std::string(f.Key) == "WAVE" || std::string(f.Key) == "BGMOVIE" || std::string(f.Key) == "SONGURL" || std::string(f.Key) == "MOVIEURL";
                 const bool visibility = std::string_view(f.Key) == "TITLE" || std::string_view(f.Key) == "SUBTITLE";
                 const float vr = visibility ? EditorHeaderVisibilityButton(i).L - 8.0f : button ? r.R - EditorTextWidth("参照…") - 28.0f : r.R - 8.0f;
                 const float labelWidth = std::min(keyw, std::max(1.0f, (vr - r.L - 28.0f) * 0.5f));
                 UIText(EditorPanelFont(), r.L + 8, (r.T + r.B) * 0.5f,
-                    FitText(f.Key, EditorPanelFont().Handle, labelWidth, false), f.CourseField ? GetColor(160, 210, 255) : white);
+                    FitText(f.Key, EditorPanelFont().Handle, labelWidth, false), f.CourseField ? gfx::Rgb(160, 210, 255) : white);
                 const float vx = r.L + 8.0f + labelWidth + 20.0f;
                 UIText(EditorPanelFont(), vx, (r.T + r.B) * 0.5f, FitText(value.empty() ? std::string(f.Help) : value, EditorPanelFont().Handle, std::max(1.0f, vr - vx), false), value.empty() ? gray : white);
                 if (button) {
                     const UIRect b = EditorWaveButton(i);
-                    UIBox(b, GetColor(60, 64, 84), 230);
+                    UIBox(b, gfx::Rgb(60, 64, 84), 230);
                     UIText(sfont, (b.L + b.R) * 0.5f, (b.T + b.B) * 0.5f, std::string(f.Key) == "WAVE" || std::string(f.Key) == "BGMOVIE" ? "参照…" : "取得", white, 1);
                 }
                 if (visibility) {
@@ -2584,14 +2564,14 @@ void Game::EditorDraw() {
                     EditorButton icon;
                     icon.Rect = EditorHeaderVisibilityButton(i);
                     icon.Icon = hidden ? EditorIcon::Hidden : EditorIcon::Visible;
-                    UIBox(icon.Rect, hidden ? GetColor(78, 104, 150) : GetColor(60, 64, 84), 255);
+                    UIBox(icon.Rect, hidden ? gfx::Rgb(78, 104, 150) : gfx::Rgb(60, 64, 84), 255);
                     EditorDrawIcon(icon, white);
                 }
             }
             const char* labels[] = { "コースを追加", "このコースを削除" };
             for (int i = 0; i < 2; ++i) {
                 const UIRect b = EditorHeaderButton(i);
-                UIBox(b, GetColor(60, 64, 84), 230);
+                UIBox(b, gfx::Rgb(60, 64, 84), 230);
                 UIText(sfont, (b.L + b.R) * 0.5f, (b.T + b.B) * 0.5f, labels[i], white, 1);
             }
         }
@@ -2601,19 +2581,19 @@ void Game::EditorDraw() {
     if (Editor.Editing) {
         const UIRect p = EditorEditRect(), box = EditorEditBox();
         UIBox({ 0, 0, resx, resy }, black, 120);
-        UIBox(p, GetColor(18, 20, 32), 245);
+        UIBox(p, gfx::Rgb(18, 20, 32), 245);
         UIBox(p, accent, 255, false);
         UIText(sfont, p.L + 20, p.T + lh * 0.9f, FitText(Editor.EditLabel, sfont.Handle, p.R - p.L - 40, false), white);
-        UIBox(box, GetColor(36, 40, 54), 255);
+        UIBox(box, gfx::Rgb(36, 40, 54), 255);
         UIBox(box, gray, 255, false);
-        SetDrawArea((int)box.L + 8, (int)box.T, (int)box.R - 8, (int)box.B);
+        gfx::SetClip((int)box.L + 8, (int)box.T, (int)box.R - 8, (int)box.B);
         EditorDrawKeyInput((int)box.L + 12, (int)((box.T + box.B) * 0.5f - sfont.Size * 0.5f), Editor.EditHandle);
-        SetDrawAreaFull();
+        gfx::ResetClip();
         const char* labels[] = { "決定 (Enter)", "キャンセル (Esc)" };
         for (int i = 0; i < 2; ++i) {
             const UIRect b = EditorEditButton(i);
             const bool over = b.Contains(PointerPrev.X, PointerPrev.Y);
-            UIBox(b, i == 0 ? (over ? GetColor(255, 220, 90) : accent) : (over ? GetColor(80, 86, 110) : GetColor(60, 64, 84)), 240);
+            UIBox(b, i == 0 ? (over ? gfx::Rgb(255, 220, 90) : accent) : (over ? gfx::Rgb(80, 86, 110) : gfx::Rgb(60, 64, 84)), 240);
             UIText(sfont, (b.L + b.R) * 0.5f, (b.T + b.B) * 0.5f, labels[i], white, 1);
         }
     }
@@ -2632,89 +2612,42 @@ void Game::EditorDraw() {
     }
 }
 
-#ifndef __ANDROID__
+// 文字入力欄: 入力中の文字・カーソル・変換中の文字を描く (変換の候補の一覧は OS の IME が出す)
 void Game::DrawTextInput(int x,int y,int handle) {
-    RECT area{}; GetDrawArea(&area);
-    if (GetActiveKeyInput()==handle) { TextInputArea=area; }
-    // 候補は全UIの後に別レイヤーとして描く。入力文字だけを欄内にクリップする。
-    DrawKeyInputString(x,y,handle,FALSE);
+    sys::DrawTextInput(handle, (float)x, (float)y);
 }
 
-void Game::DrawTextCandidates(const IMEINPUTDATA* ime) {
-    if (!TextInputArea || !ime || ime->CandidateNum<=0 || !ime->CandidateList) { return; }
-    const auto& font=NowScene==Scene::Editor ? EditorFont() : ConfigSmallFont();
-    const float lh=std::max(24.0f,font.Size*1.4f), margin=10;
-    const int selected=std::clamp(ime->SelectCandidate,0,ime->CandidateNum-1);
-    const int first=selected/9*9, count=std::min(9,ime->CandidateNum-first);
-    float width=lh*6;
-    std::vector<std::string> labels;
-    for (int i=0;i<count;++i) {
-        labels.push_back(std::to_string(i+1)+"  "+std::string(ime->CandidateList[first+i]));
-        width=std::max(width,(float)GetStrlenCached(labels.back(),font.Handle)+margin*2);
-    }
-    width=std::min(width,(float)Skin.Info.Resolution.X-margin*2);
-    const float height=lh*count+margin*2;
-    const float x=std::clamp((float)TextInputArea->left,margin,std::max(margin,Skin.Info.Resolution.X-width-margin));
-    float y=(float)TextInputArea->bottom+4;
-    if (y+height>Skin.Info.Resolution.Y-margin) { y=std::max(margin,TextInputArea->top-height-4); }
-    SetDrawAreaFull();
-    UIBox({x,y,x+width,y+height},GetColor(18,20,32),255);
-    UIBox({x,y,x+width,y+height},GetColor(255,200,40),255,false);
-    for (int i=0;i<count;++i) {
-        const float top=y+margin+i*lh;
-        if (first+i==selected) { UIBox({x+2,top,x+width-2,top+lh},GetColor(100,70,20),255); }
-        UIText(font,x+margin,top+lh*.5f,FitText(labels[i],font.Handle,width-margin*2,false),GetColor(255,255,255));
-    }
-}
-
-#endif
 void Game::EditorDrawKeyInput(int x, int y, int handle) {
-#ifndef __ANDROID__
-    const auto text = GetColor(245, 245, 250), edge = GetColor(18, 20, 32);
-    const auto back = GetColor(36, 40, 54), selected = GetColor(50, 90, 150), cursor = GetColor(255, 210, 70);
-    for (int target : { DX_KEYINPSTRCOLOR_NORMAL_STR, DX_KEYINPSTRCOLOR_SELECT_STR, DX_KEYINPSTRCOLOR_IME_STR,
-        DX_KEYINPSTRCOLOR_IME_SELECT_STR, DX_KEYINPSTRCOLOR_IME_CONV_WIN_STR, DX_KEYINPSTRCOLOR_IME_CONV_WIN_SELECT_STR, DX_KEYINPSTRCOLOR_IME_MODE_STR }) {
-        SetKeyInputStringColor2(target, text);
-    }
-    for (int target : { DX_KEYINPSTRCOLOR_NORMAL_STR_EDGE, DX_KEYINPSTRCOLOR_SELECT_STR_EDGE, DX_KEYINPSTRCOLOR_IME_STR_EDGE,
-        DX_KEYINPSTRCOLOR_IME_SELECT_STR_EDGE, DX_KEYINPSTRCOLOR_IME_CONV_WIN_STR_EDGE, DX_KEYINPSTRCOLOR_IME_CONV_WIN_SELECT_STR_EDGE, DX_KEYINPSTRCOLOR_IME_MODE_STR_EDGE }) {
-        SetKeyInputStringColor2(target, edge);
-    }
-    for (int target : { DX_KEYINPSTRCOLOR_IME_STR_BACK, DX_KEYINPSTRCOLOR_IME_CONV_WIN_BACK }) { SetKeyInputStringColor2(target, back); }
-    for (int target : { DX_KEYINPSTRCOLOR_SELECT_STR_BACK, DX_KEYINPSTRCOLOR_IME_SELECT_STR_BACK, DX_KEYINPSTRCOLOR_IME_CONV_WIN_SELECT_STR_BACK }) { SetKeyInputStringColor2(target, selected); }
-    for (int target : { DX_KEYINPSTRCOLOR_NORMAL_CURSOR, DX_KEYINPSTRCOLOR_IME_CURSOR, DX_KEYINPSTRCOLOR_IME_LINE, DX_KEYINPSTRCOLOR_IME_CONV_WIN_EDGE }) { SetKeyInputStringColor2(target, cursor); }
-    DrawTextInput(x, y, handle);
-    for (int target = 0; target < DX_KEYINPSTRCOLOR_NUM; ++target) { ResetKeyInputStringColor2(target); }
-#endif
+    sys::DrawTextInput(handle, (float)x, (float)y, gfx::Rgb(245, 245, 250), gfx::Rgb(255, 210, 70));
 }
 
 void Game::EditorDrawFields() {
 #ifndef __ANDROID__
     const auto& sfont = EditorFont();
     const float resx = EditorResX(), resy = EditorResY(), lh = EditorLine();
-    const auto black = GetColor(0, 0, 0), white = GetColor(255, 255, 255), gray = GetColor(150, 150, 150), accent = GetColor(255, 200, 40);
+    const auto black = gfx::Rgb(0, 0, 0), white = gfx::Rgb(255, 255, 255), gray = gfx::Rgb(150, 150, 150), accent = gfx::Rgb(255, 200, 40);
     if (Editor.FormOpen) {
         const UIRect p = EditorFieldsRect();
-        UIBox({ 0, 0, resx, resy }, black, 140); UIBox(p, GetColor(18, 20, 32), 250); UIBox(p, accent, 255, false);
+        UIBox({ 0, 0, resx, resy }, black, 140); UIBox(p, gfx::Rgb(18, 20, 32), 250); UIBox(p, accent, 255, false);
         UIText(sfont, p.L + 16, p.T + lh * 0.8f, Editor.FormTitle + "  (Tab: 次の欄)", white);
         for (int i = 0; i < (int)Editor.FormFields.size(); ++i) {
             const auto box = EditorFieldRect(i);
             UIText(sfont, p.L + 16, (box.T + box.B) * 0.5f, FitText(Editor.FormFields[i].Label, sfont.Handle, box.L - p.L - 24, false), white);
-            UIBox(box, GetColor(36, 40, 54), 255); UIBox(box, i == Editor.FormActive ? accent : gray, 255, false);
+            UIBox(box, gfx::Rgb(36, 40, 54), 255); UIBox(box, i == Editor.FormActive ? accent : gray, 255, false);
             if (!Editor.FormFields[i].Choices.empty()) {
                 UIText(sfont, box.L + 12, (box.T + box.B) * 0.5f, "◀", accent);
                 UIText(sfont, (box.L + box.R) * 0.5f, (box.T + box.B) * 0.5f, EditorFieldValue(i), white, 1);
                 UIText(sfont, box.R - 12, (box.T + box.B) * 0.5f, "▶", accent, 2);
             }
             else if (i == Editor.FormActive) {
-                SetDrawArea((int)box.L + 8, (int)box.T, (int)box.R - 8, (int)box.B);
+                gfx::SetClip((int)box.L + 8, (int)box.T, (int)box.R - 8, (int)box.B);
                 EditorDrawKeyInput((int)box.L + 10, (int)((box.T + box.B - sfont.Size) * 0.5f), Editor.FormFields[i].Handle);
-                SetDrawAreaFull();
+                gfx::ResetClip();
             }
             else { UIText(sfont, box.L + 10, (box.T + box.B) * 0.5f, FitText(EditorFieldValue(i), sfont.Handle, box.R - box.L - 20, false), white); }
         }
         for (int i = 0; i < 2; ++i) {
-            const auto button = EditorFieldsButton(i); UIBox(button, i == 0 ? accent : GetColor(60, 64, 84), 240);
+            const auto button = EditorFieldsButton(i); UIBox(button, i == 0 ? accent : gfx::Rgb(60, 64, 84), 240);
             UIText(sfont, (button.L + button.R) * 0.5f, (button.T + button.B) * 0.5f, i == 0 ? "適用 (Enter)" : "キャンセル (Esc)", white, 1);
         }
     }
@@ -2795,12 +2728,12 @@ auto Game::EditorHeaderButton(int i) const -> UIRect {
 
 unsigned int Game::EditorNoteColor(char type) {
     switch (type) {
-    case '1': case '3': return GetColor(235, 72, 52);
-    case '2': case '4': return GetColor(64, 170, 235);
-    case '5': case '6': return GetColor(250, 200, 40);
-    case '7': case '9': return GetColor(250, 130, 40);
-    case '8': return GetColor(200, 200, 200);
-    default: return GetColor(200, 120, 255);
+    case '1': case '3': return gfx::Rgb(235, 72, 52);
+    case '2': case '4': return gfx::Rgb(64, 170, 235);
+    case '5': case '6': return gfx::Rgb(250, 200, 40);
+    case '7': case '9': return gfx::Rgb(250, 130, 40);
+    case '8': return gfx::Rgb(200, 200, 200);
+    default: return gfx::Rgb(200, 120, 255);
     }
 }
 
@@ -2816,9 +2749,9 @@ bool Game::EditorDrawSkinNote(float x, float cy, float lane_h, int index, int al
     const auto& img = Skin.Base->Playing.Image.Note;
     if (index < 0 || index >= (int)img.Handles.size() || img.Size.Height <= 0) { return false; }
     const float h = lane_h * 1.2f, w = h * img.Size.Width / img.Size.Height;
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, alpha);
-    DrawExtendGraphF(x - w * 0.5f, cy - h * 0.5f, x + w * 0.5f, cy + h * 0.5f, img.Handles[index], TRUE);
-    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+    gfx::SetBlend(gfx::Blend::Alpha, alpha);
+    gfx::DrawTexture(img.Handles[index], x - w * 0.5f, cy - h * 0.5f, x + w * 0.5f, cy + h * 0.5f);
+    gfx::SetBlend(gfx::Blend::None);
     return true;
 }
 
@@ -2826,21 +2759,80 @@ void Game::EditorDrawNote(float x, float cy, float lane_h, char type, int alpha)
     if (EditorDrawSkinNote(x, cy, lane_h, EditorNoteImage(type), alpha)) { return; }
     const bool big = type == '3' || type == '4' || type == '6' || type == '9';
     const float r = lane_h * (big ? 0.42f : 0.3f) * (type == '8' ? 0.6f : 1.0f);
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, alpha);
-    DrawCircleAA(x, cy, r, 32, EditorNoteColor(type), TRUE);
-    DrawCircleAA(x, cy, r, 32, GetColor(255, 255, 255), FALSE, 2.0f);
-    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+    gfx::SetBlend(gfx::Blend::Alpha, alpha);
+    gfx::Circle(x, cy, r, 32, EditorNoteColor(type), true);
+    gfx::Circle(x, cy, r, 32, gfx::Rgb(255, 255, 255), false, 2.0f);
+    gfx::SetBlend(gfx::Blend::None);
 }
 
 void Game::EditorDrawIcon(const EditorButton& b, unsigned int color) {
     const UIRect& r = b.Rect;
+    const int w = (int)std::ceil(r.R - r.L), h = (int)std::ceil(r.B - r.T);
+    // 音符 (スキンの画像と番号の文字) はそのまま描く
+    if (b.Icon == EditorIcon::Note || w <= 0 || h <= 0 || w > 512 || h > 512) { EditorDrawIconShape(b, color); return; }
+    constexpr int Scale = 4;
+    // 速度計は針の向きが倍率で変わるので、倍率もキーに入れる (文字は縮小せずに後で描く)
+    const uint64_t speed = b.Icon == EditorIcon::SpeedValue ? (uint64_t)std::clamp((int)std::lround(Editor.PreviewSpeed * 100), 0, 0xFFFF) : 0;
+    const uint64_t key = ((uint64_t)b.Icon << 48) | (speed << 32) | ((uint64_t)w << 16) | (uint64_t)h;
+    auto it = Editor.IconCache.find(key);
+    if (it == Editor.IconCache.end()) {
+        // 白い図形を 4 倍の大きさで描き、2 倍 → 等倍と半分ずつ縮小する (線形補間で 2×2 の平均になり、縁が滑らかになる)。
+        // 描画先は「白・透明」で消しておくと、重ねた結果が白のままアルファだけが付く
+        gfx::Texture big = gfx::CreateTexture(w * Scale, h * Scale, true);
+        gfx::Texture mid = gfx::CreateTexture(w * 2, h * 2, true);
+        gfx::Texture out = gfx::CreateTexture(w, h, true);
+        if (!big || !mid || !out) { EditorDrawIconShape(b, color); return; }
+        int cl = 0, ct = 0, cr = 0, cb = 0;
+        const bool clipped = gfx::GetClip(cl, ct, cr, cb);
+        const gfx::Blend blend = gfx::CurrentBlend();
+        const int param = gfx::CurrentBlendParam();
+        int br = 255, bg = 255, bb = 255;
+        gfx::GetBright(br, bg, bb);
+        gfx::ResetClip();
+        gfx::SetBright(255, 255, 255);
+        gfx::SetAddColor(0, 0, 0);
+        gfx::SetBlend(gfx::Blend::Alpha, 255);
+        gfx::SetTarget(&big);
+        gfx::Clear(gfx::Rgb(255, 255, 255), 0);
+        EditorButton scaled = b;
+        scaled.Rect = { 0.0f, 0.0f, (float)(w * Scale), (float)(h * Scale) };
+        EditorDrawIconShape(scaled, gfx::Rgb(255, 255, 255), false);
+        gfx::SetTarget(&mid);
+        gfx::Clear(gfx::Rgb(255, 255, 255), 0);
+        gfx::DrawTexture(big, 0, 0, (float)(w * 2), (float)(h * 2));
+        gfx::SetTarget(&out);
+        gfx::Clear(gfx::Rgb(255, 255, 255), 0);
+        gfx::DrawTexture(mid, 0, 0, (float)w, (float)h);
+        gfx::SetTarget(nullptr);
+        gfx::SetBright(br, bg, bb);
+        gfx::SetBlend(blend, param);
+        if (clipped) { gfx::SetClip(cl, ct, cr, cb); }
+        it = Editor.IconCache.emplace(key, std::move(out)).first;
+    }
+    // 白い画像に色を掛けて描く
+    int br = 255, bg = 255, bb = 255;
+    gfx::GetBright(br, bg, bb);
+    const gfx::Blend blend = gfx::CurrentBlend();
+    const int param = gfx::CurrentBlendParam();
+    gfx::SetBright(gfx::R(color) * br / 255, gfx::G(color) * bg / 255, gfx::B(color) * bb / 255);
+    if (blend == gfx::Blend::None) { gfx::SetBlend(gfx::Blend::Alpha, 255); }
+    gfx::DrawTexture(it->second, r.L, r.T, r.L + (float)w, r.T + (float)h);
+    gfx::SetBlend(blend, param);
+    gfx::SetBright(br, bg, bb);
+    if (b.Icon == EditorIcon::SpeedValue) {
+        UIText(EditorFont(), (r.L + (r.B - r.T) + r.R) * 0.5f, (r.T + r.B) * 0.5f, FormatNumber(Editor.PreviewSpeed, 2) + "x", color, 1);
+    }
+}
+
+void Game::EditorDrawIconShape(const EditorButton& b, unsigned int color, bool text) {
+    const UIRect& r = b.Rect;
     const float cx = (r.L + r.R) * 0.5f, cy = (r.T + r.B) * 0.5f, s = (r.B - r.T) * 0.30f;
     const float t = std::max(2.0f, s * 0.16f);
-    auto line = [&](float x0, float y0, float x1, float y1) { DrawLineAA(x0, y0, x1, y1, color, t); };
+    auto line = [&](float x0, float y0, float x1, float y1) { gfx::Line(x0, y0, x1, y1, color, t); };
     auto arrowhead = [&](float x, float y, float dx, float dy) {
         // (x, y) を先端に、(dx, dy) の向きの矢じり
         const float len = s * 0.45f, nx = -dy, ny = dx;
-        DrawTriangleAA(x, y, x - dx * len + nx * len * 0.6f, y - dy * len + ny * len * 0.6f, x - dx * len - nx * len * 0.6f, y - dy * len - ny * len * 0.6f, color, TRUE);
+        gfx::Triangle(x, y, x - dx * len + nx * len * 0.6f, y - dy * len + ny * len * 0.6f, x - dx * len - nx * len * 0.6f, y - dy * len - ny * len * 0.6f, color, true);
     };
     switch (b.Icon) {
     case EditorIcon::Visible:
@@ -2851,13 +2843,13 @@ void Game::EditorDrawIcon(const EditorButton& b, unsigned int color) {
             line(x0, cy - y0, x1, cy - y1);
             line(x0, cy + y0, x1, cy + y1);
         }
-        DrawCircleAA(cx, cy, s * 0.25f, 16, color, TRUE);
+        gfx::Circle(cx, cy, s * 0.25f, 16, color, true);
         if (b.Icon == EditorIcon::Hidden) { line(cx - s * 0.9f, cy + s * 0.9f, cx + s * 0.9f, cy - s * 0.9f); }
         break;
     }
     case EditorIcon::DemoStart:
         line(cx - s * 0.8f, cy - s, cx - s * 0.8f, cy + s);
-        DrawTriangleAA(cx - s * 0.4f, cy - s * 0.8f, cx - s * 0.4f, cy + s * 0.8f, cx + s * 0.8f, cy, color, TRUE);
+        gfx::Triangle(cx - s * 0.4f, cy - s * 0.8f, cx - s * 0.4f, cy + s * 0.8f, cx + s * 0.8f, cy, color, true);
         break;
     case EditorIcon::WaveAlign:
         for (int i = -2; i <= 2; ++i) {
@@ -2868,13 +2860,13 @@ void Game::EditorDrawIcon(const EditorButton& b, unsigned int color) {
         arrowhead(cx - s * 0.25f, cy + s, 1, 0);
         break;
     case EditorIcon::Unfold:    // 開いた小節枠と、登録を外す ×
-        DrawBoxAA(cx - s, cy - s * 0.8f, cx + s * 0.2f, cy + s * 0.8f, color, FALSE, t);
+        gfx::Box(cx - s, cy - s * 0.8f, cx + s * 0.2f, cy + s * 0.8f, color, false, t);
         line(cx - s * 0.6f, cy - s * 0.4f, cx - s * 0.6f, cy + s * 0.4f);
         line(cx + s * 0.35f, cy - s * 0.4f, cx + s, cy + s * 0.4f);
         line(cx + s * 0.35f, cy + s * 0.4f, cx + s, cy - s * 0.4f);
         break;
     case EditorIcon::AudioLength:    // 時計から小節の枠へ
-        DrawCircleAA(cx - s * 0.35f, cy - s * 0.25f, s * 0.65f, 24, color, FALSE, t);
+        gfx::Circle(cx - s * 0.35f, cy - s * 0.25f, s * 0.65f, 24, color, false, t);
         line(cx - s * 0.35f, cy - s * 0.7f, cx - s * 0.35f, cy - s * 0.25f);
         line(cx - s * 0.35f, cy - s * 0.25f, cx, cy - s * 0.05f);
         line(cx + s * 0.25f, cy + s * 0.5f, cx + s, cy + s * 0.5f);
@@ -2882,13 +2874,13 @@ void Game::EditorDrawIcon(const EditorButton& b, unsigned int color) {
         line(cx + s, cy - s * 0.6f, cx + s, cy + s * 0.1f);
         break;
     case EditorIcon::Save:      // フロッピー
-        DrawBoxAA(cx - s, cy - s, cx + s, cy + s, color, FALSE, t);
-        DrawBoxAA(cx - s * 0.55f, cy - s, cx + s * 0.45f, cy - s * 0.35f, color, TRUE);
-        DrawBoxAA(cx - s * 0.6f, cy + s * 0.15f, cx + s * 0.6f, cy + s, color, FALSE, t);
+        gfx::Box(cx - s, cy - s, cx + s, cy + s, color, false, t);
+        gfx::Box(cx - s * 0.55f, cy - s, cx + s * 0.45f, cy - s * 0.35f, color, true);
+        gfx::Box(cx - s * 0.6f, cy + s * 0.15f, cx + s * 0.6f, cy + s, color, false, t);
         break;
     case EditorIcon::Test:      // 太鼓 (丸の中のばち)
-        DrawCircleAA(cx, cy, s, 32, color, FALSE, t);
-        DrawCircleAA(cx, cy, s * 0.45f, 32, color, TRUE);
+        gfx::Circle(cx, cy, s, 32, color, false, t);
+        gfx::Circle(cx, cy, s * 0.45f, 32, color, true);
         line(cx + s * 0.6f, cy - s * 1.05f, cx + s * 1.1f, cy - s * 0.4f);
         break;
     case EditorIcon::Close:
@@ -2896,7 +2888,7 @@ void Game::EditorDrawIcon(const EditorButton& b, unsigned int color) {
         line(cx - s * 0.8f, cy + s * 0.8f, cx + s * 0.8f, cy - s * 0.8f);
         break;
     case EditorIcon::Play:
-        DrawTriangleAA(cx - s * 0.6f, cy - s, cx - s * 0.6f, cy + s, cx + s, cy, color, TRUE);
+        gfx::Triangle(cx - s * 0.6f, cy - s, cx - s * 0.6f, cy + s, cx + s, cy, color, true);
         break;
     case EditorIcon::SpeedDown:
     case EditorIcon::SpeedUp: {
@@ -2904,9 +2896,7 @@ void Game::EditorDrawIcon(const EditorButton& b, unsigned int color) {
         const float dir = b.Icon == EditorIcon::SpeedUp ? 1.0f : -1.0f;
         for (int i = -1; i <= 1; i += 2) {
             const float x = cx + i * s * 0.48f;
-            DrawTriangleAA(x - dir * s * 0.42f, cy - s * 0.65f,
-                x - dir * s * 0.42f, cy + s * 0.65f,
-                x + dir * s * 0.42f, cy, color, TRUE);
+            gfx::Triangle(x - dir * s * 0.42f, cy - s * 0.65f, x - dir * s * 0.42f, cy + s * 0.65f, x + dir * s * 0.42f, cy, color, true);
         }
         break;
     }
@@ -2925,23 +2915,23 @@ void Game::EditorDrawIcon(const EditorButton& b, unsigned int color) {
         }
         const float a = 3.14159265f * (1.0f - std::clamp((float)(Editor.PreviewSpeed - 0.25) / 1.75f, 0.0f, 1.0f));
         line(gx, gy, gx + std::cos(a) * radius * 0.7f, gy - std::sin(a) * radius * 0.7f);
-        DrawCircleAA(gx, gy, t * 0.65f, 12, color, TRUE);
-        UIText(EditorFont(), (r.L + h + r.R) * 0.5f, cy, FormatNumber(Editor.PreviewSpeed, 2) + "x", color, 1);
+        gfx::Circle(gx, gy, t * 0.65f, 12, color, true);
+        if (text) { UIText(EditorFont(), (r.L + h + r.R) * 0.5f, cy, FormatNumber(Editor.PreviewSpeed, 2) + "x", color, 1); }
         break;
     }
     case EditorIcon::TaikoSound:
-        DrawBoxAA(cx-s,cy-s*.35f,cx-s*.5f,cy+s*.35f,color,TRUE);
-        DrawTriangleAA(cx-s*.5f,cy-s*.35f,cx+s*.1f,cy-s*.9f,cx+s*.1f,cy+s*.9f,color,TRUE);
+        gfx::Box(cx-s, cy-s*.35f, cx-s*.5f, cy+s*.35f, color, true);
+        gfx::Triangle(cx-s*.5f, cy-s*.35f, cx+s*.1f, cy-s*.9f, cx+s*.1f, cy+s*.9f, color, true);
         if(b.Active) {line(cx+s*.4f,cy-s*.5f,cx+s*.8f,cy);line(cx+s*.8f,cy,cx+s*.4f,cy+s*.5f);}
         else {line(cx+s*.35f,cy-s*.45f,cx+s,cy+s*.45f);line(cx+s*.35f,cy+s*.45f,cx+s,cy-s*.45f);}
         break;
     case EditorIcon::JiroPreview:
-        DrawCircleAA(cx,cy,s,32,color,FALSE,t);
-        DrawCircleAA(cx,cy,s*.72f,32,color,FALSE,t);
+        gfx::Circle(cx, cy, s, 32, color, false, t);
+        gfx::Circle(cx, cy, s*.72f, 32, color, false, t);
         line(cx-s*.7f,cy-s*.8f,cx+s*.65f,cy+s*.7f);
         line(cx+s*.7f,cy-s*.8f,cx-s*.65f,cy+s*.7f);
         break;    case EditorIcon::Stop:
-        DrawBoxAA(cx - s * 0.75f, cy - s * 0.75f, cx + s * 0.75f, cy + s * 0.75f, color, TRUE);
+        gfx::Box(cx - s * 0.75f, cy - s * 0.75f, cx + s * 0.75f, cy + s * 0.75f, color, true);
         break;
     case EditorIcon::Undo:
     case EditorIcon::Redo: {    // 半円の矢印
@@ -2968,14 +2958,14 @@ void Game::EditorDrawIcon(const EditorButton& b, unsigned int color) {
         line(cx, cy - s * 0.8f, cx, cy + s * 0.8f);
         break;
     case EditorIcon::Delete:    // ごみ箱
-        DrawBoxAA(cx - s * 0.6f, cy - s * 0.5f, cx + s * 0.6f, cy + s, color, FALSE, t);
+        gfx::Box(cx - s * 0.6f, cy - s * 0.5f, cx + s * 0.6f, cy + s, color, false, t);
         line(cx - s * 0.85f, cy - s * 0.6f, cx + s * 0.85f, cy - s * 0.6f);
         line(cx - s * 0.25f, cy - s * 0.85f, cx + s * 0.25f, cy - s * 0.85f);
         line(cx - s * 0.2f, cy - s * 0.2f, cx - s * 0.2f, cy + s * 0.7f);
         line(cx + s * 0.2f, cy - s * 0.2f, cx + s * 0.2f, cy + s * 0.7f);
         break;
     case EditorIcon::Header:    // 書類
-        DrawBoxAA(cx - s * 0.7f, cy - s, cx + s * 0.7f, cy + s, color, FALSE, t);
+        gfx::Box(cx - s * 0.7f, cy - s, cx + s * 0.7f, cy + s, color, false, t);
         for (int i = 0; i < 3; ++i) { line(cx - s * 0.4f, cy - s * 0.45f + i * s * 0.45f, cx + s * 0.4f, cy - s * 0.45f + i * s * 0.45f); }
         break;
     case EditorIcon::Command:   // #
@@ -2990,7 +2980,7 @@ void Game::EditorDrawIcon(const EditorButton& b, unsigned int color) {
             const float a = -3.14159f / 2 + i * 3.14159f / 5, rr = i % 2 == 0 ? s : s * 0.42f;
             px[i] = cx + std::cos(a) * rr; py[i] = cy + std::sin(a) * rr;
         }
-        for (int i = 0; i < 10; ++i) { DrawTriangleAA(cx, cy, px[i], py[i], px[(i + 1) % 10], py[(i + 1) % 10], color, TRUE); }
+        for (int i = 0; i < 10; ++i) { gfx::Triangle(cx, cy, px[i], py[i], px[(i + 1) % 10], py[(i + 1) % 10], color, true); }
         break;
     }
     case EditorIcon::Estimate: { // 波形
@@ -3012,26 +3002,26 @@ void Game::EditorDrawIcon(const EditorButton& b, unsigned int color) {
         line(cx + s, cy - s * 0.8f, cx + s, cy + s * 0.8f);
         break;
     case EditorIcon::Copy:      // 重なった 2 枚
-        DrawBoxAA(cx - s * 0.9f, cy - s * 0.9f, cx + s * 0.3f, cy + s * 0.5f, color, FALSE, t);
-        DrawBoxAA(cx - s * 0.3f, cy - s * 0.4f, cx + s * 0.9f, cy + s, color, FALSE, t);
+        gfx::Box(cx - s * 0.9f, cy - s * 0.9f, cx + s * 0.3f, cy + s * 0.5f, color, false, t);
+        gfx::Box(cx - s * 0.3f, cy - s * 0.4f, cx + s * 0.9f, cy + s, color, false, t);
         break;
     case EditorIcon::Cut:       // はさみ
-        DrawCircleAA(cx - s * 0.45f, cy + s * 0.55f, s * 0.3f, 16, color, FALSE, t);
-        DrawCircleAA(cx + s * 0.45f, cy + s * 0.55f, s * 0.3f, 16, color, FALSE, t);
+        gfx::Circle(cx - s * 0.45f, cy + s * 0.55f, s * 0.3f, 16, color, false, t);
+        gfx::Circle(cx + s * 0.45f, cy + s * 0.55f, s * 0.3f, 16, color, false, t);
         line(cx - s * 0.3f, cy + s * 0.3f, cx + s * 0.5f, cy - s);
         line(cx + s * 0.3f, cy + s * 0.3f, cx - s * 0.5f, cy - s);
         break;
     case EditorIcon::Paste:     // クリップボード
-        DrawBoxAA(cx - s * 0.75f, cy - s * 0.7f, cx + s * 0.75f, cy + s, color, FALSE, t);
-        DrawBoxAA(cx - s * 0.35f, cy - s, cx + s * 0.35f, cy - s * 0.55f, color, TRUE);
+        gfx::Box(cx - s * 0.75f, cy - s * 0.7f, cx + s * 0.75f, cy + s, color, false, t);
+        gfx::Box(cx - s * 0.35f, cy - s, cx + s * 0.35f, cy - s * 0.55f, color, true);
         line(cx - s * 0.4f, cy, cx + s * 0.4f, cy);
         line(cx - s * 0.4f, cy + s * 0.45f, cx + s * 0.4f, cy + s * 0.45f);
         break;
     case EditorIcon::Left:
-        DrawTriangleAA(cx + s * 0.5f, cy - s * 0.8f, cx + s * 0.5f, cy + s * 0.8f, cx - s * 0.6f, cy, color, TRUE);
+        gfx::Triangle(cx + s * 0.5f, cy - s * 0.8f, cx + s * 0.5f, cy + s * 0.8f, cx - s * 0.6f, cy, color, true);
         break;
     case EditorIcon::Right:
-        DrawTriangleAA(cx - s * 0.5f, cy - s * 0.8f, cx - s * 0.5f, cy + s * 0.8f, cx + s * 0.6f, cy, color, TRUE);
+        gfx::Triangle(cx - s * 0.5f, cy - s * 0.8f, cx - s * 0.5f, cy + s * 0.8f, cx + s * 0.6f, cy, color, true);
         break;
     case EditorIcon::Note: {
         const float lane = (r.B - r.T) * 0.62f;
@@ -3056,7 +3046,7 @@ void Game::EditorDrawRollBody(float x0, float x1, float cy, float lane_h, char t
     const int body = type == '6' ? 9 : 6;
     if (x1 > x0 && body < (int)img.Handles.size() && img.Size.Height > 0 && (type == '5' || type == '6')) {
         const float h = lane_h * 1.2f;
-        DrawExtendGraphF(x0, cy - h * 0.5f, x1, cy + h * 0.5f, img.Handles[body], TRUE);
+        gfx::DrawTexture(img.Handles[body], x0, cy - h * 0.5f, x1, cy + h * 0.5f);
         return;
     }
     UIBox({ x0, cy - lane_h * 0.22f, x1, cy + lane_h * 0.22f }, EditorNoteColor(type), 120);
@@ -3065,7 +3055,7 @@ void Game::EditorDrawRollBody(float x0, float x1, float cy, float lane_h, char t
 void Game::EditorDrawGrid(const FontData& sfont) {
     const auto* course = EditorCourse();
     if (course == nullptr) { return; }
-    const unsigned int white = GetColor(255, 255, 255), gray = GetColor(150, 150, 150), accent = GetColor(255, 200, 40);
+    const unsigned int white = gfx::Rgb(255, 255, 255), gray = gfx::Rgb(150, 150, 150), accent = gfx::Rgb(255, 200, 40);
     const int count = (int)course->Measures.size();
     const float noteHeight = EditorGridNoteHeight();
     const bool jiroMap = EditorJiroPreviewEnabled();
@@ -3102,7 +3092,7 @@ void Game::EditorDrawGrid(const FontData& sfont) {
         const auto* registration = EditorFoldAt(m) ? EditorFoldAt(m) : EditorOpenFoldAt(m);
         if (registration && registration->first == m) {
             const auto remove = EditorFoldDeleteButton(row);
-            UIBox(remove, GetColor(116, 48, 60), 255);
+            UIBox(remove, gfx::Rgb(116, 48, 60), 255);
             UIText(sfont, (remove.L + remove.R) * 0.5f, (remove.T + remove.B) * 0.5f, "×", white, 1);
         }
         // 折りたたんだ範囲: 1 本の帯にまとめる (クリックで開く)
@@ -3113,8 +3103,8 @@ void Game::EditorDrawGrid(const FontData& sfont) {
                 for (const auto& c : course->Measures[k].Commands) { if (tja::StartsWithKey(c.Text, "#BPMCHANGE")) { bpm = EditorCommandValue(c.Text, 10); } }
             }
             const UIRect band{ lane.L, cy - lh * 0.3f, lane.R, cy + lh * 0.3f };
-            UIBox(band, GetColor(70, 60, 110), 230);
-            UIBox(band, GetColor(150, 130, 220), 200, false);
+            UIBox(band, gfx::Rgb(70, 60, 110), 230);
+            UIBox(band, gfx::Rgb(150, 130, 220), 200, false);
             UIText(sfont, EditorGridArea().L, cy, std::to_string(f->first + 1) + "-" + std::to_string(f->second + 1), white);
             UIText(sfont, band.L + 12, cy, FitText("▶ " + std::to_string(f->second - f->first + 1) + " 小節を折りたたみ中 (命令 " + std::to_string(cmds) + "・音符 " + std::to_string(notes) + ")  クリックで開く", sfont.Handle, band.R - band.L - 24, false), white);
             rolling = false;
@@ -3137,49 +3127,49 @@ void Game::EditorDrawGrid(const FontData& sfont) {
         UIText(sfont, labelx, lane.T + sfont.Size * 0.6f, mapTiming ? FitText(measureLabel, sfont.Handle, EditorLabelWidth() - 8.0f, false) : measureLabel, m == Editor.CursorMeasure ? accent : white);
         if (const auto* registered = EditorOpenFoldAt(m); registered && registered->first == m) {
             const auto button = EditorFoldButton(row);
-            UIBox(button, GetColor(70, 60, 110), 230);
+            UIBox(button, gfx::Rgb(70, 60, 110), 230);
             UIText(sfont, (button.L + button.R) * 0.5f, (button.T + button.B) * 0.5f, "▼", white, 1);
         }
         const float labelRight = lane.L;
         UIText(sfont, labelx, lane.B - sfont.Size * 0.6f, FitText("BPM " + FormatNumber(bpm, bpm == std::floor(bpm) ? 0 : 2), sfont.Handle, labelRight - labelx - 8.0f, false), gray);
 
-        SetDrawArea((int)(EditorGridArea().L+EditorLabelWidth()-noteHeight*.6f),(int)EditorGridArea().T,(int)EditorGridArea().R,(int)EditorGridArea().B);
-        UIBox(lane, GetColor(50, 50, 58), 255);
+        gfx::SetClip((int)(EditorGridArea().L+EditorLabelWidth()-noteHeight*.6f), (int)EditorGridArea().T, (int)EditorGridArea().R, (int)EditorGridArea().B);
+        UIBox(lane, gfx::Rgb(50, 50, 58), 255);
         // スキンのレーンの画像を敷く (無ければ単色)
         if (const auto& laneimg = Skin.Base->Playing.Image.Lane; !laneimg.Handles.empty()) {
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 170);
-            DrawExtendGraphF(lane.L, lane.T, lane.R, lane.B, laneimg.Handles[0], TRUE);
-            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            gfx::SetBlend(gfx::Blend::Alpha, 170);
+            gfx::DrawTexture(laneimg.Handles[0], lane.L, lane.T, lane.R, lane.B);
+            gfx::SetBlend(gfx::Blend::None);
         }
         // グリッド (拍の線を明るく)
         double gogoFrom = 0;
         for (const auto& c : measure.Commands) {
             if (!tja::StartsWithKey(c.Text, "#GOGOSTART") && !tja::StartsWithKey(c.Text, "#GOGOEND")) { continue; }
             const double p = std::clamp((double)c.Num / std::max<int64_t>(c.Den, 1), 0.0, 1.0);
-            if (gogo) { UIBox({ EditorX(lane, gogoFrom), lane.T, EditorX(lane, p), lane.B }, GetColor(255, 125, 20), 100); }
+            if (gogo) { UIBox({ EditorX(lane, gogoFrom), lane.T, EditorX(lane, p), lane.B }, gfx::Rgb(255, 125, 20), 100); }
             gogo = tja::StartsWithKey(c.Text, "#GOGOSTART");
             gogoFrom = p;
         }
-        if (gogo) { UIBox({ EditorX(lane, gogoFrom), lane.T, lane.R, lane.B }, GetColor(255, 125, 20), 100); }
+        if (gogo) { UIBox({ EditorX(lane, gogoFrom), lane.T, lane.R, lane.B }, gfx::Rgb(255, 125, 20), 100); }
         const int div = EditorDivOf(m);      // この小節のグリッドの数 (#MEASURE の長さに合わせる)
         const int beat = Editor.Division % 4 == 0 ? Editor.Division / 4 : 0;
         for (int k = 0; k <= div; ++k) {
             const float x = EditorX(lane, (double)k / div);
             const bool strong = k == 0 || k == div;
             const bool beatline = beat > 0 && k % beat == 0;
-            DrawLineAA(x, lane.T, x, lane.B, strong ? white : beatline ? GetColor(130, 130, 150) : GetColor(80, 80, 92), strong ? 2.0f : 1.0f);
+            gfx::Line(x, lane.T, x, lane.B, strong ? white : beatline ? gfx::Rgb(130, 130, 150) : gfx::Rgb(80, 80, 92), strong ? 2.0f : 1.0f);
         }
         if (Editor.Selecting) {
             const auto [a, b] = EditorSelection();
             if (a.Measure <= m && m <= b.Measure) {
                 const double from = m == a.Measure ? (double)a.Num / a.Den : 0.0;
                 const double to = m == b.Measure ? (double)b.Num / b.Den + 0.5 / div : 1.0;
-                UIBox({ EditorX(lane, from), lane.T, EditorX(lane, std::min(to, 1.0)), lane.B }, GetColor(90, 150, 255), 90);
+                UIBox({ EditorX(lane, from), lane.T, EditorX(lane, std::min(to, 1.0)), lane.B }, gfx::Rgb(90, 150, 255), 90);
             }
         }
         if (m == Editor.CursorMeasure) {
             const float x = EditorX(lane, (double)Editor.CursorSlot / EditorDivOf(Editor.CursorMeasure));
-            DrawLineAA(x, lane.T - 4, x, lane.B + 4, accent, 3.0f);
+            gfx::Line(x, lane.T - 4, x, lane.B + 4, accent, 3.0f);
         }
 
         // 連打の帯
@@ -3233,7 +3223,7 @@ void Game::EditorDrawGrid(const FontData& sfont) {
         for (const auto& c : measure.Commands) {
             if (c.Num != 0 && tja::StartsWithKey(c.Text, "#BPMCHANGE")) { bpm = EditorCommandValue(c.Text, 10); }
         }
-        SetDrawAreaFull();
+        gfx::ResetClip();
     }
     // 疑似再生の位置
     if (Editor.Preview) {
@@ -3243,15 +3233,15 @@ void Game::EditorDrawGrid(const FontData& sfont) {
         if (tl.PosAt(EditorPreviewNow(), pm, pp) && EditorMeasureRow(pm) >= 0 && !EditorFoldAt(pm)) {
             const UIRect lane = EditorLane(EditorMeasureRow(pm));
             const float x = EditorX(lane, pp);
-            DrawLineAA(x, lane.T - 6, x, lane.B + 6, GetColor(80, 255, 140), 3.0f);
+            gfx::Line(x, lane.T - 6, x, lane.B + 6, gfx::Rgb(80, 255, 140), 3.0f);
         }
     }
     // 命令のラベル
     for (const auto& hit : EditorCommandRects()) {
         const auto& cmd = course->Measures[hit.Measure].Commands[hit.Index];
-        UIBox(hit.Rect, GetColor(70, 60, 110), 230);
+        UIBox(hit.Rect, gfx::Rgb(70, 60, 110), 230);
         UIText(sfont, hit.Rect.L + 6, (hit.Rect.T + hit.Rect.B) * 0.5f, FitText(cmd.Text, sfont.Handle, hit.Rect.R - hit.Rect.L - 10, false), white);
-        DrawLineAA(hit.Rect.L, hit.Rect.B, hit.Rect.L, EditorLane(EditorMeasureRow(hit.Measure)).T, GetColor(150, 130, 220), 1.0f);
+        gfx::Line(hit.Rect.L, hit.Rect.B, hit.Rect.L, EditorLane(EditorMeasureRow(hit.Measure)).T, gfx::Rgb(150, 130, 220), 1.0f);
     }
     // スクロールバー
     const UIRect area = EditorGridArea();
@@ -3360,7 +3350,7 @@ void Game::EditorProc() {
             if (EditorFieldsButton(1).Contains(pt.X, pt.Y)) { action = 2; }
         }
         const int handle = Editor.FormFields[Editor.FormActive].Handle;
-        if (handle != -1 && CheckKeyInput(handle) != 0) { action = CheckKeyInput(handle); }
+        if (handle != -1 && sys::TextInputState(handle) != 0) { action = sys::TextInputState(handle); }
         Input::GetInstance().HitKeyProcess(VK_TAB, KeyState::Down, [&] { EditorFocusField(Editor.FormActive + ((__gotkeyboardinput[VK_SHIFT] & 1) ? -1 : 1)); });
         Input::GetInstance().HitKeyProcess(VK_RETURN, KeyState::Down, [&] { action = 1; });
         Input::GetInstance().HitKeyProcess(VK_ESCAPE, KeyState::Down, [&] { action = 2; });
@@ -3375,7 +3365,7 @@ void Game::EditorProc() {
 #ifndef __ANDROID__
     // ---- 文字入力中 ----
     if (Editor.Editing) {
-        int state = CheckKeyInput(Editor.EditHandle);
+        int state = sys::TextInputState(Editor.EditHandle);
         // ボタン: 決定 = Enter、キャンセル = Esc
         if (state == 0 && pt.LeftPressed) {
             if (EditorEditButton(0).Contains(pt.X, pt.Y)) { state = 1; }
@@ -3383,17 +3373,16 @@ void Game::EditorProc() {
         }
         if (state != 0) {
             if (state == 1) {
-                std::vector<char> buf(4096, '\0');
-                GetKeyInputString(buf.data(), Editor.EditHandle);
+                const std::string buf = sys::TextInputString(Editor.EditHandle);
                 auto done = std::move(Editor.OnEdit);
-                DeleteKeyInput(Editor.EditHandle);
+                sys::EndTextInput(Editor.EditHandle);
                 Editor.EditHandle = 0;
                 Editor.Editing = false;
                 Input::GetInstance().ResyncKeys();
-                if (done) { done(buf.data()); }
+                if (done) { done(buf); }
                 return;
             }
-            DeleteKeyInput(Editor.EditHandle);
+            sys::EndTextInput(Editor.EditHandle);
             Editor.EditHandle = 0;
             Editor.Editing = false;
             Editor.OnEdit = nullptr;
