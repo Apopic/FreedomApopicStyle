@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <functional>
 #include <cstddef>
 #include <numeric>
 #include <vector>
@@ -432,5 +433,118 @@ namespace tempo {
         result.FirstDownbeat = std::max(0.0, phase + std::round((downbeat - phase) / period) * period);
         result.Confidence = std::clamp(matched / weight, 0.0, 1.0);
         return result;
+    }
+
+    // ---- 範囲の BPM の変化を小節ごとに追う (譜面制作モードの「範囲の BPM を解析」) ----
+    struct TrackOnset { double Time, Weight; };
+
+    // 1ms ごとのエネルギーの立ち上がりから発音の時刻と強さを求める (from～to 秒の区間だけ)
+    inline std::vector<TrackOnset> DetectOnsets(const float* input, size_t count, int rate, double from, double to) {
+        std::vector<TrackOnset> onsets;
+        if (!input || rate < 1000 || count == 0) { return onsets; }
+        const size_t first = (size_t)(std::clamp(from, 0.0, (double)count / rate) * rate);
+        const size_t last = (size_t)(std::clamp(to, 0.0, (double)count / rate) * rate);
+        if (last <= first + (size_t)rate / 10) { return onsets; }
+        const size_t step = (size_t)std::max(1, rate / 1000);
+        const size_t frames = (last - first) / step;
+        std::vector<double> rms(frames), prefix(frames + 1, 0), smooth(frames), smoothPrefix(frames + 1, 0), novelty(frames, 0);
+        for (size_t i = 0; i < frames; ++i) {
+            double energy = 0;
+            for (size_t j = first + i * step; j < first + (i + 1) * step; ++j) { const double v = std::isfinite(input[j]) ? input[j] : 0; energy += v * v; }
+            rms[i] = std::sqrt(energy / step); prefix[i + 1] = prefix[i] + rms[i];
+        }
+        for (size_t i = 0; i < frames; ++i) {
+            const size_t a = i > 4 ? i - 4 : 0, b = std::min(frames, i + 5);
+            smooth[i] = (prefix[b] - prefix[a]) / (double)(b - a); smoothPrefix[i + 1] = smoothPrefix[i] + smooth[i];
+            const size_t start = i > 30 ? i - 30 : 0;
+            novelty[i] = std::max(0.0, smooth[i] - (smoothPrefix[i] - smoothPrefix[start]) / (double)std::max<size_t>(1, i - start));
+        }
+        auto levels = novelty;
+        const size_t percentile = levels.size() * 95 / 100;
+        std::nth_element(levels.begin(), levels.begin() + percentile, levels.end());
+        const double maximum = *std::max_element(novelty.begin(), novelty.end());
+        if (maximum < 1e-7) { return onsets; }
+        const double scale = std::max(levels[percentile], maximum * 0.08);
+        for (size_t i = 1; i + 8 < frames; ++i) {
+            if (novelty[i] < scale * 0.25 || novelty[i] < novelty[i - 1]) { continue; }
+            bool peak = true;
+            for (size_t k = i + 1; k <= i + 8; ++k) { if (novelty[k] > novelty[i]) { peak = false; break; } }
+            if (!peak) { continue; }
+            // 立ち上がりの始まり (直前の谷から少し上がった所) を発音の時刻にする
+            const size_t start = i > 30 ? i - 30 : 0;
+            const auto minimum = std::min_element(rms.begin() + start, rms.begin() + i + 1);
+            size_t attack = (size_t)(minimum - rms.begin());
+            const double threshold = *minimum + (rms[i] - *minimum) * 0.06;
+            while (attack < i && rms[attack] <= threshold) { ++attack; }
+            const double time = (double)(first + attack * step) / rate;
+            const double weight = std::log1p(std::min(100.0, novelty[i] / scale));
+            if (!onsets.empty() && time - onsets.back().Time < 0.04) { if (weight > onsets.back().Weight) { onsets.back() = { time, weight }; } }
+            else { onsets.push_back({ time, weight }); }
+            i += 8;
+        }
+        return onsets;
+    }
+
+    // start 秒から始まる小節 (それぞれ beats[m] 拍) の BPM を、前の小節の BPM の ±25% の範囲で 1 小節ずつ追う。
+    // 打音が少ない小節は前の BPM のままにする。戻り値は小節ごとの BPM (beats と同じ数)
+    inline std::vector<double> TrackMeasureBpms(const float* input, size_t count, int rate, double start, const std::vector<double>& beats, double initialBpm) {
+        std::vector<double> out;
+        if (!input || rate < 1000 || beats.empty() || !std::isfinite(initialBpm) || initialBpm <= 0 || !std::isfinite(start)) { return out; }
+        double total = 0;
+        for (double b : beats) { total += std::max(0.0, b); }
+        const double longest = total * 60 / initialBpm * 1.4 + 2;
+        const auto onsets = DetectOnsets(input, count, rate, start - 0.5, start + longest);
+        std::vector<double> times;
+        for (const auto& o : onsets) { times.push_back(o.Time); }
+        // 時刻 t の近く (±radius) にある打音の重みの合計 (ずれが小さいほど重く)
+        auto around = [&](double t, double radius, const std::function<void(const TrackOnset&, double)>& each) {
+            auto it = std::lower_bound(times.begin(), times.end(), t - radius);
+            for (; it != times.end() && *it <= t + radius; ++it) { const auto& o = onsets[(size_t)(it - times.begin())]; each(o, o.Time - t); }
+        };
+        double t = start, period = 60 / initialBpm;
+        for (size_t m = 0; m < beats.size(); ++m) {
+            const double b = beats[m];
+            if (!(b > 0)) { out.push_back(60 / period); continue; }
+            const int n = std::max(1, (int)std::floor(b + 1e-9));
+            double best = 0, bestPeriod = period, bestShift = 0;
+            // 前の BPM の 0.6～1.4 倍を 0.25% 刻みで試す。拍の格子の点ごとに、いちばん合う打音を 1 つだけ数える
+            // (打音を全部足すと、細かい音の多い遅い格子が有利になってしまう)
+            for (int k = -160; k <= 160; ++k) {
+                const double p = period * (1 + k * 0.0025);
+                for (int s = -3; s <= 3; ++s) {
+                    const double shift = s * 0.002;
+                    double score = 0;
+                    for (int j = 0; j <= n; ++j) {
+                        double point = 0;
+                        around(t + shift + j * p, 0.04, [&](const TrackOnset& o, double error) { point = std::max(point, o.Weight * std::exp(-0.5 * std::pow(error / 0.012, 2))); });
+                        score += point;
+                    }
+                    score /= n + 1;
+                    // 前の BPM から大きく離れた候補 (と、ずれの大きい合わせ方) は少しだけ不利にする
+                    score *= std::exp(-0.5 * std::pow((p / period - 1) / 0.3, 2)) * std::exp(-0.5 * std::pow(shift / 0.006, 2));
+                    if (score > best) { best = score; bestPeriod = p; bestShift = shift; }
+                }
+            }
+            if (best < 0.15) { out.push_back(60 / period); t += b * period; continue; }    // 打音が無い: 前の BPM のまま
+            // 拍の番号と打音の時刻に直線を当てはめて、周期と位置を細かく求める
+            double sw = 0, sk = 0, st = 0, skk = 0, skt = 0;
+            for (int j = 0; j <= n; ++j) {
+                around(t + bestShift + j * bestPeriod, 0.025, [&](const TrackOnset& o, double error) {
+                    const double w = o.Weight * std::exp(-0.5 * std::pow(error / 0.015, 2));
+                    sw += w; sk += w * j; st += w * o.Time; skk += w * j * j; skt += w * j * o.Time;
+                });
+            }
+            const double denominator = sw * skk - sk * sk;
+            double fitted = bestPeriod, origin = t + bestShift;
+            if (sw > 0 && denominator > 1e-9) {
+                const double p = (sw * skt - sk * st) / denominator;
+                if (p > bestPeriod * 0.9 && p < bestPeriod * 1.1) { fitted = p; origin = (st - p * sk) / sw; }
+            }
+            if (std::abs(origin - t) > 0.02) { origin = t + bestShift; }
+            period = fitted;
+            out.push_back(60 / period);
+            t = origin + b * period;
+        }
+        return out;
     }
 }

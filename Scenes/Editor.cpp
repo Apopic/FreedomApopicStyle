@@ -837,6 +837,183 @@ void Game::EditorShowCursorPage() {
     }
 }
 
+std::string Game::EditorCommandKey(const std::string& text) {
+    const std::string_view t = tja::Trim(text);
+    std::string key(t.substr(0, t.find_first_of(" \t")));
+    for (auto& c : key) { c = (char)std::toupper((unsigned char)c); }
+    return key;
+}
+
+void Game::EditorBeginDeleteCommands() {
+    auto* course = EditorCourse();
+    if (course == nullptr) { return; }
+    if (!Editor.Selecting) { EditorMessage("命令を消す範囲を選んでください (Shift+クリック / Shift+矢印)"); return; }
+    const auto [a, b] = EditorSelection();
+    std::vector<std::pair<std::string, int>> kinds;
+    int total = 0;
+    for (int m = a.Measure; m <= b.Measure && m < (int)course->Measures.size(); ++m) {
+        for (const auto& c : course->Measures[m].Commands) {
+            if (!EditorInSelection(m, c.Num, c.Den)) { continue; }
+            const std::string key = EditorCommandKey(c.Text);
+            auto it = std::ranges::find(kinds, key, &std::pair<std::string, int>::first);
+            if (it == kinds.end()) { kinds.push_back({ key, 1 }); } else { ++it->second; }
+            ++total;
+        }
+    }
+    if (total == 0) { EditorMessage("選んだ範囲に命令がありません"); return; }
+    std::vector<std::string> choices{ "すべて (" + std::to_string(total) + " 個)" };
+    for (const auto& [key, n] : kinds) { choices.push_back(key + " (" + std::to_string(n) + " 個)"); }
+    EditorBeginFields("範囲の命令を消す (←→ で種類を選ぶ)", { { "消す命令", choices.front(), choices } }, [this, kinds, choices](const auto& values) {
+        const auto it = std::ranges::find(choices, values.empty() ? std::string() : values[0]);
+        const size_t index = it == choices.end() ? 0 : (size_t)(it - choices.begin());
+        EditorDeleteCommandsInSelection(index == 0 ? std::string() : kinds[index - 1].first);
+    });
+}
+
+void Game::EditorDeleteCommandsInSelection(const std::string& key) {
+    auto* course = EditorCourse();
+    if (course == nullptr || !Editor.Selecting) { return; }
+    const auto [a, b] = EditorSelection();
+    auto target = [&](int m, const tja::Command& c) { return EditorInSelection(m, c.Num, c.Den) && (key.empty() || EditorCommandKey(c.Text) == key); };
+    int count = 0;
+    bool measureCommand = false;
+    for (int m = a.Measure; m <= b.Measure && m < (int)course->Measures.size(); ++m) {
+        for (const auto& c : course->Measures[m].Commands) {
+            if (target(m, c)) { ++count; measureCommand |= EditorCommandKey(c.Text) == "#MEASURE"; }
+        }
+    }
+    if (count == 0) { EditorMessage("消す命令がありません"); return; }
+    const std::vector<EditorFrac> before = measureCommand ? EditorMeasureFracs() : std::vector<EditorFrac>{};
+    EditorChange();
+    for (int m = a.Measure; m <= b.Measure && m < (int)course->Measures.size(); ++m) {
+        std::erase_if(course->Measures[m].Commands, [&](const tja::Command& c) { return target(m, c); });
+    }
+    if (measureCommand) { EditorKeepNotePositions(before); }
+    EditorMessage((key.empty() ? std::string("範囲の命令を ") : "範囲の " + key + " を ") + std::to_string(count) + " 個消しました (Ctrl+Z で戻せます)");
+}
+
+auto Game::EditorMeasureFracs() -> std::vector<EditorFrac> {
+    ++Editor.Revision;      // 小節の長さの記録を作り直させる
+    std::vector<EditorFrac> out;
+    if (const auto* course = EditorCourse()) {
+        for (int m = 0; m < (int)course->Measures.size(); ++m) { out.push_back(EditorTimingAt(m).Measure); }
+    }
+    return out;
+}
+
+void Game::EditorKeepNotePositions(const std::vector<EditorFrac>& before) {
+    auto* course = EditorCourse();
+    if (course == nullptr) { return; }
+    const std::vector<EditorFrac> after = EditorMeasureFracs();
+    // 長さを整数の分数にする (小数の #MEASURE も 10 倍ずつして整数に)。負や 0 の長さ (逆走などのギミック) は扱わない
+    auto rational = [](const EditorFrac& f, int64_t& n, int64_t& d) {
+        double num = f.Num, den = f.Den;
+        for (int i = 0; i < 6 && (std::abs(num - std::round(num)) > 1e-9 || std::abs(den - std::round(den)) > 1e-9); ++i) { num *= 10; den *= 10; }
+        n = (int64_t)std::llround(num); d = (int64_t)std::llround(den);
+        if (d < 0) { n = -n; d = -d; }
+        if (n <= 0 || d <= 0) { return false; }
+        tja::Reduce(n, d);
+        return true;
+    };
+    // 小節ごとの位置の倍率 (= 前の長さ / 新しい長さ)。変わらない小節・長さが負や 0 の小節は 0
+    const int n = (int)std::min(before.size(), after.size());
+    std::vector<std::pair<int64_t, int64_t>> factors((size_t)n, { 0, 0 });
+    for (int m = 0; m < n; ++m) {
+        int64_t bn = 1, bd = 1, an = 1, ad = 1;
+        if (!rational(before[(size_t)m], bn, bd) || !rational(after[(size_t)m], an, ad) || bn * ad == an * bd) { continue; }
+        factors[(size_t)m] = { bn * ad, bd * an };
+    }
+    // 縮めて小節の外にはみ出す音符・命令がある時は、ほかの小節の音符と重なって消えてしまうので位置を変えない (従来どおり小節に合わせて縮む)
+    for (int m = 0; m < n; ++m) {
+        const auto [mulN, mulD] = factors[(size_t)m];
+        if (mulN == 0 || mulN <= mulD) { continue; }
+        const auto& measure = course->Measures[(size_t)m];
+        const bool overflow = std::ranges::any_of(measure.Notes, [&](const tja::Note& x) { return x.Num * mulN >= x.Den * mulD; })
+            || std::ranges::any_of(measure.Commands, [&](const tja::Command& x) { return x.Num * mulN > x.Den * mulD; });
+        if (overflow) {
+            ++Editor.Revision;
+            EditorMessage("小節を縮めると後ろの音符が小節の外に出るため、音符の位置は小節の長さに合わせて縮めました (Ctrl+Z で戻せます)");
+            return;
+        }
+    }
+    // 音符・命令の小節の中の位置に倍率を掛ける: 拍の位置はそのままで、伸ばした分は右に空きができる
+    for (int m = 0; m < n; ++m) {
+        const auto [mulN, mulD] = factors[(size_t)m];
+        if (mulN == 0) { continue; }
+        auto& measure = course->Measures[(size_t)m];
+        for (auto& x : measure.Notes) { x.Num *= mulN; x.Den *= mulD; tja::Reduce(x.Num, x.Den); }
+        for (auto& x : measure.Commands) { x.Num *= mulN; x.Den *= mulD; tja::Reduce(x.Num, x.Den); }
+    }
+    ++Editor.Revision;
+}
+
+void Game::EditorBeginBpmAnalyze() {
+    if (!EditorCourse()) { return; }
+    if (!Editor.Selecting) { EditorMessage("BPM を解析する範囲を選んでください (Shift+クリック / Shift+矢印)"); return; }
+    EditorBeginFields("範囲の BPM を解析して #BPMCHANGE を入れる", {
+        { "変化とみなす差 (BPM)", "1" },
+        { "BPM の丸め", "小数第 2 位", { "整数", "小数第 1 位", "小数第 2 位" } },
+    }, [this](const auto& values) {
+        double threshold = 0;
+        const std::string text = values.empty() ? std::string() : std::string(tja::Trim(values[0]));
+        const auto result = fast_float::from_chars(text.data(), text.data() + text.size(), threshold);
+        if (result.ec != std::errc{} || result.ptr != text.data() + text.size() || !std::isfinite(threshold) || threshold < 0) { EditorMessage("差は 0 以上の数で入れてください"); return; }
+        const std::string rounding = values.size() > 1 ? values[1] : std::string();
+        EditorAnalyzeBpm(std::max(threshold, 0.01), rounding == "整数" ? 0 : rounding == "小数第 1 位" ? 1 : 2);
+    });
+}
+
+void Game::EditorAnalyzeBpm(double threshold, int digits) {
+    auto* course = EditorCourse();
+    if (course == nullptr || !Editor.Selecting) { return; }
+    const auto [a, b] = EditorSelection();
+    const int count = (int)course->Measures.size();
+    const int first = std::clamp(a.Measure, 0, count - 1), last = std::clamp(b.Measure, first, count - 1);
+    // 範囲の小節の拍数と、範囲の始まりの BPM・時刻
+    std::vector<double> beats;
+    for (int m = first; m <= last; ++m) { beats.push_back(EditorTimingAt(m).Measure.Value() * 4); }
+    const double initial = EditorTimingAt(first).Bpm;
+    if (!(initial > 0) || std::ranges::any_of(beats, [](double v) { return !(v > 0); })) { EditorMessage("負の BPM・拍子 (逆走などのギミック) を含む範囲は解析できません"); return; }
+    const auto& timeline = EditorTimelineCached();
+    if (first >= (int)timeline.Measures.size() || timeline.Measures[(size_t)first].Map.empty()) { EditorMessage("範囲の時刻を求められませんでした"); return; }
+    const double offset = std::atof(tja::Document::GetValue(Editor.Doc.Header, "OFFSET").c_str());
+    const double start = timeline.Measures[(size_t)first].Map.front().second / 1000.0 - offset;
+    auto [mono, rate] = EditorReadMono();
+    if (mono.empty()) { return; }
+    if (start < 0 || start * rate >= (double)mono.size()) { EditorMessage("範囲の始まりが音源の外にあります"); return; }
+    const auto bpms = tempo::TrackMeasureBpms(mono.data(), mono.size(), rate, start, beats, initial);
+    if (bpms.size() != beats.size()) { EditorMessage("BPM を解析できませんでした"); return; }
+    // 範囲の後ろの小節が今まで使っていた BPM (範囲の BPM を変えても、後ろは元の BPM に戻す)
+    const bool hasNext = last + 1 < count;
+    const double nextBpm = hasNext ? EditorTimingAt(last + 1).Bpm : 0;
+    const bool nextHasOwn = hasNext && std::ranges::any_of(course->Measures[(size_t)(last + 1)].Commands, [](const tja::Command& c) { return c.Num == 0 && tja::StartsWithKey(c.Text, "#BPMCHANGE"); });
+    EditorChange();
+    for (int m = first; m <= last; ++m) {
+        std::erase_if(course->Measures[(size_t)m].Commands, [](const tja::Command& c) { return tja::StartsWithKey(c.Text, "#BPMCHANGE"); });
+    }
+    ++Editor.Revision;
+    double current = EditorTimingAt(first).Bpm;     // 範囲に入る時の BPM (範囲の #BPMCHANGE を消した後)
+    const double scale = std::pow(10.0, digits);
+    double lowest = 1e9, highest = 0;
+    int inserted = 0;
+    for (size_t i = 0; i < bpms.size(); ++i) {
+        const double v = std::round(bpms[i] * scale) / scale;
+        lowest = std::min(lowest, v); highest = std::max(highest, v);
+        if (std::abs(v - current) + 1e-9 >= threshold) {
+            tja::Document::AddCommand(course->Measures[(size_t)first + i], 0, 1, "#BPMCHANGE " + EditorNum(v));
+            current = v;
+            ++inserted;
+        }
+    }
+    if (hasNext && !nextHasOwn && std::abs(current - nextBpm) > 1e-9) {
+        tja::Document::AddCommand(course->Measures[(size_t)last + 1], 0, 1, "#BPMCHANGE " + EditorNum(nextBpm));
+    }
+    ++Editor.Revision;
+    const std::string range = "小節 " + std::to_string(first + 1) + "～" + std::to_string(last + 1) + " (BPM " + EditorNum(lowest) + "～" + EditorNum(highest) + ")";
+    EditorMessage(inserted > 0 ? range + " を解析し、" + std::to_string(inserted) + " か所に #BPMCHANGE を入れました (目安なので、テストプレイで確かめてください)"
+        : range + " を解析しました。差が " + EditorNum(threshold) + " 以上の BPM の変化はありませんでした");
+}
+
 auto Game::EditorLane(int row) const -> UIRect {
     const UIRect a = EditorGridArea();
     const float h = EditorRowHeight(), top = a.T + h * row;
@@ -951,6 +1128,7 @@ auto Game::EditorButtons() -> std::vector<EditorButton> {
         { "コピー", [this] { EditorCopy(false); }, false, EditorIcon::Copy },
         { "切り取り", [this] { EditorCopy(true); }, false, EditorIcon::Cut },
         { "貼り付け", [this] { EditorPaste(); }, false, EditorIcon::Paste },
+        { "命令を消す", [this] { EditorBeginDeleteCommands(); }, false, EditorIcon::CommandDelete },
     });
     group("小節", {
         { "挿入", [this] {
@@ -990,6 +1168,7 @@ auto Game::EditorButtons() -> std::vector<EditorButton> {
         { "音源長→小節数", [this] { EditorFitAudioLength(); }, false, EditorIcon::AudioLength },
         { "現在位置をDEMOSTARTに設定", [this] { EditorSetDemoStart(); }, false, EditorIcon::DemoStart },
         { "波形に音符を合わせる", [this] { EditorBeginWaveAlign(); }, false, EditorIcon::WaveAlign },
+        { "範囲のBPMを解析", [this] { EditorBeginBpmAnalyze(); }, false, EditorIcon::BpmAnalyze },
     });
     newline();
     group("コース", {
@@ -1024,6 +1203,8 @@ std::string Game::EditorButtonHelp(const std::string& label) {
         { "コピー", "選んだ範囲の音符・命令をコピーする (Ctrl+C)" },
         { "切り取り", "選んだ範囲の音符・命令を切り取る (Ctrl+X)" },
         { "貼り付け", "カーソルの位置に貼り付ける (Ctrl+V)" },
+        { "命令を消す", "選んだ範囲の命令を、すべて・または種類 (#SCROLL など) を選んでまとめて消す (Ctrl+Z で戻せる)" },
+        { "範囲のBPMを解析", "選んだ範囲の小節の BPM を音源から 1 小節ずつ解析し、変わる小節に #BPMCHANGE を入れる (範囲の #BPMCHANGE は入れ直す。Ctrl+Z で戻せる)" },
         { "前のコース", "編集するコースを切り替える (コースの追加はヘッダーから)" },
         { "次のコース", "編集するコースを切り替える (コースの追加はヘッダーから)" },
         { "細かくしない分割", "グリッドを「よく使う分割」の 1 つ粗いものにする" },
@@ -1473,6 +1654,9 @@ void Game::EditorInsertCommand(const std::string& text) {
     if (t.empty() || t == "#") { return; }
     auto* course = EditorCourse();
     if (course == nullptr) { return; }
+    // #MEASURE で小節の長さを変える時は、音符の拍の位置を変えずに小節の長さだけを変える
+    const bool measureCommand = tja::StartsWithKey(t, "#MEASURE");
+    const std::vector<EditorFrac> measureBefore = measureCommand ? EditorMeasureFracs() : std::vector<EditorFrac>{};
     // グラデーション: 値を「始まり>終わり」と書くと、範囲の音符ごと (後ろに「小節」と書くと小節線ごと) に、値を少しずつ変えて入れる
     //   例: #SCROLL 1>3 (音符ごと)、#BPMCHANGE 120>240 小節 (小節線ごと)
     if (const size_t gt = t.find('>'); gt != std::string::npos && (tja::StartsWithKey(t, "#SCROLL") || tja::StartsWithKey(t, "#BPMCHANGE") || tja::StartsWithKey(t, "#DELAY"))) {
@@ -1557,12 +1741,14 @@ void Game::EditorInsertCommand(const std::string& text) {
         EditorChange();
         tja::Document::AddCommand(course->Measures[a.Measure], a.Num, a.Den, t);
         if (!restore.empty() && em < (int)course->Measures.size()) { tja::Document::AddCommand(course->Measures[em], en, ed, restore); }
+        if (measureCommand) { EditorKeepNotePositions(measureBefore); }
         EditorMessage("範囲に命令を入れました: " + t + (restore.empty() ? "" : " … " + restore));
         return;
     }
     const int division=EditorDivOf(Editor.CursorMeasure);
     EditorChange();
     tja::Document::AddCommand(course->Measures[Editor.CursorMeasure], Editor.CursorSlot, division, t);
+    if (measureCommand) { EditorKeepNotePositions(measureBefore); }
     ++Editor.Revision;
     EditorMessage("命令を挿入しました: " + t);
 }
@@ -2996,6 +3182,25 @@ void Game::EditorDrawIconShape(const EditorButton& b, unsigned int color, bool t
         for (int i = 0; i < 10; ++i) { gfx::Triangle(cx, cy, px[i], py[i], px[(i + 1) % 10], py[(i + 1) % 10], color, true); }
         break;
     }
+    case EditorIcon::CommandDelete: {    // 命令 (#) と ×
+        const float hx = cx - s * 0.3f;
+        line(hx - s * 0.2f, cy - s * 0.8f, hx - s * 0.35f, cy + s * 0.8f);
+        line(hx + s * 0.3f, cy - s * 0.8f, hx + s * 0.15f, cy + s * 0.8f);
+        line(hx - s * 0.65f, cy - s * 0.3f, hx + s * 0.55f, cy - s * 0.3f);
+        line(hx - s * 0.75f, cy + s * 0.3f, hx + s * 0.45f, cy + s * 0.3f);
+        line(cx + s * 0.35f, cy + s * 0.15f, cx + s * 0.95f, cy + s * 0.85f);
+        line(cx + s * 0.95f, cy + s * 0.15f, cx + s * 0.35f, cy + s * 0.85f);
+        break;
+    }
+    case EditorIcon::BpmAnalyze: {      // メトロノーム
+        line(cx - s * 0.75f, cy + s * 0.9f, cx + s * 0.75f, cy + s * 0.9f);
+        line(cx - s * 0.75f, cy + s * 0.9f, cx - s * 0.3f, cy - s * 0.9f);
+        line(cx + s * 0.75f, cy + s * 0.9f, cx + s * 0.3f, cy - s * 0.9f);
+        line(cx - s * 0.3f, cy - s * 0.9f, cx + s * 0.3f, cy - s * 0.9f);
+        line(cx, cy + s * 0.55f, cx + s * 0.6f, cy - s * 0.6f);
+        gfx::Circle(cx + s * 0.38f, cy - s * 0.18f, t * 0.9f, 12, color, true);
+        break;
+    }
     case EditorIcon::Estimate: { // 波形
         float px = 0, py = 0;
         for (int i = 0; i <= 16; ++i) {
@@ -3637,10 +3842,13 @@ void Game::EditorProc() {
     for (const auto& hit : EditorCommandRects()) {
         if (!hit.Rect.Contains(pt.X, pt.Y)) { continue; }
         if (pt.RightPressed) {
-            EditorChange();
             auto& cmds = course->Measures[hit.Measure].Commands;
+            const bool measureCommand = tja::StartsWithKey(cmds[hit.Index].Text, "#MEASURE");
+            const std::vector<EditorFrac> before = measureCommand ? EditorMeasureFracs() : std::vector<EditorFrac>{};
+            EditorChange();
             EditorMessage("命令を削除しました: " + cmds[hit.Index].Text);
             cmds.erase(cmds.begin() + hit.Index);
+            if (measureCommand) { EditorKeepNotePositions(before); }
             return;
         }
         if (pt.LeftPressed) {
@@ -3648,10 +3856,13 @@ void Game::EditorProc() {
             EditorEditCommandValues(course->Measures[m].Commands[i].Text, [this, m, i](const std::string& s) {
                 auto& cmds = EditorCourse()->Measures[m].Commands;
                 if (i >= (int)cmds.size()) { return; }
-                EditorChange();
                 const std::string t(strtrim(s));
+                const bool measureCommand = tja::StartsWithKey(cmds[i].Text, "#MEASURE") || tja::StartsWithKey(t, "#MEASURE");
+                const std::vector<EditorFrac> before = measureCommand ? EditorMeasureFracs() : std::vector<EditorFrac>{};
+                EditorChange();
                 if (t.empty()) { cmds.erase(cmds.begin() + i); }
                 else { cmds[i].Text = t; }
+                if (measureCommand) { EditorKeepNotePositions(before); }
             });
             return;
         }
