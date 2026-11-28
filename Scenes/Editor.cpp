@@ -1878,7 +1878,7 @@ auto Game::EditorGimmicks() -> const std::vector<EditorGimmick>& {
         { "慣性移動", "BPM 時間(小節) 距離(小節) 段数 段ごとの速さの倍率", "200 2/4 4/2 4 1/2", "「BPM の 時間(小節) の長さ」の間に、距離(小節) だけ段数の段に分けて減速しながら進む (例: BPM 200 の 2/4 小節の時間で 4/2 小節ぶん進む)。最後に元の BPM・拍子へ戻す" },
         { "慣性移動 (加速)", "BPM 時間(小節) 距離(小節) 段数 段ごとの速さの倍率", "200 2/4 4/2 4 2", "「BPM の 時間(小節) の長さ」の間に、距離(小節) だけ段数の段に分けて加速しながら進む (例: BPM 200 の 2/4 小節の時間で 4/2 小節ぶん進む)。最後に元の BPM・拍子へ戻す" },
         { "コマ送り (範囲)", "移動距離の倍率", "1", "選んだ範囲を別の小節に分け、音符ごとに「止まる → 次の音符までの距離だけ瞬間移動 (バグ式)」に作り直して、音符が 1 つずつコマ送りで進んで見えるようにする (叩く時刻は変わらない。倍率 1 で元の間隔)" },
-        { "痙攣 (範囲)", "間隔(分) 振れ幅", "16 1/2", "選んだ範囲を別の小節に分け、間隔ごとに「速く前へ進む → 振れ幅 (間隔に対する割合) だけ戻る」に作り直して、音符が元の速さで来ながら震えて見えるようにする (叩く時刻は変わらない)" },
+        { "痙攣 (範囲)", "振れ幅", "1/2", "選んだ範囲を別の小節に分け、音符の間隔に合わせた区切りごとに「速く前へ進む → 振れ幅 (区切りに対する割合。0 より大きく 1 より小さい) だけ戻る」に作り直して、音符が元の速さで来ながら震えて見えるようにする (区切りは範囲の一番細かい音符の間隔 (4 分より粗い時は 4 分) に自動で合わせる。叩く時刻は変わらない)" },
     };
     return list;
 }
@@ -2283,27 +2283,33 @@ void Game::EditorFixJiroDrift() {
         exact.push_back(tl.Measures.empty() || tl.Measures.back().Map.empty() ? 0 : tl.Measures.back().Map.back().second);
     }
     Editor.PreviewJiro = savedJiro;
-    // 小節の頭ごとに、次郎の時刻が本来より 1ms 以上早ければ、その分 (ミリ秒の整数) の #DELAY を小節の頭に入れる
+    // 小節の頭ごとに、次郎の時刻が本来より 1ms 以上ずれていれば、その分 (ミリ秒の整数) の #DELAY を小節の頭に入れる
+    //   drift = 本来 - 次郎。正 = 次郎が早い (正の拍の長さの切り捨て) → 正の #DELAY で遅らせる
+    //                        負 = 次郎が遅い (負の BPM・負の #DELAY の 0 方向への切り捨て) → 負の #DELAY で早める
     bool changed = false;
     int inserted = 0;
-    double total = 0, worst = 0;
+    double early = 0, late = 0, worst = 0;
     for (int m = std::max(first, 1); m <= last + 1 && m <= count; ++m) {
         const auto maps = EditorJiroMeasureMaps();
         const double jiroHead = m < (int)maps.size() ? maps[(size_t)m].Map.front().second : maps.back().Map.back().second;
         const double drift = exact[(size_t)m] - jiroHead;
-        if (drift < 1.0 - 1e-6 || m >= count) { worst = std::max(worst, std::abs(drift)); continue; }
-        const double ms = std::floor(drift + 1e-6);
+        if (std::abs(drift) < 1.0 - 1e-6 || m >= count) { worst = std::max(worst, std::abs(drift)); continue; }
+        // 次郎は #DELAY を (int)(秒 × 1000) で 0 方向に切り捨てるので、ミリ秒の整数を 0 方向に丸めて書く
+        const double ms = drift > 0 ? std::floor(drift + 1e-6) : -std::floor(-drift + 1e-6);
         if (!changed) { EditorChange(); changed = true; }
         // 小節の頭の #DELAY (次郎は小数第 3 位 = ミリ秒まで読む)
         tja::Document::AddCommand(course->Measures[(size_t)m], 0, 1, "#DELAY " + EditorNum(ms / 1000.0));
         ++Editor.Revision;
         ++inserted;
-        total += ms;
-        worst = std::max(worst, drift - ms);
+        (ms > 0 ? early : late) += std::abs(ms);
+        worst = std::max(worst, std::abs(drift - ms));
     }
     if (!changed) { EditorMessage("補正するずれはありませんでした (次郎の時刻と本来の時刻の差は 1ms 未満)"); return; }
     ++Editor.Revision;
-    EditorMessage(std::to_string(inserted) + " か所に #DELAY を入れ、次郎の切り捨てで早くなる分 (合計 " + EditorNum(total) + "ms) を打ち消しました"
+    std::string detail;
+    if (early > 0) { detail += "早くなる分 " + EditorNum(early) + "ms"; }
+    if (late > 0) { detail += (detail.empty() ? "" : "・") + std::string("遅くなる分 ") + EditorNum(late) + "ms"; }
+    EditorMessage(std::to_string(inserted) + " か所に #DELAY を入れ、次郎の切り捨てでずれる分 (" + detail + ") を打ち消しました"
         + (EditorJiroPreviewEnabled() ? "" : "  ※ 次郎形式再生ボタンで、次郎の時刻で確かめられます"));
 }
 
@@ -2391,7 +2397,7 @@ void Game::EditorInsertConvulsion(const std::string& params) { EditorRebuildRang
 
 // 選んだ範囲を別の小節に分けて作り直す。範囲の前と後ろの部分は、拍子を短くした小節として残す。叩く時刻は変わらない
 //   kind 0 (コマ送り): 音符ごとに「止まる (疑似停止) → 次の音符までの距離 × 倍率だけ瞬間移動 (バグ式)」
-//   kind 1 (痙攣): 間隔ごとに「速く前へ進む → 振れ幅だけ後ろへ戻る」(進む距離と時間の合計は元と同じなので、音符は元の速さで来ながら震える)
+//   kind 1 (痙攣): 音符の間隔に合わせた区切りごとに「速く前へ進む → 振れ幅だけ後ろへ戻る」(進む距離と時間の合計は元と同じなので、音符は元の速さで来ながら震える)
 void Game::EditorRebuildRange(int kind, const std::string& params) {
     auto* course = EditorCourse();
     if (course == nullptr) { return; }
@@ -2400,18 +2406,17 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
     std::vector<std::string> args;
     for (auto part : split(params, ' ')) { if (!tja::Trim(part).empty()) { args.emplace_back(tja::Trim(part)); } }
     auto arg = [&](size_t i, const char* def) { return EditorParseFrac(i < args.size() ? std::string_view(args[i]) : std::string_view(def)); };
-    int64_t kn = 1, kd = 1, iv = 16, an = 1, ad = 2;
+    int64_t kn = 1, kd = 1, an = 1, ad = 2;
     if (kind == 0) {
         const auto scale = arg(0, "1");
         if (!scale || !EditorToRational(*scale, kn, kd)) { EditorMessage("移動距離の倍率は正の値にしてください (例: 1)"); return; }
     }
     else {
-        const auto interval = arg(0, "16"), amplitude = arg(1, "1/2");
-        if (!interval || interval->Value() < 1 || std::floor(interval->Value()) != interval->Value() || interval->Value() > 1024
-            || !amplitude || !EditorToRational(*amplitude, an, ad) || an >= ad) {
-            EditorMessage("間隔は 1 以上の整数 (分)、振れ幅は 0 より大きく 1 より小さくしてください (例: 16 1/2)"); return;
+        // 振れ幅だけを指定する (以前の「間隔 振れ幅」の形で書かれていたら最後の値を振れ幅として使う)
+        const auto amplitude = arg(args.empty() ? 0 : args.size() - 1, "1/2");
+        if (!amplitude || !EditorToRational(*amplitude, an, ad) || an >= ad) {
+            EditorMessage("振れ幅は 0 より大きく 1 より小さくしてください (例: 1/2)"); return;
         }
-        iv = (int64_t)interval->Value();
     }
     const auto [a, b] = EditorSelection();
     const int count = (int)course->Measures.size();
@@ -2492,15 +2497,36 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
     }
     std::string summary;
     if (kind == 1) {
-        // 痙攣: 間隔 1/iv 小節ごとの区切り。区切りの長さ len、戻る距離 a = len × 振れ幅、
+        // 痙攣: 音符の時刻で範囲を切り、その間を「一番細かい音符の間隔 (4 分より粗ければ 4 分)」に近い長さで等分した区切り。
+        // 音符は必ず区切りの頭 (前へ進む小節の頭) に来る。区切りの長さ len、戻る距離 a = len × 振れ幅、
         // 前へ進む小節は 距離 len + a を 時間 len - a で進み (BPM = B × (len + a) / (len - a))、戻る小節は BPM -B・長さ -a (時間 a、距離 -a)
-        const Q slice{ 1, iv };
+        std::vector<Q> cuts{ start };
+        for (const auto& it : inside) { if (it.Text.empty() && less(start, it.At)) { cuts.push_back(it.At); } }
+        std::ranges::sort(cuts.begin() + 1, cuts.end(), less);
+        cuts.erase(std::unique(cuts.begin(), cuts.end(), [](const Q& x, const Q& y) { return x.N == y.N && x.D == y.D; }), cuts.end());
+        cuts.push_back(end);
+        // 区切りの基準の長さ: 音符と音符の間隔 (範囲の始まり・終わりとの間は含めない) の一番短いもの。音符が 2 つ未満なら 16 分
+        Q unit{ 1, 4 };
+        bool found = false;
+        for (size_t i = 1; i + 2 < cuts.size(); ++i) {
+            const Q gap = sub(cuts[i + 1], cuts[i]);
+            if (!found || less(gap, unit)) { unit = gap; found = true; }
+        }
+        if (!found) { unit = { 1, 16 }; }
+        if (less(Q{ 1, 4 }, unit)) { unit = { 1, 4 }; }
         std::vector<std::pair<Q, Q>> slices;
-        for (Q from = start; less(from, end);) {
-            Q to = add(from, slice);
-            if (less(end, to)) { to = end; }
-            slices.push_back({ from, to });
-            from = to;
+        for (size_t i = 0; i + 1 < cuts.size(); ++i) {
+            const Q gap = sub(cuts[i + 1], cuts[i]);
+            if (gap.N <= 0) { continue; }
+            const int64_t pieces = std::max<int64_t>(1, std::llround(qValue(gap) / qValue(unit)));
+            if (pieces > 2048) { EditorMessage("区切りが多すぎます (2048 まで)。範囲を短くしてください"); return; }
+            const Q piece = norm({ gap.N, gap.D * pieces });
+            Q from = cuts[i];
+            for (int64_t k = 0; k < pieces; ++k) {
+                const Q to = k + 1 == pieces ? cuts[i + 1] : add(from, piece);
+                slices.push_back({ from, to });
+                from = to;
+            }
         }
         if (slices.size() > 2048) { EditorMessage("区切りが多すぎます (2048 まで)。間隔を大きくするか、範囲を短くしてください"); return; }
         // 戻る間に音符があると、その音符は正しく流せないので使えない
@@ -2509,7 +2535,7 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
             const Q turn = sub(to, back);
             for (const auto& it : inside) {
                 if (it.Text.empty() && !less(it.At, turn) && less(it.At, to)) {
-                    EditorMessage("音符が戻る所にかかります。間隔を音符の細かさに合わせるか、振れ幅を小さくしてください"); return;
+                    EditorMessage("音符が戻る所にかかります。振れ幅を小さくしてください"); return;
                 }
             }
         }
@@ -2533,7 +2559,7 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
             fill(ret, inside, turn, to);     // 音符以外の命令 (#SCROLL など) だけが入る
             built.push_back(std::move(ret));
         }
-        summary = std::to_string(slices.size()) + " 区切りの痙攣にしました";
+        summary = std::to_string(slices.size()) + " 区切り (1 区切り " + qText(unit) + " 小節前後) の痙攣にしました";
     }
     else {
     // 音符ごとの区切り: 範囲の始まり・音符の時刻 (同じ時刻はまとめる)・範囲の終わり
