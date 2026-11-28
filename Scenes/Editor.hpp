@@ -10,7 +10,7 @@
 
     // 編集画面のボタンの絵 (None は文字のボタン)
     Scene EditorReturnScene=Scene::ModeSelect;
-    enum class EditorIcon { None, Save, Test, Close, Play, Stop, Undo, Redo, Insert, Delete, Fold, Unfold, AudioLength, DemoStart, WaveAlign, Header, Command, Gimmick, Estimate, Left, Right, Note, CommandDelete, BpmAnalyze, Select, Copy, Cut, Paste, SpeedDown, SpeedUp, SpeedValue, JiroPreview, TaikoSound, Visible, Hidden };
+    enum class EditorIcon { None, Save, Test, Close, Play, Stop, Undo, Redo, Insert, Delete, Fold, Unfold, AudioLength, DemoStart, WaveAlign, Header, Command, Gimmick, Estimate, Left, Right, Note, CommandDelete, BpmAnalyze, JiroFix, Select, Copy, Cut, Paste, SpeedDown, SpeedUp, SpeedValue, JiroPreview, TaikoSound, Visible, Hidden };
     struct EditorButton {
         UIRect Rect;
         std::string Label;              // 絵のボタンでは名前 (マウスを乗せると出す)
@@ -214,9 +214,14 @@
     void EditorBeginDeleteCommands();
     void EditorDeleteCommandsInSelection(const std::string& key);
     static std::string EditorCommandKey(const std::string& text);
-    // 範囲の小節の BPM を音源から 1 小節ずつ解析して #BPMCHANGE を入れる
+    // 範囲の小節の頭を音源から 1 小節ずつ求め、譜面が音源から tolerance (ms) 以上ずれる小節に #BPMCHANGE を入れる
     void EditorBeginBpmAnalyze();
-    void EditorAnalyzeBpm(double threshold, int digits);
+    void EditorAnalyzeBpm(double tolerance, int digits);
+    // 太鼓さん次郎の BPM の小数以下の切り捨て (#BPMCHANGE ごとに整数ミリ秒へ切り捨てる) で早くなる分を、
+    // 小節の頭の #DELAY で打ち消す (範囲を選んでいればその範囲、無ければコース全体)
+    void EditorFixJiroDrift();
+    // 範囲をコマ送りに見せる: 範囲を interval ごとの段に分け、段の間は疑似停止、段の終わりに distance だけ瞬間移動する
+    void EditorInsertFrameStep(const std::string& params);
     // 音符と小節幅を同じ縮尺で描き、演奏画面の16分の間隔と音符径の比率を保つ。
     UIRect EditorLane(int row) const;
     float EditorX(const UIRect& lane, double pos) const;
@@ -287,8 +292,10 @@
     // "1/4" や "0.25" を分数として読む
     static std::optional<EditorFrac> EditorParseFrac(std::string_view text);
     // 小節ごとの長さ (#MEASURE)。#MEASURE を変えた後に EditorKeepNotePositions(変える前の値) を呼ぶと、
-    // 音符・命令の拍の位置を保ったまま小節の長さだけを変える (伸ばした分は右に空きができる。縮めて音符がはみ出す時は位置を変えない)
+    // 音符・命令の拍の位置を保ったまま小節の長さだけを変える (伸ばした分は右に空きができ、縮めて小節の終わりからはみ出したものは消す)
     std::vector<EditorFrac> EditorMeasureFracs();
+    // 分数を整数の分数にする (小数は 10 倍ずつして整数に)。0 や負の値は false
+    static bool EditorToRational(const EditorFrac& f, int64_t& num, int64_t& den);
     void EditorKeepNotePositions(const std::vector<EditorFrac>& before);
     // 数値を短く書く (0.128 / 120000 / -0.004)
     static std::string EditorNum(double v);
@@ -357,6 +364,8 @@
     };
     EditorTimeline EditorBuildTimeline();
     const EditorTimeline& EditorTimelineCached();
+    // 次郎形式の小節ごとの時刻 (分岐の無いコース用)。taikojiro と同じく #BPMCHANGE ごとに整数ミリ秒へ切り捨てて足す
+    std::vector<EditorTimeline::Measure> EditorJiroMeasureMaps();
     EditorTimeline EditorTimelineCache;
     uint64_t EditorTimelineRevision = std::numeric_limits<uint64_t>::max();
     int EditorTimelineCourse = -1;
