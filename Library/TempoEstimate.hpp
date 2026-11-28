@@ -499,6 +499,11 @@ namespace tempo {
         const double maximum = *std::max_element(novelty.begin(), novelty.end());
         if (maximum <= 0) { return onsets; }
         const double threshold = std::max(levels[p90] * 0.3, maximum * 0.03);
+        // 音の大きさの目安 (エネルギーの上位 10%)。小さすぎる音 (雑音の揺らぎ) は発音とみなさず、大きい音ほど重くする
+        auto loud = rms;
+        const size_t r90 = loud.size() * 90 / 100;
+        std::nth_element(loud.begin(), loud.begin() + r90, loud.end());
+        const double loudness = std::max(loud[r90], 1e-9);
         for (size_t f = 1; f + 1 < hops; ++f) {
             if (novelty[f] < threshold) { continue; }
             bool peak = true;
@@ -517,7 +522,9 @@ namespace tempo {
             const double rise = rms[bottom] + (rms[top] - rms[bottom]) * 0.1;
             while (attack < top && rms[attack] <= rise) { ++attack; }
             const double time = from + (rms[top] > rms[bottom] * 1.05 ? (double)attack / 1000.0 : center);
-            const double weight = std::log1p(std::min(50.0, novelty[f] / threshold));
+            const double level = rms[top] / loudness;
+            if (level < 0.1 || rms[top] < rms[bottom] * 1.15) { continue; }     // 雑音・持続音の揺らぎ
+            const double weight = std::log1p(std::min(50.0, novelty[f] / threshold)) * std::clamp(level, 0.1, 1.5);
             if (!onsets.empty() && std::abs(time - onsets.back().Time) < 0.03) { if (weight > onsets.back().Weight) { onsets.back() = { time, weight }; } }
             else { onsets.push_back({ time, weight }); }
         }
@@ -592,6 +599,82 @@ namespace tempo {
             heads.push_back(t);
         }
         return heads;
+    }
+
+    // 小節ごとの拍の頭の時刻 (0, 1, … 拍目と小節の終わり)。1 拍ずつ追う:
+    //   次の 4 拍 (と裏拍) の格子が打音に合う周期を、前の拍の 0.6～1.6 倍で探し (小節の途中のテンポの変化も拾う)、
+    //   次の拍の頭は予想の位置の近くに強い打音があればそこに合わせる (位置のずれが積み重ならない)。打音が無い所は前の周期のまま進める
+    inline std::vector<std::vector<double>> TrackBeatTimes(const float* input, size_t count, int rate, double start, const std::vector<double>& beats, double initialBpm) {
+        std::vector<std::vector<double>> out;
+        if (!input || rate < 4000 || beats.empty() || !std::isfinite(initialBpm) || initialBpm <= 0 || !std::isfinite(start)) { return out; }
+        double total = 0;
+        for (double b : beats) { total += std::max(0.0, b); }
+        const auto onsets = DetectOnsets(input, count, rate, start - 0.5, start + total * 60 / initialBpm * 1.8 + 3);
+        std::vector<double> times, weights;
+        for (const auto& o : onsets) { times.push_back(o.Time); weights.push_back(o.Weight); }
+        auto sorted = weights;
+        std::ranges::sort(sorted);
+        const double typical = sorted.empty() ? 1 : sorted[sorted.size() / 2];
+        auto bestAt = [&](double t, double radius, double sigma) {
+            double value = 0;
+            for (auto it = std::lower_bound(times.begin(), times.end(), t - radius); it != times.end() && *it <= t + radius; ++it) {
+                const double error = *it - t;
+                value = std::max(value, weights[(size_t)(it - times.begin())] * std::exp(-0.5 * error * error / (sigma * sigma)));
+            }
+            return value;
+        };
+        // 拍の区切りの長さの並び (小節の終わりの端数の拍も 1 つの区切り)
+        struct Step { size_t Measure; double Length; };
+        std::vector<Step> steps;
+        for (size_t m = 0; m < beats.size(); ++m) {
+            const double b = std::max(0.0, beats[m]);
+            for (double k = 0; k < b - 1e-9; k += 1) { steps.push_back({ m, std::min(1.0, b - k) }); }
+            if (b <= 1e-9) { steps.push_back({ m, 0.0 }); }
+        }
+        double t = start, period = 60 / initialBpm;
+        out.assign(beats.size(), {});
+        out[0].push_back(t);
+        for (size_t i = 0; i < steps.size(); ++i) {
+            const double length = steps[i].Length;
+            if (length > 0) {
+                double bestScore = 0, bestPeriod = period, bestShift = 0;
+                for (int k = -170; k <= 200; ++k) {
+                    const double p = period * std::pow(1.003, k);
+                    if (p < period * 0.6 || p > period * 1.6) { continue; }
+                    for (int s = -6; s <= 6; ++s) {
+                        const double shift = s * 0.0015;
+                        // 今の拍と、この後の 4 拍 (遠いほど軽く)、裏拍 (軽く)
+                        double score = 0;
+                        static constexpr double wb[] = { 1.0, 1.0, 0.8, 0.5, 0.3 }, wh[] = { 0.3, 0.25, 0.2, 0.1 };
+                        for (int j = 0; j <= 4; ++j) { score += wb[j] * bestAt(t + shift + j * p, 0.04, 0.012); }
+                        for (int j = 0; j < 4; ++j) { score += wh[j] * bestAt(t + shift + (j + 0.5) * p, 0.04, 0.012); }
+                        score *= std::exp(-0.5 * std::pow(std::log(p / period) / 0.35, 2)) * std::exp(-0.5 * std::pow(shift / 0.005, 2));
+                        if (score > bestScore) { bestScore = score; bestPeriod = p; bestShift = shift; }
+                    }
+                }
+                double next = t + length * period;
+                if (bestScore >= 0.15 * typical) {
+                    next = t + bestShift + length * bestPeriod;
+                    // 予想した次の拍の頭の近くの強い打音に合わせる
+                    const double radius = std::min(0.025, bestPeriod * 0.08);
+                    double best = 0, at = next;
+                    for (auto it = std::lower_bound(times.begin(), times.end(), next - radius); it != times.end() && *it <= next + radius; ++it) {
+                        const double w = weights[(size_t)(it - times.begin())];
+                        const double error = (*it - next) / (radius * 0.5);
+                        const double score = w * std::exp(-0.5 * error * error);
+                        if (w >= typical * 0.5 && score > best) { best = score; at = *it; }
+                    }
+                    next = at;
+                    period = std::clamp((next - t) / length, bestPeriod * 0.9, bestPeriod * 1.1);
+                }
+                t = next;
+            }
+            // 区切りの終わりを記録する (小節の中の拍か、小節の終わり = 次の小節の頭)
+            const size_t m = steps[i].Measure;
+            out[m].push_back(t);
+            if ((i + 1 == steps.size() || steps[i + 1].Measure != m) && m + 1 < beats.size()) { out[m + 1].push_back(t); }
+        }
+        return out;
     }
 
     // 小節ごとの BPM (TrackMeasureHeads の頭の間隔から)

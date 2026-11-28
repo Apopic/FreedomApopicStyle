@@ -1270,7 +1270,7 @@ void Game::PlayingDraw() {
     else if (Editor.Testing) {
         const FontData& sfont = ConfigSmallFont();
         const float helpY=std::min(Skin.Info.Resolution.Y-sfont.Size*2.2f,keyMapTop-sfont.Size*.5f-8);
-        UIText(sfont, 16, helpY, std::string("テストプレイ  オート: ") + (Config.AutoPlay ? "ON" : "OFF") + (Config.PauseDisplay ? "  (F1: 切り替え / Esc: ポーズ)" : "  (F1: 切り替え / Esc: 編集に戻る)"), gfx::Rgb(255, 220, 90));
+        UIText(sfont, 16, helpY, std::string("テストプレイ  オート: ") + (Config.AutoPlay ? "ON" : "OFF") + (Config.JiroChartMode ? "  次郎形式" : "") + (Config.PauseDisplay ? "  (F1: 切り替え / Esc: ポーズ)" : "  (F1: 切り替え / Esc: 編集に戻る)"), gfx::Rgb(255, 220, 90));
     }
     // スコアメーター: 画面の中央・最下部
     if (Config.ScoreMeter && !IsMulti) {

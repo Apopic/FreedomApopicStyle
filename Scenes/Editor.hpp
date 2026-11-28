@@ -216,7 +216,7 @@
     static std::string EditorCommandKey(const std::string& text);
     // 範囲の小節の頭を音源から 1 小節ずつ求め、譜面が音源から tolerance (ms) 以上ずれる小節に #BPMCHANGE を入れる
     void EditorBeginBpmAnalyze();
-    void EditorAnalyzeBpm(double tolerance, int digits);
+    void EditorAnalyzeBpm(double tolerance, int digits, bool perBeat);
     // 太鼓さん次郎の BPM の小数以下の切り捨て (#BPMCHANGE ごとに整数ミリ秒へ切り捨てる) で早くなる分を、
     // 小節の頭の #DELAY で打ち消す (範囲を選んでいればその範囲、無ければコース全体)
     void EditorFixJiroDrift();

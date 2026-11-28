@@ -223,7 +223,8 @@ void Game::LoadingProc() {
     const TextLines& text = *textptr;
     // BM/HB譜面はプレイ前に一時的な互換モードを確認する。
     const bool hbScroll = RequiresJiroTiming(text.lines);
-    if (hbScroll && !Config.JiroChartMode && AskTemporaryJiroMode()) {
+    // 譜面制作のテストプレイは、編集画面の「次郎形式再生」で決めた形式で遊ぶ (聞かない)
+    if (hbScroll && !Config.JiroChartMode && !Editor.Testing && AskTemporaryJiroMode()) {
         if (!Config.JiroChartModeSaved) { Config.JiroChartModeSaved = Config.JiroChartMode; }
         Config.JiroChartMode = true;
     }
