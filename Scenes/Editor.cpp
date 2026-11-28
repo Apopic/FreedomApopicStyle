@@ -2398,12 +2398,12 @@ namespace {
         return best;
     }
     // 次郎は #BPMCHANGE の値を命令名の後の 8 文字 (空白を含む) までしか読まないので、7 文字に収める
-    std::string JiroBpm(double v) {
+    std::string JiroBpm(double v, size_t maxLength = 7) {
         for (int precision = 6; precision >= 0; --precision) {
             std::string text = std::format("{:.{}f}", v, precision);
             if (text.find('.') != std::string::npos) { while (text.back() == '0') { text.pop_back(); } if (text.back() == '.') { text.pop_back(); } }
             if (text == "-0") { text = "0"; }
-            if (text.size() <= 7) { return text; }
+            if (text.size() <= maxLength) { return text; }
         }
         return std::format("{:.0f}", v);
     }
@@ -2505,10 +2505,12 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
     };
     std::vector<tja::Measure> built;
     // 作った小節ごとの本来の時間 (ミリ秒) と、流れる距離 (小節)。Adjust の小節は最後に次郎の整数ミリ秒に合わせて BPM と拍子を書き直す
-    struct Plan { double Ms = 0; double Distance = 0; bool Adjust = true; };
+    // FreeMeasure: 拍子 (距離) をずらしてもよい小節 (止まる小節。距離はほぼ 0 なので、拍子を少し変えても見え方は変わらない)
+    struct Plan { double Ms = 0; double Distance = 0; bool Adjust = true; bool FreeMeasure = false; bool Note = false; };
     std::vector<Plan> plans;
-    auto push = [&](tja::Measure m, const Q& duration, const Q& distance, bool adjust = true) {
-        plans.push_back({ 240000.0 * qValue(duration) / B, qValue(distance), adjust });
+    auto push = [&](tja::Measure m, const Q& duration, const Q& distance, bool adjust = true, bool freeMeasure = false) {
+        const bool note = std::ranges::any_of(m.Notes, [](const tja::Note& n) { return n.Num == 0; });
+        plans.push_back({ 240000.0 * qValue(duration) / B, qValue(distance), adjust, freeMeasure, note });
         built.push_back(std::move(m));
     };
     // 範囲の始まりの小節の頭の #DELAY は残す (補正の #DELAY などを消さない)
@@ -2633,14 +2635,30 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
         if (i == 0 && !noteHere) { stop.Commands.push_back({ 0, 1, "#BARLINEOFF" }); }
         fill(stop, inside, stopFrom, cuts[i + 1]);
         if (built.empty()) { addHeadDelays(stop); }
-        push(std::move(stop), stopLength, stopMeasure);
+        push(std::move(stop), stopLength, stopMeasure, true, true);
         // 瞬間移動 (バグ式): BPM X と -X の 0 秒の小節で、次の音符までの距離 × 倍率だけ進める
         Q distance = norm({ length.N * kn, length.D * kd });
         tja::Measure jump;
         jump.Resolution = 2;
-        jump.Commands.push_back({ 0, 1, "#BPMCHANGE " + bpmText });
-        jump.Commands.push_back({ 0, 1, "#MEASURE " + qText(jiroQ(distance)) });
-        jump.Commands.push_back({ 1, 2, "#BPMCHANGE " + JiroBpm(-B) });
+        // X と -X は同じ桁で書く (JiroBpm(-B) は符号の分だけ桁が減り、前半と後半の時間が打ち消し合わなくなる)。
+        // 前半の時間 h = 120000 × 距離 / X を「整数 + 0.5」にして、次郎の切り捨てでも前半と後半が必ず打ち消し合うようにする
+        const Q jumpDistance = jiroQ(distance);
+        std::string jumpText = JiroBpm(B, 6);
+        {
+            const double r = qValue(jumpDistance), h0 = 120000.0 * r / B;
+            for (double h : { std::floor(h0) + 0.5, h0 }) {
+                if (!(h > 0)) { continue; }
+                const std::string t = JiroBpm(120000.0 * r / h, 6);
+                const double x = std::strtod(t.c_str(), nullptr);
+                if (!(x > 0)) { continue; }
+                const double game = JiroTrunc(60000.0 / x * 1.0 / 2 * 4.0 * r) + JiroTrunc(60000.0 / -x * ((1.0 - 0.5) * 4.0 * r));
+                const double editor = JiroTrunc(60000.0 / x * 4.0 * r * 0.5) + JiroTrunc(60000.0 / -x * (0.5 * 4.0 * r));
+                if (game == 0 && editor == 0) { jumpText = t; break; }
+            }
+        }
+        jump.Commands.push_back({ 0, 1, "#BPMCHANGE " + jumpText });
+        jump.Commands.push_back({ 0, 1, "#MEASURE " + qText(jumpDistance) });
+        jump.Commands.push_back({ 1, 2, "#BPMCHANGE -" + jumpText });
         push(std::move(jump), Q{ 0, 1 }, distance, false);     // 0 秒 (X と -X の切り捨ては打ち消し合う)
     }
     summary = std::to_string(cuts.size() - 1) + " コマのコマ送りにしました";
@@ -2655,6 +2673,7 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
         fill(tail, after, end, total);
         push(std::move(tail), sub(total, end), sub(total, end));
     }
+    double worstJiro = 0, worstNormal = 0;
     // 次郎は #BPMCHANGE のたびに小節の時間をミリ秒の整数に切り捨てるので、そのままでは区切りごとに最大 1ms ずつ早くなる。
     // 小節ごとに「本来の時刻を丸めた整数ミリ秒」までの時間 D を決め、拍子 (= 流れる距離) はそのままで、小節の時間が
     // D よりほんの少しだけ長く (D + 0.002ms 程度) なる BPM を書く。次郎 (切り捨て) では D ちょうど、通常の読み方でも
@@ -2677,30 +2696,65 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
             const auto f = EditorParseFrac(std::string_view(m.Commands[1].Text).substr(8));
             return bv != 0 && f && f->Den != 0 ? JiroTrunc(60000.0 / bv * (4.0 * f->Value())) : 0.0;
         };
-        auto fit = [&](tja::Measure& m, double D) {
+        // 小節の時間が D 以上 D + 0.5 未満 (できるだけ D に近い) になる書き方を探す。返り値はその時間 (見つからなければ負)
+        auto fit = [&](tja::Measure& m, double D, bool freeMeasure) {
             const auto f = EditorParseFrac(std::string_view(m.Commands[1].Text).substr(8));
-            if (!f || f->Den == 0 || f->Value() == 0) { return false; }
-            const double r = f->Value();
-            for (double extra : { 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.4 }) {
-                const std::string bpmText = JiroBpm(240000.0 * r / (D + extra));
+            if (!f || f->Den == 0 || f->Value() == 0) { return -1.0; }
+            const double r0 = f->Value();
+            std::string bestBpm, bestMeasure;
+            double best = -1;
+            auto consider = [&](const std::string& bpmText, double r, const std::string& measureText) {
                 const double bv = std::strtod(bpmText.c_str(), nullptr);
-                if (bv == 0 || !std::isfinite(bv)) { continue; }
+                if (bv == 0 || !std::isfinite(bv)) { return; }
                 const double ms = 60000.0 / bv * (4.0 * r);
                 // 掛ける順番による誤差でも D を下回らない余裕を持たせる (ゲームと次郎の計算の順番は違うことがある)
-                if (ms - D >= 1e-4 && ms - D < 0.5 && JiroTrunc(ms) == D && JiroTrunc(60000.0 / bv * 4.0 * r) == D && JiroTrunc(240000.0 * r / bv) == D) {
-                    m.Commands[0].Text = "#BPMCHANGE " + bpmText;
-                    return true;
+                if (!(ms - D >= 1e-4 && ms - D < 0.5) || JiroTrunc(ms) != D || JiroTrunc(60000.0 / bv * 4.0 * r) != D || JiroTrunc(240000.0 * r / bv) != D) { return; }
+                if (best < 0 || ms < best) { best = ms; bestBpm = bpmText; bestMeasure = measureText; }
+            };
+            for (double extra : { 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.4 }) {
+                // 拍子 (距離) はそのままで BPM を合わせる
+                consider(JiroBpm(240000.0 * r0 / (D + extra)), r0, m.Commands[1].Text);
+                // 止まる小節は、BPM を先に決めて拍子 (次郎が読める分数) を合わせてもよい (BPM の桁が足りない極端に遅い BPM でも合う)
+                if (freeMeasure) {
+                    const std::string bpmText = JiroBpm(240000.0 * r0 / (D + extra));
+                    const double bv = std::strtod(bpmText.c_str(), nullptr);
+                    const auto [n, d] = JiroFraction(std::llround((D + extra) * bv / 240000.0 * 1e12), 1000000000000LL);
+                    if (n != 0) { consider(bpmText, (double)n / (double)d, "#MEASURE " + std::to_string(n) + "/" + std::to_string(d)); }
+                }
+                if (best >= 0 && best - D <= extra + 1e-9) { break; }
+            }
+            if (best < 0) { return -1.0; }
+            m.Commands[0].Text = "#BPMCHANGE " + bestBpm;
+            m.Commands[1].Text = bestMeasure;
+            return best;
+        };
+        auto exactMs = [&](const tja::Measure& m) {
+            const double bv = value(m.Commands[0].Text, 10);
+            const auto f = EditorParseFrac(std::string_view(m.Commands[1].Text).substr(8));
+            return bv != 0 && f && f->Den != 0 ? 240000.0 * f->Value() / bv : 0.0;
+        };
+        // normal = 通常の読み方 (切り捨て無し) の時刻。少しずつ長めに書く分は、次郎の目標を半分だけ早めて両方に分ける。
+        // 範囲より前で次郎がもう早くなっている分 (offset) はそのまま保つ: ここで取り戻すと、通常の読み方では範囲から後ろが
+        // その分だけ遅れてしまう (次郎のずれは「次郎ずれ補正」で直す)
+        const double offset = want - now;
+        double normal = want;
+        for (size_t k = 0; k < built.size(); ++k) {
+            if (plans[k].Note) {
+                worstJiro = std::max(worstJiro, std::abs(now + offset - want));
+                worstNormal = std::max(worstNormal, std::abs(normal - want));
+            }
+            want += plans[k].Ms;
+            if (!plans[k].Adjust) { continue; }        // 0 秒の小節 (前半と後半が打ち消し合う)
+            if (plans[k].Distance != 0) {
+                // 1ms 未満の小節も 1ms にする: 次郎で 0ms・通常で 0.7ms のような小節があると、その差は後ろの小節で取り戻せず
+                // (どの小節も通常の方が少し長い)、音符ごとに積み重なってしまう
+                const double target = std::max(now + 1, std::round(want - offset - std::max(0.0, normal - now - offset) / 2)), D = target - now;
+                if (D < 1e9) {
+                    if (const double ms = fit(built[k], D, plans[k].FreeMeasure); ms >= 0) { now = target; normal += ms; continue; }
                 }
             }
-            return false;
-        };
-        for (size_t k = 0; k < built.size(); ++k) {
-            want += plans[k].Ms;
-            if (plans[k].Adjust && plans[k].Distance != 0) {
-                const double target = std::round(want), D = target - now;
-                if (D >= 1 && D < 1e9 && fit(built[k], D)) { now = target; continue; }
-            }
-            now += plans[k].Adjust ? writtenMs(built[k]) : 0.0;
+            now += writtenMs(built[k]);
+            normal += exactMs(built[k]);
         }
     }
     EditorChange();
@@ -2724,6 +2778,7 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
     Editor.CursorMeasure = first;
     Editor.CursorSlot = 0;
     EditorClamp();
+    summary += " (作り直した所の音符の時刻のずれ: 次郎形式 最大 " + std::format("{:.1f}", worstJiro) + "ms・通常 最大 " + std::format("{:.1f}", worstNormal) + "ms)";
     EditorMessage("範囲を分けて、" + summary + (hasscroll ? "" : "  (#HBSCROLL を追加)")
         + (EditorJiroPreviewEnabled() ? "" : "  ※ 次郎形式再生ボタンで次郎の時刻で確かめられます"));
 }
