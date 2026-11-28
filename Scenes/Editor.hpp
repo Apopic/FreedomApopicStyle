@@ -212,7 +212,8 @@
     void EditorShowCursorPage();
     // 範囲の命令を消す (すべて / 命令の種類ごと)。key が空ならすべて
     void EditorBeginDeleteCommands();
-    void EditorDeleteCommandsInSelection(const std::string& key);
+    // whole: 範囲を選んでいない時の譜面全体
+    void EditorDeleteCommandsInSelection(const std::string& key, bool whole = false);
     static std::string EditorCommandKey(const std::string& text);
     // 範囲の小節の頭を音源から 1 小節ずつ求め、譜面が音源から tolerance (ms) 以上ずれる小節に #BPMCHANGE を入れる
     void EditorBeginBpmAnalyze();
@@ -373,7 +374,8 @@
     const EditorTimeline& EditorTimelineCached();
     // 次郎形式の小節ごとの時刻 (分岐の無いコース用)。taikojiro と同じく #BPMCHANGE ごとに整数ミリ秒へ切り捨てて足す
     // truncate = false で切り捨てない本来の時刻。originOut に譜面の始まりの絶対時刻 (曲の始まりからのミリ秒) を返す
-    std::vector<EditorTimeline::Measure> EditorJiroMeasureMaps(bool truncate = true, double* originOut = nullptr);
+    // commandTimes: 小節ごと・命令ごとの、その命令の位置の時刻 (命令を処理する前。譜面の時刻)
+    std::vector<EditorTimeline::Measure> EditorJiroMeasureMaps(bool truncate = true, double* originOut = nullptr, std::vector<std::vector<double>>* commandTimes = nullptr);
     EditorTimeline EditorTimelineCache;
     uint64_t EditorTimelineRevision = std::numeric_limits<uint64_t>::max();
     int EditorTimelineCourse = -1;

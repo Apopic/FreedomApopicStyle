@@ -853,37 +853,40 @@ std::string Game::EditorCommandKey(const std::string& text) {
 void Game::EditorBeginDeleteCommands() {
     auto* course = EditorCourse();
     if (course == nullptr) { return; }
-    if (!Editor.Selecting) { EditorMessage("命令を消す範囲を選んでください (Shift+クリック / Shift+矢印)"); return; }
-    const auto [a, b] = EditorSelection();
+    // 範囲を選んでいなければ譜面全体 (このコース) の命令が対象
+    const bool whole = !Editor.Selecting;
+    int from = 0, to = (int)course->Measures.size() - 1;
+    if (!whole) { const auto [a, b] = EditorSelection(); from = a.Measure; to = b.Measure; }
     std::vector<std::pair<std::string, int>> kinds;
     int total = 0;
-    for (int m = a.Measure; m <= b.Measure && m < (int)course->Measures.size(); ++m) {
+    for (int m = from; m <= to && m < (int)course->Measures.size(); ++m) {
         for (const auto& c : course->Measures[m].Commands) {
-            if (!EditorInSelection(m, c.Num, c.Den)) { continue; }
+            if (!whole && !EditorInSelection(m, c.Num, c.Den)) { continue; }
             const std::string key = EditorCommandKey(c.Text);
             auto it = std::ranges::find(kinds, key, &std::pair<std::string, int>::first);
             if (it == kinds.end()) { kinds.push_back({ key, 1 }); } else { ++it->second; }
             ++total;
         }
     }
-    if (total == 0) { EditorMessage("選んだ範囲に命令がありません"); return; }
+    if (total == 0) { EditorMessage(whole ? "命令がありません" : "選んだ範囲に命令がありません"); return; }
     std::vector<std::string> choices{ "すべて (" + std::to_string(total) + " 個)" };
     for (const auto& [key, n] : kinds) { choices.push_back(key + " (" + std::to_string(n) + " 個)"); }
-    EditorBeginFields("範囲の命令を消す (←→ で種類を選ぶ)", { { "消す命令", choices.front(), choices } }, [this, kinds, choices](const auto& values) {
+    EditorBeginFields(whole ? "譜面全体の命令を消す (←→ で種類を選ぶ)" : "範囲の命令を消す (←→ で種類を選ぶ)", { { "消す命令", choices.front(), choices } }, [this, kinds, choices, whole](const auto& values) {
         const auto it = std::ranges::find(choices, values.empty() ? std::string() : values[0]);
         const size_t index = it == choices.end() ? 0 : (size_t)(it - choices.begin());
-        EditorDeleteCommandsInSelection(index == 0 ? std::string() : kinds[index - 1].first);
+        EditorDeleteCommandsInSelection(index == 0 ? std::string() : kinds[index - 1].first, whole);
     });
 }
 
-void Game::EditorDeleteCommandsInSelection(const std::string& key) {
+void Game::EditorDeleteCommandsInSelection(const std::string& key, bool whole) {
     auto* course = EditorCourse();
-    if (course == nullptr || !Editor.Selecting) { return; }
-    const auto [a, b] = EditorSelection();
-    auto target = [&](int m, const tja::Command& c) { return EditorInSelection(m, c.Num, c.Den) && (key.empty() || EditorCommandKey(c.Text) == key); };
+    if (course == nullptr || (!whole && !Editor.Selecting)) { return; }
+    int from = 0, to = (int)course->Measures.size() - 1;
+    if (!whole) { const auto [a, b] = EditorSelection(); from = a.Measure; to = b.Measure; }
+    auto target = [&](int m, const tja::Command& c) { return (whole || EditorInSelection(m, c.Num, c.Den)) && (key.empty() || EditorCommandKey(c.Text) == key); };
     int count = 0;
     bool measureCommand = false;
-    for (int m = a.Measure; m <= b.Measure && m < (int)course->Measures.size(); ++m) {
+    for (int m = from; m <= to && m < (int)course->Measures.size(); ++m) {
         for (const auto& c : course->Measures[m].Commands) {
             if (target(m, c)) { ++count; measureCommand |= EditorCommandKey(c.Text) == "#MEASURE"; }
         }
@@ -891,11 +894,12 @@ void Game::EditorDeleteCommandsInSelection(const std::string& key) {
     if (count == 0) { EditorMessage("消す命令がありません"); return; }
     const std::vector<EditorFrac> before = measureCommand ? EditorMeasureFracs() : std::vector<EditorFrac>{};
     EditorChange();
-    for (int m = a.Measure; m <= b.Measure && m < (int)course->Measures.size(); ++m) {
+    for (int m = from; m <= to && m < (int)course->Measures.size(); ++m) {
         std::erase_if(course->Measures[m].Commands, [&](const tja::Command& c) { return target(m, c); });
     }
     if (measureCommand) { EditorKeepNotePositions(before); }
-    EditorMessage((key.empty() ? std::string("範囲の命令を ") : "範囲の " + key + " を ") + std::to_string(count) + " 個消しました (Ctrl+Z で戻せます)");
+    const std::string where = whole ? "譜面全体の" : "範囲の";
+    EditorMessage((key.empty() ? where + "命令を " : where + " " + key + " を ") + std::to_string(count) + " 個消しました (Ctrl+Z で戻せます)");
 }
 
 auto Game::EditorMeasureFracs() -> std::vector<EditorFrac> {
@@ -1230,8 +1234,8 @@ std::string Game::EditorButtonHelp(const std::string& label) {
         { "コピー", "選んだ範囲の音符・命令をコピーする (Ctrl+C)" },
         { "切り取り", "選んだ範囲の音符・命令を切り取る (Ctrl+X)" },
         { "貼り付け", "カーソルの位置に貼り付ける (Ctrl+V)" },
-        { "次郎ずれ補正", "太鼓さん次郎で BPM の小数以下の切り捨てにより譜面が早くなる分を、小節の頭の #DELAY で打ち消す。範囲を選んでいればその範囲、無ければコース全体 (Ctrl+Z で戻せる)" },
-        { "命令を消す", "選んだ範囲の命令を、すべて・または種類 (#SCROLL など) を選んでまとめて消す (Ctrl+Z で戻せる)" },
+        { "次郎ずれ補正", "太鼓さん次郎でミリ秒の切り捨てにより譜面がずれる分を、小節の頭と #BPMCHANGE の直後の #DELAY で打ち消す (何度やっても同じ結果)。範囲を選んでいればその範囲、無ければコース全体 (Ctrl+Z で戻せる)" },
+        { "命令を消す", "選んだ範囲 (選んでいなければ譜面全体) の命令を、すべて・または種類 (#SCROLL など) を選んでまとめて消す (Ctrl+Z で戻せる)" },
         { "範囲のBPMを解析", "選んだ範囲の小節の頭を音源から 1 小節ずつ求め、譜面が音源から指定の ms 以上ずれる小節に #BPMCHANGE を入れる (範囲の #BPMCHANGE は入れ直す。Ctrl+Z で戻せる)" },
         { "前のコース", "編集するコースを切り替える (コースの追加はヘッダーから)" },
         { "次のコース", "編集するコースを切り替える (コースの追加はヘッダーから)" },
@@ -2161,7 +2165,7 @@ bool Game::EditorToRational(const EditorFrac& f, int64_t& num, int64_t& den) {
     return true;
 }
 
-auto Game::EditorJiroMeasureMaps(bool truncate, double* originOut) -> std::vector<EditorTimeline::Measure> {
+auto Game::EditorJiroMeasureMaps(bool truncate, double* originOut, std::vector<std::vector<double>>* commandTimes) -> std::vector<EditorTimeline::Measure> {
     std::vector<EditorTimeline::Measure> out;
     // truncate = false: 次郎と同じ読み方 (決まった文字数・小節の途中の #MEASURE は次の小節から) のまま、ミリ秒の切り捨てだけをしない「本来の時刻」
     auto trunc = [truncate](double v) { return truncate ? JiroTrunc(v) : v; };
@@ -2207,6 +2211,10 @@ auto Game::EditorJiroMeasureMaps(bool truncate, double* originOut) -> std::vecto
         }
         return scanDen != 0 ? scanValue / (double)scanDen : std::numeric_limits<double>::infinity();
     };
+    if (commandTimes != nullptr) {
+        commandTimes->assign(course->Measures.size(), {});
+        for (size_t i = 0; i < course->Measures.size(); ++i) { (*commandTimes)[i].assign(course->Measures[i].Commands.size(), 0.0); }
+    }
     for (const auto& m : course->Measures) {
         if (hasPending) { ratio = pending; hasPending = false; }
         for (const auto& c : m.Commands) {
@@ -2233,6 +2241,7 @@ auto Game::EditorJiroMeasureMaps(bool truncate, double* originOut) -> std::vecto
                 const auto& c = m.Commands[ci];
                 const double p = std::min(1.0, (double)c.Num / std::max<int64_t>(c.Den, 1));
                 if (inclusive ? p > upto + 1e-12 : p >= upto - 1e-12) { break; }
+                if (commandTimes != nullptr) { (*commandTimes)[out.size()][ci] = posTime(p) - origin; }
                 map.Map.push_back({ p, posTime(p) });
                 if (tja::StartsWithKey(c.Text, "#BPMCHANGE")) {
                     double v = scanDouble(jiroArg(c.Text, 10, 8));
@@ -2282,39 +2291,57 @@ void Game::EditorFixJiroDrift() {
     int removedFix = 0;
     for (int m = std::max(first, 1); m <= last + 1 && m < count; ++m) {
         auto& cmds = course->Measures[(size_t)m].Commands;
-        const auto isFix = [](const tja::Command& c) { return c.Num == 0 && tja::StartsWithKey(c.Text, "#DELAY") && c.Text.find(mark) != std::string::npos; };
+        const auto isFix = [](const tja::Command& c) { return tja::StartsWithKey(c.Text, "#DELAY") && c.Text.find(mark) != std::string::npos; };
         if (std::ranges::none_of(cmds, isFix)) { continue; }
         if (!changed) { EditorChange(); changed = true; }
         removedFix += (int)std::erase_if(cmds, isFix);
         ++Editor.Revision;
     }
-    // 本来の時刻の小節の頭: 次郎と同じ読み方 (命令の決まった文字数・小節の途中の #MEASURE は次の小節から) で、
-    // ミリ秒の切り捨てだけをしない時刻。通常の読み方の時刻と比べると、ギミックの譜面では読み方の違いを「ずれ」と取り違えてしまう
-    std::vector<double> exact;
-    {
-        const auto maps = EditorJiroMeasureMaps(false);
-        for (const auto& m : maps) { exact.push_back(m.Map.front().second); }
-        exact.push_back(maps.back().Map.back().second);
-    }
-    // 小節の頭ごとに、次郎の時刻が本来より 1ms 以上ずれていれば、その分 (ミリ秒の整数) の #DELAY を小節の頭に入れる
+    // 本来の時刻: 次郎と同じ読み方 (命令の決まった文字数・小節の途中の #MEASURE は次の小節から) で、ミリ秒の切り捨てだけを
+    // しない時刻。通常の読み方の時刻と比べると、ギミックの譜面では読み方の違いを「ずれ」と取り違えてしまう
+    std::vector<std::vector<double>> idealCmd, jiroCmd;
+    const auto ideal = EditorJiroMeasureMaps(false, nullptr, &idealCmd);
+    const auto jiro = EditorJiroMeasureMaps(true, nullptr, &jiroCmd);
+    // 次郎は小節の頭と #BPMCHANGE の位置で時刻をミリ秒の整数に切り捨てて、そこから先を数え直すので、ずれはその位置ごとに増える。
+    // 小節の頭 (小節の途中の #BPMCHANGE より前の音符) と、各 #BPMCHANGE の直後 (その後ろの音符) で、次郎の時刻が本来より
+    // 1ms 以上ずれていれば、その分 (ミリ秒の整数) の #DELAY を入れる。#DELAY は後ろの時刻をちょうどその分だけずらすので、
+    // 入れた分を足しながら順に決める
     //   drift = 本来 - 次郎。正 = 次郎が早い (正の拍の長さの切り捨て) → 正の #DELAY で遅らせる
     //                        負 = 次郎が遅い (負の BPM・負の #DELAY の 0 方向への切り捨て) → 負の #DELAY で早める
+    struct Insert { int Measure; size_t After; int64_t Num, Den; double Ms; };    // After: この番号の命令の直後 (SIZE_MAX = 小節の頭)
+    std::vector<Insert> inserts;
     int inserted = 0;
-    double early = 0, late = 0, worst = 0;
-    for (int m = std::max(first, 1); m <= last + 1 && m <= count; ++m) {
-        const auto maps = EditorJiroMeasureMaps();
-        const double jiroHead = m < (int)maps.size() ? maps[(size_t)m].Map.front().second : maps.back().Map.back().second;
-        const double drift = exact[(size_t)m] - jiroHead;
-        if (std::abs(drift) < 1.0 - 1e-6 || m >= count) { worst = std::max(worst, std::abs(drift)); continue; }
+    double early = 0, late = 0, worst = 0, added = 0;
+    auto check = [&](int m, size_t after, int64_t num, int64_t den, double idealTime, double jiroTime) {
+        const double drift = idealTime - (jiroTime + added);
+        if (std::abs(drift) < 1.0 - 1e-6) { worst = std::max(worst, std::abs(drift)); return; }
         // 次郎は #DELAY を (int)(秒 × 1000) で 0 方向に切り捨てるので、ミリ秒の整数を 0 方向に丸めて書く
         const double ms = drift > 0 ? std::floor(drift + 1e-6) : -std::floor(-drift + 1e-6);
-        if (!changed) { EditorChange(); changed = true; }
-        // 小節の頭の #DELAY (次郎は小数第 3 位 = ミリ秒まで読む)
-        tja::Document::AddCommand(course->Measures[(size_t)m], 0, 1, "#DELAY " + EditorNum(ms / 1000.0) + " " + std::string(mark));
-        ++Editor.Revision;
+        inserts.push_back({ m, after, num, den, ms });
+        added += ms;
         ++inserted;
         (ms > 0 ? early : late) += std::abs(ms);
         worst = std::max(worst, std::abs(drift - ms));
+    };
+    for (int m = first; m <= last && m < count; ++m) {
+        const auto& cmds = course->Measures[(size_t)m].Commands;
+        if (m >= 1) { check(m, SIZE_MAX, 0, 1, ideal[(size_t)m].Map.front().second, jiro[(size_t)m].Map.front().second); }
+        for (size_t ci = 0; ci < cmds.size(); ++ci) {
+            // 小節の頭の #BPMCHANGE は小節の頭と同じ時刻なので、小節の頭で見た分で足りる
+            if (cmds[ci].Num == 0 || !tja::StartsWithKey(cmds[ci].Text, "#BPMCHANGE")) { continue; }
+            check(m, ci, cmds[ci].Num, cmds[ci].Den, idealCmd[(size_t)m][ci], jiroCmd[(size_t)m][ci]);
+        }
+    }
+    // 範囲の次の小節の頭 (範囲の最後のずれを打ち消す)
+    if (last + 1 < count) { check(last + 1, SIZE_MAX, 0, 1, ideal[(size_t)last + 1].Map.front().second, jiro[(size_t)last + 1].Map.front().second); }
+    if (!inserts.empty() && !changed) { EditorChange(); changed = true; }
+    // 後ろから入れる (前の命令の番号がずれないように)
+    for (auto it = inserts.rbegin(); it != inserts.rend(); ++it) {
+        auto& cmds = course->Measures[(size_t)it->Measure].Commands;
+        const std::string text = "#DELAY " + EditorNum(it->Ms / 1000.0) + " " + std::string(mark);
+        if (it->After == SIZE_MAX) { tja::Document::AddCommand(course->Measures[(size_t)it->Measure], 0, 1, text); }
+        else { cmds.insert(cmds.begin() + (ptrdiff_t)it->After + 1, tja::Command{ it->Num, it->Den, text }); }
+        ++Editor.Revision;
     }
     if (inserted == 0) {
         if (changed) { ++Editor.Revision; }
