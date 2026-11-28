@@ -213,8 +213,7 @@ bool Game::EditorOpen(const fs::path& path) {
         if (ToLower(Editor.Doc.CourseName(i)) == "oni" || Editor.Doc.CourseName(i) == "3") { Editor.Course = i; break; }
     }
     Editor.Top = Editor.CursorMeasure = Editor.CursorSlot = 0;
-    Editor.Folds.clear();
-    Editor.OpenFolds.clear();
+    EditorLoadFolds();      // 前に折りたたんでいた範囲を戻す
     Editor.Panel = EditorState::PanelType::None;
     EditorMessage("開きました: " + PathToU8(path.filename()));
     return true;
@@ -222,6 +221,7 @@ bool Game::EditorOpen(const fs::path& path) {
 
 bool Game::EditorSave() {
     if (!Editor.Open || Editor.Path.empty()) { return false; }
+    EditorStoreFolds();
     std::string utf8;
     try { utf8 = Editor.Doc.Write(); }
     catch (const std::exception& e) { EditorMessage(std::string("保存できません: ") + e.what()); return false; }
@@ -935,6 +935,7 @@ void Game::EditorKeepNotePositions(const std::vector<EditorFrac>& before) {
     for (int m = 0; m < n; ++m) {
         const auto [mulN, mulD] = factors[(size_t)m];
         if (mulN == 0) { continue; }
+        if (mulN > mulD && !Config.EditorKeepSpacingOnShrink) { continue; }     // 縮める: 「縮めても間隔を保つ」が OFF なら小節に合わせて縮める
         auto& measure = course->Measures[(size_t)m];
         for (auto& x : measure.Notes) { x.Num *= mulN; x.Den *= mulD; tja::Reduce(x.Num, x.Den); }
         for (auto& x : measure.Commands) {
@@ -1166,6 +1167,11 @@ auto Game::EditorButtons() -> std::vector<EditorButton> {
         }, false, EditorIcon::Insert },
         { "折りたたむ", [this] { EditorFold(); }, false, EditorIcon::Fold },
         { "登録解除", [this] { EditorRemoveFoldRegistration(Editor.CursorMeasure); }, false, EditorIcon::Unfold },
+        { std::string(Config.EditorKeepSpacingOnShrink ? "■" : "□") + " 縮めても間隔を保つ", [this] {
+            Config.EditorKeepSpacingOnShrink = !Config.EditorKeepSpacingOnShrink;
+            Config.Write();
+            EditorMessage(Config.EditorKeepSpacingOnShrink ? "#MEASURE で小節を縮めても音符の間隔を保ちます (はみ出した音符・命令は消します)" : "#MEASURE で小節を縮めると、音符は小節の長さに合わせて縮みます");
+        }, Config.EditorKeepSpacingOnShrink },
         { "削除", [this] {
             auto& ms = EditorCourse()->Measures;
             // 範囲を選んでいる時は、範囲にかかる小節をまとめて消す
@@ -1198,9 +1204,9 @@ auto Game::EditorButtons() -> std::vector<EditorButton> {
     });
     newline();
     group("コース", {
-        { "前のコース", [this] { Editor.Course = (Editor.Course + (int)Editor.Doc.Courses.size() - 1) % (int)Editor.Doc.Courses.size(); Editor.Folds.clear(); Editor.OpenFolds.clear(); EditorClamp(); }, false, EditorIcon::Left },
+        { "前のコース", [this] { EditorStoreFolds(); Editor.Course = (Editor.Course + (int)Editor.Doc.Courses.size() - 1) % (int)Editor.Doc.Courses.size(); EditorLoadFolds(); EditorClamp(); }, false, EditorIcon::Left },
         { Editor.Doc.CourseName(Editor.Course), [] {} },
-        { "次のコース", [this] { Editor.Course = (Editor.Course + 1) % (int)Editor.Doc.Courses.size(); Editor.Folds.clear(); Editor.OpenFolds.clear(); EditorClamp(); }, false, EditorIcon::Right },
+        { "次のコース", [this] { EditorStoreFolds(); Editor.Course = (Editor.Course + 1) % (int)Editor.Doc.Courses.size(); EditorLoadFolds(); EditorClamp(); }, false, EditorIcon::Right },
     });
     group("グリッド", {
         { "細かくしない分割", [this] { EditorSetDivision(-1); }, false, EditorIcon::Left },
@@ -1230,6 +1236,7 @@ std::string Game::EditorButtonHelp(const std::string& label) {
         { "切り取り", "選んだ範囲の音符・命令を切り取る (Ctrl+X)" },
         { "貼り付け", "カーソルの位置に貼り付ける (Ctrl+V)" },
         { "次郎ずれ補正", "太鼓さん次郎で BPM の小数以下の切り捨てにより譜面が早くなる分を、小節の頭の #DELAY で打ち消す。範囲を選んでいればその範囲、無ければコース全体 (Ctrl+Z で戻せる)" },
+        { "縮めても間隔を保つ", "ON: #MEASURE で小節を縮めても音符の間隔・命令の位置を保ち、小節の終わりからはみ出したものは消す。OFF: 音符は小節の長さに合わせて縮む (伸ばす時はいつも間隔を保つ)" },
         { "命令を消す", "選んだ範囲の命令を、すべて・または種類 (#SCROLL など) を選んでまとめて消す (Ctrl+Z で戻せる)" },
         { "範囲のBPMを解析", "選んだ範囲の小節の頭を音源から 1 小節ずつ求め、譜面が音源から指定の ms 以上ずれる小節に #BPMCHANGE を入れる (範囲の #BPMCHANGE は入れ直す。Ctrl+Z で戻せる)" },
         { "前のコース", "編集するコースを切り替える (コースの追加はヘッダーから)" },
@@ -1455,6 +1462,7 @@ void Game::EditorUndo(bool redo) {
 }
 
 void Game::EditorClose() {
+    EditorStoreFolds();
     if (Editor.Dirty && std::chrono::steady_clock::now() > Editor.ExitConfirmUntil) {
         Editor.ExitConfirmUntil = std::chrono::steady_clock::now() + std::chrono::seconds(3);
         EditorMessage("保存していない変更があります。もう一度押すと保存せずに閉じます");
@@ -1863,7 +1871,7 @@ auto Game::EditorGimmicks() -> const std::vector<EditorGimmick>& {
         { "ダミーノーツ (逆走式)", "なし (Enter)", "", "カーソルの小節の音符を、譜面の最後に書いたダミーとして同じ場所に重ねて見せる" },
         { "慣性移動", "BPM 時間(小節) 距離(小節) 段数 段ごとの速さの倍率", "200 2/4 4/2 4 1/2", "「BPM の 時間(小節) の長さ」の間に、距離(小節) だけ段数の段に分けて減速しながら進む (例: BPM 200 の 2/4 小節の時間で 4/2 小節ぶん進む)。最後に元の BPM・拍子へ戻す" },
         { "慣性移動 (加速)", "BPM 時間(小節) 距離(小節) 段数 段ごとの速さの倍率", "200 2/4 4/2 4 2", "「BPM の 時間(小節) の長さ」の間に、距離(小節) だけ段数の段に分けて加速しながら進む (例: BPM 200 の 2/4 小節の時間で 4/2 小節ぶん進む)。最後に元の BPM・拍子へ戻す" },
-        { "コマ送り (範囲)", "移動の間隔(小節) 1回の移動距離(小節)", "1/8 1/8", "選んだ範囲を、間隔ごとの疑似停止と瞬間移動 (バグ式) に作り直し、音符がコマ送りのように進んで見えるようにする (叩く時刻は変わらない)" },
+        { "コマ送り (範囲)", "移動距離の倍率", "1", "選んだ範囲を別の小節に分け、音符ごとに「止まる → 次の音符までの距離だけ瞬間移動 (バグ式)」に作り直して、音符が 1 つずつコマ送りで進んで見えるようにする (叩く時刻は変わらない。倍率 1 で元の間隔)" },
     };
     return list;
 }
@@ -2158,6 +2166,15 @@ auto Game::EditorJiroMeasureMaps() -> std::vector<EditorTimeline::Measure> {
     //   位置 = 小節の頭 (同じ小節に #BPMCHANGE があればその時刻) + (位置までの長さを切り捨て) + 小節の中の #DELAY
     double evTime = 0, evPos = 0, evRemain = 0, after = 0, totalDelay = 0, measureStart = 0, measureDelay = 0, next = 0;
     bool evHere = true;
+    // ゲームと同じく、譜面の始まりの絶対時刻 (曲の始まりからのミリ秒) から計算する: 始まりの 1ms 未満の切り捨てと、
+    // 0 より前の時刻を 0 に詰める所をゲームとそろえ、最後に譜面の時刻 (始まり = 0) に直す
+    double origin = 0;
+    {
+        const double offset = std::atof(tja::Document::GetValue(Editor.Doc.Header, "OFFSET").c_str());
+        origin = 240.0 / bpm > -offset ? 240000.0 / bpm : offset * -1000.0 - Config.SongOffset;
+        origin = std::max(0.0, origin + Config.ChartOffset);
+        evTime = next = std::max(0.0, JiroTrunc(origin));
+    }
     // 次郎は命令名の後の決まった文字数 (#BPMCHANGE は 8、#MEASURE・#DELAY は 10) を sscanf で読み、読めなければ前に読んだ値のまま
     double scanValue = 0;
     long scanDen = 1;
@@ -2231,6 +2248,7 @@ auto Game::EditorJiroMeasureMaps() -> std::vector<EditorTimeline::Measure> {
         const double beat = 60000.0 / bpm;
         next = std::max(0.0, evTime + JiroTrunc(beat * evRemain) + JiroTrunc(beat * after) + totalDelay);
         map.Map.push_back({ 1.0, next });
+        for (auto& point : map.Map) { point.second -= origin; }
         out.push_back(std::move(map));
     }
     return out;
@@ -2281,56 +2299,105 @@ void Game::EditorFixJiroDrift() {
         + (EditorJiroPreviewEnabled() ? "" : "  ※ 次郎形式再生ボタンで、次郎の時刻で確かめられます"));
 }
 
+namespace {
+    fs::path EditorFoldsFile() { return GetExecutablePath() / "editorfolds.json"; }
+    json ReadEditorFolds() {
+        std::ifstream in(EditorFoldsFile());
+        json data = in ? json::parse(in, nullptr, false) : json::object();
+        return data.is_object() ? data : json::object();
+    }
+}
+
+void Game::EditorStoreFolds() {
+    if (!Editor.Open || Editor.Path.empty() || EditorCourse() == nullptr) { return; }
+    try {
+        json data = ReadEditorFolds();
+        const std::string key = PathToU8(fs::absolute(Editor.Path).lexically_normal()), course = Editor.Doc.CourseName(Editor.Course);
+        auto pairs = [](const std::vector<std::pair<int, int>>& list) { json a = json::array(); for (const auto& [f, t] : list) { a.push_back({ f, t }); } return a; };
+        if (Editor.Folds.empty() && Editor.OpenFolds.empty()) {
+            if (data.contains(key) && data[key].is_object()) { data[key].erase(course); if (data[key].empty()) { data.erase(key); } }
+        }
+        else { data[key][course] = { { "folds", pairs(Editor.Folds) }, { "open", pairs(Editor.OpenFolds) } }; }
+        std::ofstream out(EditorFoldsFile());
+        out << data.dump(1);
+    }
+    catch (...) {}      // 保存できなくても編集は続ける
+}
+
+void Game::EditorLoadFolds() {
+    Editor.Folds.clear();
+    Editor.OpenFolds.clear();
+    if (!Editor.Open || Editor.Path.empty() || EditorCourse() == nullptr) { return; }
+    try {
+        const json data = ReadEditorFolds();
+        const std::string key = PathToU8(fs::absolute(Editor.Path).lexically_normal()), course = Editor.Doc.CourseName(Editor.Course);
+        if (!data.contains(key) || !data[key].is_object() || !data[key].contains(course)) { return; }
+        const json& entry = data[key][course];
+        auto read = [&](const char* name, std::vector<std::pair<int, int>>& out) {
+            if (!entry.contains(name) || !entry[name].is_array()) { return; }
+            for (const auto& p : entry[name]) {
+                if (p.is_array() && p.size() == 2 && p[0].is_number_integer() && p[1].is_number_integer()) { out.push_back({ p[0].get<int>(), p[1].get<int>() }); }
+            }
+        };
+        read("folds", Editor.Folds);
+        read("open", Editor.OpenFolds);
+    }
+    catch (...) { Editor.Folds.clear(); Editor.OpenFolds.clear(); }
+    EditorNormalizeFolds();     // 譜面が外で書き換えられていても、小節の数を超えない・重ならないようにする
+}
+
+// 選んだ範囲を別の小節に分け、音符ごとに「止まる (疑似停止) → 次の音符までの距離 × 倍率だけ瞬間移動 (バグ式)」に作り直す。
+// 範囲の前と後ろの部分は、拍子を短くした小節として残す。叩く時刻は変わらない
 void Game::EditorInsertFrameStep(const std::string& params) {
     auto* course = EditorCourse();
     if (course == nullptr) { return; }
     if (!Editor.Selecting) { EditorMessage("コマ送りにする範囲を選んでください (Shift+クリック / Shift+矢印)"); return; }
     std::vector<std::string> args;
     for (auto part : split(params, ' ')) { if (!tja::Trim(part).empty()) { args.emplace_back(tja::Trim(part)); } }
-    const auto interval = EditorParseFrac(args.size() > 0 ? std::string_view(args[0]) : "1/8");
-    const auto distance = EditorParseFrac(args.size() > 1 ? std::string_view(args[1]) : "1/8");
-    int64_t tn = 0, td = 0, dn = 0, dd = 0;
-    if (!interval || !distance || !EditorToRational(*interval, tn, td) || !EditorToRational(*distance, dn, dd)) { EditorMessage("間隔と距離は正の値にしてください (例: 1/8 1/8)"); return; }
+    const auto scale = EditorParseFrac(args.empty() ? std::string_view("1") : std::string_view(args[0]));
+    int64_t kn = 0, kd = 0;
+    if (!scale || !EditorToRational(*scale, kn, kd)) { EditorMessage("移動距離の倍率は正の値にしてください (例: 1)"); return; }
     const auto [a, b] = EditorSelection();
     const int count = (int)course->Measures.size();
     const int first = std::clamp(a.Measure, 0, count - 1), last = std::clamp(b.Measure, first, count - 1);
-    // 範囲の中で BPM・拍子・時刻が変わると段の長さを決められないので使えない (範囲の始まりの小節の頭は可)
     for (int m = first; m <= last; ++m) {
         for (const auto& c : course->Measures[(size_t)m].Commands) {
             const bool timing = tja::StartsWithKey(c.Text, "#BPMCHANGE") || tja::StartsWithKey(c.Text, "#MEASURE") || tja::StartsWithKey(c.Text, "#DELAY");
-            if (timing && !(m == first && c.Num == 0)) { EditorMessage("範囲の中に #BPMCHANGE・#MEASURE・#DELAY があると使えません (範囲の始まりの小節の頭は可)"); return; }
-            if (tja::StartsWithKey(c.Text, "#BRANCHSTART") || tja::StartsWithKey(c.Text, "#N") || tja::StartsWithKey(c.Text, "#E") || tja::StartsWithKey(c.Text, "#M ") || c.Text == "#M" || tja::StartsWithKey(c.Text, "#BRANCHEND")) {
-                EditorMessage("範囲に譜面分岐があると使えません"); return;
-            }
+            if (timing && !(m == first && c.Num == 0)) { EditorMessage("範囲の小節に #BPMCHANGE・#MEASURE・#DELAY があると使えません (範囲の始まりの小節の頭は可)"); return; }
+            const std::string key = EditorCommandKey(c.Text);
+            if (key == "#BRANCHSTART" || key == "#BRANCHEND" || key == "#N" || key == "#E" || key == "#M") { EditorMessage("範囲に譜面分岐があると使えません"); return; }
         }
     }
     const EditorTiming timing = EditorTimingAt(first);
     int64_t rn = 0, rd = 0;
     if (!(timing.Bpm > 0) || !EditorToRational(timing.Measure, rn, rd)) { EditorMessage("負の BPM・拍子の所では使えません"); return; }
     const double B = timing.Bpm;
-    // 範囲の長さ L = 小節数 × 拍子 (4/4 の小節を 1 とする分数)、段の数 = L / 間隔 (端数の段は短くする)
-    const int64_t measures = last - first + 1;
-    int64_t ln = measures * rn, ld = rd;
-    tja::Reduce(ln, ld);
-    // 段の数 = ceil(L / T) = ceil(ln*td / (ld*tn))
-    const int64_t steps = (ln * td + ld * tn - 1) / (ld * tn);
-    if (steps < 1 || steps > 1024) { EditorMessage("段が多すぎます (1024 段まで)。間隔を大きくするか、範囲を短くしてください"); return; }
-    // 範囲の音符・命令を、範囲の始まりからの位置 (4/4 の小節を 1 とする分数) にする
-    struct Item { int64_t Num, Den; char Type; std::string Text; };
-    std::vector<Item> items;
-    std::vector<std::string> keepHead;      // 範囲の始まりの小節の頭の、BPM・拍子以外の命令
+    // 位置は「小節 first の頭からの長さ (4/4 の小節を 1 とする分数)」で表す
+    struct Q { int64_t N = 0, D = 1; };
+    auto norm = [](Q q) { tja::Reduce(q.N, q.D); return q; };
+    auto absolute = [&](int m, int64_t num, int64_t den) { return norm({ ((int64_t)(m - first) * den + num) * rn, den * rd }); };
+    auto less = [](const Q& x, const Q& y) { return x.N * y.D < y.N * x.D; };
+    auto sub = [&](const Q& x, const Q& y) { return norm({ x.N * y.D - y.N * x.D, x.D * y.D }); };
+    const Q total = absolute(last + 1, 0, 1);
+    const Q start = absolute(a.Measure < first ? first : a.Measure, a.Num, std::max<int64_t>(a.Den, 1));
+    // 範囲の終わり = 選んだ最後の位置の 1 グリッド後 (小節の終わりを超えない)
+    Q end = absolute(b.Measure, std::min<int64_t>(b.Num + 1, b.Den), std::max<int64_t>(b.Den, 1));
+    if (less(total, end)) { end = total; }
+    if (!less(start, end)) { EditorMessage("範囲が短すぎます"); return; }
+    // 範囲の音符・命令を集める (範囲の前・後ろのものは、分けた前後の小節に残す)
+    struct Item { Q At; char Type = 0; std::string Text; };
+    std::vector<Item> before, inside, after;
     for (int m = first; m <= last; ++m) {
         const auto& measure = course->Measures[(size_t)m];
-        auto absolute = [&](int64_t num, int64_t den, int64_t& outN, int64_t& outD) {
-            // (m - first) × 拍子 + 位置 × 拍子 = ((m - first) × den + num) × rn / (den × rd)
-            outN = ((int64_t)(m - first) * den + num) * rn; outD = den * rd;
-            tja::Reduce(outN, outD);
+        auto place = [&](Item it) {
+            if (less(it.At, start)) { before.push_back(std::move(it)); }
+            else if (less(it.At, end)) { inside.push_back(std::move(it)); }
+            else { after.push_back(std::move(it)); }
         };
-        for (const auto& n : measure.Notes) { Item it{ 0, 1, n.Type, {} }; absolute(n.Num, n.Den, it.Num, it.Den); items.push_back(it); }
+        for (const auto& n : measure.Notes) { place({ absolute(m, n.Num, n.Den), n.Type, {} }); }
         for (const auto& c : measure.Commands) {
             if (tja::StartsWithKey(c.Text, "#BPMCHANGE") || tja::StartsWithKey(c.Text, "#MEASURE") || tja::StartsWithKey(c.Text, "#DELAY")) { continue; }
-            if (tja::StartsWithKey(c.Text, "#BARLINEON") || tja::StartsWithKey(c.Text, "#BARLINEOFF")) { continue; }   // 小節線は作り直す
-            Item it{ 0, 1, 0, c.Text }; absolute(c.Num, c.Den, it.Num, it.Den); items.push_back(it);
+            place({ absolute(m, c.Num, c.Den), 0, c.Text });
         }
     }
     // 範囲の前の小節線の表示 (範囲の後で元に戻す)
@@ -2341,48 +2408,78 @@ void Game::EditorInsertFrameStep(const std::string& params) {
             else if (tja::StartsWithKey(c.Text, "#BARLINEON")) { barline = true; }
         }
     }
-    std::vector<tja::Measure> built;
-    const std::string bpmText = EditorNum(B), stopBpm = EditorNum(B / 1000.0);
-    for (int64_t i = 0; i < steps; ++i) {
-        // 段 i: 始まり s = i × T、長さ = min(T, L - s)
-        int64_t sn = i * tn, sd = td;
-        int64_t lenN = 0, lenD = 1;
-        {
-            int64_t restN = ln * sd - sn * ld, restD = ld * sd;     // L - s
-            tja::Reduce(restN, restD);
-            if (restN * td >= tn * restD) { lenN = tn; lenD = td; } else { lenN = restN; lenD = restD; }
+    const std::string bpmText = EditorNum(B), stopBpm = EditorNum(B / 1000.0), restoreMeasure = "#MEASURE " + EditorFracText(timing.Measure.Num, timing.Measure.Den);
+    auto fracText = [](const Q& q, int64_t mul) { return std::to_string(q.N) + "/" + std::to_string(q.D * mul); };
+    // 区間 [from, to) の音符・命令を、長さ to - from の小節に入れる
+    auto fill = [&](tja::Measure& out, const std::vector<Item>& items, const Q& from, const Q& to) {
+        const Q length = sub(to, from);
+        for (const auto& it : items) {
+            if (less(it.At, from) || !less(it.At, to)) { continue; }
+            const Q rel = sub(it.At, from);
+            int64_t pn = rel.N * length.D, pd = rel.D * length.N;
+            tja::Reduce(pn, pd);
+            if (it.Text.empty()) { tja::Document::SetNote(out, pn, pd, it.Type); } else { tja::Document::AddCommand(out, pn, pd, it.Text); }
         }
-        // 疑似停止: BPM と拍子を 1/1000 にする (時間はそのまま、流れる距離はほぼ 0)
+    };
+    std::vector<tja::Measure> built;
+    // 範囲の前の部分: 元の BPM・拍子のまま、長さだけ短い小節
+    if (less(Q{ 0, 1 }, start)) {
+        tja::Measure head;
+        head.Commands.push_back({ 0, 1, "#BPMCHANGE " + bpmText });
+        head.Commands.push_back({ 0, 1, "#MEASURE " + fracText(start, 1) });
+        fill(head, before, Q{ 0, 1 }, start);
+        built.push_back(std::move(head));
+    }
+    // 音符ごとの区切り: 範囲の始まり・音符の時刻 (同じ時刻はまとめる)・範囲の終わり
+    std::vector<Q> cuts{ start };
+    for (const auto& it : inside) {
+        if (it.Text.empty() && it.Type != '8' && less(cuts.back(), it.At)) { cuts.push_back(it.At); }
+    }
+    std::ranges::sort(cuts.begin() + 1, cuts.end(), less);
+    cuts.erase(std::unique(cuts.begin(), cuts.end(), [](const Q& x, const Q& y) { return x.N == y.N && x.D == y.D; }), cuts.end());
+    cuts.push_back(end);
+    if (cuts.size() - 1 > 1024) { EditorMessage("音符が多すぎます (1024 個まで)。範囲を短くしてください"); return; }
+    for (size_t i = 0; i + 1 < cuts.size(); ++i) {
+        const Q length = sub(cuts[i + 1], cuts[i]);
+        if (length.N <= 0) { continue; }
+        // 止まる: BPM と拍子を 1/1000 にする (時間はそのまま、流れる距離はほぼ 0)
         tja::Measure stop;
         stop.Commands.push_back({ 0, 1, "#BPMCHANGE " + stopBpm });
-        stop.Commands.push_back({ 0, 1, "#MEASURE " + std::to_string(lenN) + "/" + std::to_string(lenD * 1000) });
-        if (i == 0) { stop.Commands.push_back({ 0, 1, "#BARLINEOFF" }); }
-        for (const auto& it : items) {
-            // 段の中の位置 = (位置 - s) / 長さ
-            int64_t pn = (it.Num * sd - sn * it.Den) * lenD, pd = it.Den * sd * lenN;
-            if (pn < 0 || pn >= pd) { continue; }
-            tja::Reduce(pn, pd);
-            if (it.Text.empty()) { tja::Document::SetNote(stop, pn, pd, it.Type); }
-            else { tja::Document::AddCommand(stop, pn, pd, it.Text); }
-        }
+        stop.Commands.push_back({ 0, 1, "#MEASURE " + fracText(length, 1000) });
+        if (built.empty() || i == 0) { stop.Commands.push_back({ 0, 1, "#BARLINEOFF" }); }
+        fill(stop, inside, cuts[i], cuts[i + 1]);
         built.push_back(std::move(stop));
-        // 瞬間移動 (バグ式): BPM X と -X の 0 秒の小節で、距離だけ一瞬で進める
+        // 瞬間移動 (バグ式): BPM X と -X の 0 秒の小節で、次の音符までの距離 × 倍率だけ進める
+        Q distance = norm({ length.N * kn, length.D * kd });
         tja::Measure jump;
         jump.Resolution = 2;
         jump.Commands.push_back({ 0, 1, "#BPMCHANGE " + bpmText });
-        jump.Commands.push_back({ 0, 1, "#MEASURE " + std::to_string(dn) + "/" + std::to_string(dd) });
+        jump.Commands.push_back({ 0, 1, "#MEASURE " + fracText(distance, 1) });
         jump.Commands.push_back({ 1, 2, "#BPMCHANGE " + EditorNum(-B) });
         built.push_back(std::move(jump));
+    }
+    // 範囲の後ろの部分: 元の BPM と小節線で、長さだけ短い小節
+    if (less(end, total)) {
+        tja::Measure tail;
+        tail.Commands.push_back({ 0, 1, "#BPMCHANGE " + bpmText });
+        tail.Commands.push_back({ 0, 1, "#MEASURE " + fracText(sub(total, end), 1) });
+        tail.Commands.push_back({ 0, 1, barline ? "#BARLINEON" : "#BARLINEOFF" });
+        fill(tail, after, end, total);
+        built.push_back(std::move(tail));
     }
     EditorChange();
     const int removed = last - first + 1;
     course->Measures.erase(course->Measures.begin() + first, course->Measures.begin() + last + 1);
     course->Measures.insert(course->Measures.begin() + first, built.begin(), built.end());
-    // 範囲の後ろで元の BPM・拍子・小節線に戻す
-    const size_t after = (size_t)first + built.size();
-    if (after >= course->Measures.size()) { course->Measures.emplace_back(); }
-    auto& restore = course->Measures[after].Commands;
-    std::vector<tja::Command> head = { { 0, 1, "#BPMCHANGE " + bpmText }, { 0, 1, "#MEASURE " + EditorFracText(timing.Measure.Num, timing.Measure.Den) }, { 0, 1, barline ? "#BARLINEON" : "#BARLINEOFF" } };
+    // その後ろで元の BPM・拍子・小節線に戻す (同じ種類の命令がもうあれば足さない)
+    const size_t next = (size_t)first + built.size();
+    if (next >= course->Measures.size()) { course->Measures.emplace_back(); }
+    auto& restore = course->Measures[next].Commands;
+    std::vector<tja::Command> head;
+    for (const std::string& t : { "#BPMCHANGE " + bpmText, restoreMeasure, std::string(barline ? "#BARLINEON" : "#BARLINEOFF") }) {
+        const std::string key = EditorCommandKey(t);
+        if (std::ranges::none_of(restore, [&](const tja::Command& c) { return c.Num == 0 && EditorCommandKey(c.Text) == key; })) { head.push_back({ 0, 1, t }); }
+    }
     restore.insert(restore.begin(), head.begin(), head.end());
     EditorRemapFolds(first, removed, (int)built.size());
     const bool hasscroll = std::ranges::any_of(course->Header, [](const std::string& h) { return tja::StartsWithKey(h, "#HBSCROLL") || tja::StartsWithKey(h, "#BMSCROLL"); });
@@ -2391,8 +2488,8 @@ void Game::EditorInsertFrameStep(const std::string& params) {
     Editor.CursorMeasure = first;
     Editor.CursorSlot = 0;
     EditorClamp();
-    EditorMessage("小節 " + std::to_string(first + 1) + "～" + std::to_string(last + 1) + " を " + std::to_string(steps) + " 段のコマ送りにしました"
-        + (hasscroll ? "" : "  (#HBSCROLL を追加)") + (EditorJiroPreviewEnabled() ? "" : "  ※ 次郎形式再生ボタンで次郎の時刻で確かめられます"));
+    EditorMessage("範囲を分けて、" + std::to_string(cuts.size() - 1) + " コマのコマ送りにしました" + (hasscroll ? "" : "  (#HBSCROLL を追加)")
+        + (EditorJiroPreviewEnabled() ? "" : "  ※ 次郎形式再生ボタンで次郎の時刻で確かめられます"));
 }
 
 auto Game::EditorBuildTimeline() -> EditorTimeline {
@@ -4321,14 +4418,29 @@ void Game::EditorProc() {
         tja::Document::SetNote(measure, Editor.CursorSlot, EditorDivOf(Editor.CursorMeasure), type);
         if(type=='7'||type=='9') EditorBalloonPlaced(Editor.CursorMeasure,Editor.CursorSlot,EditorDivOf(Editor.CursorMeasure),insertedBalloon);
     };
+    // 折りたたんだ範囲は 1 行として扱う: 入る時は折りたたんだ行 (範囲の始まり) に止まり、次の 1 回で抜ける
+    auto StepMeasure = [&](int dir) {
+        if (const auto* f = EditorFoldAt(Editor.CursorMeasure)) { Editor.CursorMeasure = dir > 0 ? f->second + 1 : f->first - 1; }
+        else { Editor.CursorMeasure += dir; }
+        Editor.CursorMeasure = std::clamp(Editor.CursorMeasure, 0, std::max(EditorMeasureCount() - 1, 0));
+        if (const auto* g = EditorFoldAt(Editor.CursorMeasure)) { Editor.CursorMeasure = g->first; }
+    };
     auto MoveSlot = [&](int dir) {
+        if (EditorFoldAt(Editor.CursorMeasure)) {
+            const int before = Editor.CursorMeasure;
+            StepMeasure(dir);
+            Editor.CursorSlot = dir < 0 && !EditorFoldAt(Editor.CursorMeasure) ? EditorDivOf(Editor.CursorMeasure) - 1 : 0;
+            if (Editor.CursorMeasure == before) { Editor.CursorSlot = 0; }
+            EditorClamp();
+            return;
+        }
         Editor.CursorSlot += dir;
         if (Editor.CursorSlot < 0) {
-            if (Editor.CursorMeasure > 0) { --Editor.CursorMeasure; Editor.CursorSlot = EditorDivOf(Editor.CursorMeasure) - 1; }
+            if (Editor.CursorMeasure > 0) { StepMeasure(-1); Editor.CursorSlot = EditorFoldAt(Editor.CursorMeasure) ? 0 : EditorDivOf(Editor.CursorMeasure) - 1; }
             else { Editor.CursorSlot = 0; }
         }
         if (Editor.CursorSlot >= EditorDivOf(Editor.CursorMeasure)) {
-            if (Editor.CursorMeasure + 1 < EditorMeasureCount()) { ++Editor.CursorMeasure; Editor.CursorSlot = 0; }
+            if (Editor.CursorMeasure + 1 < EditorMeasureCount()) { StepMeasure(1); Editor.CursorSlot = 0; }
             else { Editor.CursorSlot = EditorDivOf(Editor.CursorMeasure) - 1; }
         }
         EditorClamp();
@@ -4362,8 +4474,8 @@ void Game::EditorProc() {
         Input::GetInstance().HitKeyProcess(c, KeyState::Down, [&] { Editor.Palette = c; });
         Input::GetInstance().HitKeyProcess(VK_NUMPAD0 + (c - '0'), KeyState::Down, [&] { Editor.Palette = c; });
     }
-    Input::GetInstance().HitKeyProcess(VK_UP, KeyState::Down, [&] { Select(); --Editor.CursorMeasure; EditorClamp(); }, Config.KeyHoldProcInterval);
-    Input::GetInstance().HitKeyProcess(VK_DOWN, KeyState::Down, [&] { Select(); ++Editor.CursorMeasure; EditorClamp(); }, Config.KeyHoldProcInterval);
+    Input::GetInstance().HitKeyProcess(VK_UP, KeyState::Down, [&] { Select(); StepMeasure(-1); EditorClamp(); }, Config.KeyHoldProcInterval);
+    Input::GetInstance().HitKeyProcess(VK_DOWN, KeyState::Down, [&] { Select(); StepMeasure(1); EditorClamp(); }, Config.KeyHoldProcInterval);
     Input::GetInstance().HitKeyProcess(VK_LEFT, KeyState::Down, [&] { Select(); MoveSlot(-1); }, Config.KeyHoldProcInterval);
     Input::GetInstance().HitKeyProcess(VK_RIGHT, KeyState::Down, [&] { Select(); MoveSlot(1); }, Config.KeyHoldProcInterval);
     Input::GetInstance().HitKeyProcess(VK_RETURN, KeyState::Down, [&] { PlaceAtCursor(Editor.Palette); MoveSlot(1); });

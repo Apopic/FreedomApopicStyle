@@ -533,6 +533,7 @@ void Game::Cleanup() noexcept {
     if(gfx::IsInit()) {
         attempt([&]{ EditorReleaseSong(); });
         attempt([&]{ Editor.IconCache.clear(); });
+        attempt([&]{ EditorStoreFolds(); });      // 開いていた譜面の折りたたみを残す
         attempt([&]{ EditorFontData.Delete(); });
         attempt([&]{ EditorPanelFontData.Delete(); });
         attempt([&]{ DemoSong.Delete(); });

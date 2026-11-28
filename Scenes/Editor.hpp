@@ -30,7 +30,7 @@
         bool WasSjis = false;           // 元のファイルが Shift_JIS だった
         int Course = 0;
         int Top = 0;                    // 一番上に表示している小節
-        std::vector<std::pair<int, int>> Folds;     // 折りたたんでいる小節の範囲 (始まり, 終わり。どちらも含む。保存しない)
+        std::vector<std::pair<int, int>> Folds;     // 折りたたんでいる小節の範囲 (始まり, 終わり。どちらも含む。editorfolds.json に譜面・コースごとに保存)
         std::vector<std::pair<int, int>> OpenFolds; // 登録を残したまま開いている範囲
         int Division = 16;              // グリッドの分割数 (1 小節あたり)
         int GridPage = 0;
@@ -222,6 +222,9 @@
     void EditorFixJiroDrift();
     // 範囲をコマ送りに見せる: 範囲を interval ごとの段に分け、段の間は疑似停止、段の終わりに distance だけ瞬間移動する
     void EditorInsertFrameStep(const std::string& params);
+    // 折りたたみを譜面・コースごとに editorfolds.json へ保存・読み込む (エディタを閉じる・コースを切り替える・保存する時に保存)
+    void EditorStoreFolds();
+    void EditorLoadFolds();
     // 音符と小節幅を同じ縮尺で描き、演奏画面の16分の間隔と音符径の比率を保つ。
     UIRect EditorLane(int row) const;
     float EditorX(const UIRect& lane, double pos) const;

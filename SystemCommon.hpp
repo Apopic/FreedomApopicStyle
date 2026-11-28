@@ -72,6 +72,7 @@ public:
         JSONDATA(JiroChartMode);
         JSONDATA(EditorGrids);
         JSONDATA(EditorCustomGrids);
+        JSONDATA(EditorKeepSpacingOnShrink);
         JSONDATA(RecordPlay);
         JSONDATA(RecordFps);
         JSONDATA(RecordCrf);
@@ -158,6 +159,7 @@ public:
                 JSONDATA(JiroChartMode),
                 JSONDATA(EditorGrids),
                 JSONDATA(EditorCustomGrids),
+                JSONDATA(EditorKeepSpacingOnShrink),
                 JSONDATA(RecordPlay),
                 JSONDATA(RecordFps),
                 JSONDATA(RecordCrf),
@@ -299,6 +301,7 @@ public:
     std::optional<bool> JiroChartModeSaved;     // 譜面を読む時に一時的に次郎形式にした時の元の値 (保存しない)
     std::vector<int> EditorGrids{ 4, 8, 12, 16, 24, 32, 48 };    // 譜面制作でよく使うグリッドの分割数
     std::vector<int> EditorCustomGrids;
+    bool EditorKeepSpacingOnShrink = false;     // 譜面制作: #MEASURE で小節を縮める時も音符の間隔を保つ (はみ出した音符は消す)
     bool RecordPlay = false;            // 演奏を録画して recordings フォルダに MP4 で保存する
     int RecordFps = 60;
     int RecordCrf = 20;                 // 画質 (libx264 の CRF。小さいほど高画質・大きいファイル)
