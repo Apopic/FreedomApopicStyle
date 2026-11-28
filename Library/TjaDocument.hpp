@@ -286,6 +286,11 @@ namespace tja {
             return doc;
         }
 
+    public:
+        // 書き出す音符の 1 行の最大文字数 (',' を含む)。太鼓さん次郎は 1 行 512 文字が限界で、それを超える行で例外を出す。
+        // 改行 (CR LF) の分も含めて収まるよう 510 文字までにする
+        static constexpr int64_t MaxLineLength = 510;
+
     private:
         template<class Line>
         static void WriteMeasure(const Measure& m, Line& line) {
@@ -296,16 +301,31 @@ namespace tja {
                 }
                 return a / std::gcd(a, b) * b;
             };
-            int64_t den = m.Notes.empty() ? 1 : std::max<int64_t>(m.Resolution, 1);
-            if (den > maxResolution) { throw std::length_error("小節の分割数が大きすぎます"); }
+            // 細かさ: 音符と小節の途中の命令の位置を表せる最小の分割 (minimal) を、元の細かさ (Resolution) に合わせて細かくする
+            // (音符の間隔の見た目を保つ)。ただし 1 行が長くなりすぎる時は、minimal の倍数のうち元の細かさを割り切れて
+            // MaxLineLength に収まる一番細かいものにする (音符の位置は変わらない)。それでも収まらない時は行を折り返す
+            int64_t minimal = 1;
             for (const auto& n : m.Notes) {
                 if (n.Num < 0 || n.Den <= 0 || n.Num >= n.Den) { throw std::invalid_argument("音符の位置が範囲外です"); }
-                den = lcm(den, n.Den);
+                int64_t a = n.Num, b = n.Den;
+                Reduce(a, b);
+                minimal = lcm(minimal, b);
             }
             for (const auto& c : m.Commands) {
                 if (c.Num < 0 || c.Den <= 0 || c.Num > c.Den) { throw std::invalid_argument("命令の位置が範囲外です"); }
-                if (c.Num < c.Den) { den = lcm(den, c.Den); }
+                if (c.Num < c.Den) { int64_t a = c.Num, b = c.Den; Reduce(a, b); minimal = lcm(minimal, b); }
             }
+            int64_t den = minimal;
+            if (!m.Notes.empty()) {
+                const int64_t preferred = lcm(minimal, std::max<int64_t>(m.Resolution, 1));
+                if (preferred < MaxLineLength) { den = preferred; }
+                else {
+                    for (int64_t k = preferred / minimal; k >= 1; --k) {
+                        if ((preferred / minimal) % k == 0 && minimal * k < MaxLineLength) { den = minimal * k; break; }
+                    }
+                }
+            }
+            if (den > maxResolution) { throw std::length_error("小節の分割数が大きすぎます"); }
             const bool has_notes = !m.Notes.empty();
             std::string notes(has_notes ? (size_t)den : 0, '0');
             for (const auto& n : m.Notes) {
@@ -317,16 +337,22 @@ namespace tja {
             for (const auto& c : m.Commands) { mid = mid || (c.Num > 0 && c.Num < c.Den); }
             if (!has_notes && mid) { notes.assign((size_t)den, '0'); }
 
+            // 音符の行は MaxLineLength 文字 (',' を含む) までで折り返す (太鼓さん次郎は長すぎる行を読めない)
+            auto notesLine = [&](std::string_view part, bool last) {
+                const size_t limit = (size_t)MaxLineLength - 1;
+                while (part.size() > limit) { line(part.substr(0, limit)); part.remove_prefix(limit); }
+                if (last) { line(std::string(part) + ","); } else if (!part.empty()) { line(part); }
+            };
             size_t written = 0;
             for (const auto& c : m.Commands) {
                 const size_t index = c.Num >= c.Den ? notes.size() : (size_t)(c.Num * (den / c.Den));
                 if (index > written) {
-                    line(std::string_view(notes).substr(written, index - written));
+                    notesLine(std::string_view(notes).substr(written, index - written), false);
                     written = index;
                 }
                 line(c.Text);
             }
-            line(std::string(std::string_view(notes).substr(written)) + ",");
+            notesLine(std::string_view(notes).substr(written), true);
         }
     };
 }
