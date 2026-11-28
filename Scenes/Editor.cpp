@@ -1210,7 +1210,7 @@ auto Game::EditorButtons() -> std::vector<EditorButton> {
     });
     static const std::pair<char, const char*> palette[] = {
         { '1', "ドン" }, { '2', "カッ" }, { '3', "大ドン" }, { '4', "大カッ" }, { '5', "連打" },
-        { '6', "大連打" }, { '7', "風船" }, { '8', "連打終点" }, { '9', "くすだま" }, { '0', "休符" },
+        { '6', "大連打" }, { '7', "風船" }, { '8', "連打終点" }, { '9', "くすだま" },
     };
     std::vector<Item> notes;
     for (const auto& [type, label] : palette) {
@@ -1261,7 +1261,7 @@ std::string Game::EditorButtonHelp(const std::string& label) {
         { "分割", "グリッドの分割数 (1 小節あたり)。押すと一覧、◀ ▶ はよく使う分割だけを切り替える" },
         { "1 ", "ドン" }, { "2 ", "カッ" }, { "3 ", "大ドン" }, { "4 ", "大カッ" }, { "5 ", "連打 (8 の連打終点まで)" },
         { "6 ", "大連打 (8 の連打終点まで)" }, { "7 ", "風船 (打数はヘッダーの BALLOON)" }, { "8 ", "連打・風船の終わり" },
-        { "9 ", "くすだま (打数はヘッダーの BALLOON)" }, { "0 ", "休符: クリックした位置の音符を消す" },
+        { "9 ", "くすだま (打数はヘッダーの BALLOON)" },
     };
     for (const auto& [key, help] : helps) {
         if (label.starts_with(key) || label.find(key) != std::string::npos && std::string_view(key).size() > 2) { return help; }
@@ -2275,6 +2275,19 @@ void Game::EditorFixJiroDrift() {
     const int count = (int)course->Measures.size();
     int first = 0, last = count - 1;
     if (Editor.Selecting) { const auto [a, b] = EditorSelection(); first = std::clamp(a.Measure, 0, count - 1); last = std::clamp(b.Measure, first, count - 1); }
+    // 前に補正で入れた #DELAY (印のコメント付き) は外してから計り直す: 外さないと、その #DELAY も「本来の時刻」に入ってしまい、
+    // 補正するたびに同じ分の #DELAY が増える
+    static constexpr std::string_view mark = "// 次郎ずれ補正";
+    bool changed = false;
+    int removedFix = 0;
+    for (int m = std::max(first, 1); m <= last + 1 && m < count; ++m) {
+        auto& cmds = course->Measures[(size_t)m].Commands;
+        const auto isFix = [](const tja::Command& c) { return c.Num == 0 && tja::StartsWithKey(c.Text, "#DELAY") && c.Text.find(mark) != std::string::npos; };
+        if (std::ranges::none_of(cmds, isFix)) { continue; }
+        if (!changed) { EditorChange(); changed = true; }
+        removedFix += (int)std::erase_if(cmds, isFix);
+        ++Editor.Revision;
+    }
     // 本来の時刻の小節の頭: 次郎と同じ読み方 (命令の決まった文字数・小節の途中の #MEASURE は次の小節から) で、
     // ミリ秒の切り捨てだけをしない時刻。通常の読み方の時刻と比べると、ギミックの譜面では読み方の違いを「ずれ」と取り違えてしまう
     std::vector<double> exact;
@@ -2286,7 +2299,6 @@ void Game::EditorFixJiroDrift() {
     // 小節の頭ごとに、次郎の時刻が本来より 1ms 以上ずれていれば、その分 (ミリ秒の整数) の #DELAY を小節の頭に入れる
     //   drift = 本来 - 次郎。正 = 次郎が早い (正の拍の長さの切り捨て) → 正の #DELAY で遅らせる
     //                        負 = 次郎が遅い (負の BPM・負の #DELAY の 0 方向への切り捨て) → 負の #DELAY で早める
-    bool changed = false;
     int inserted = 0;
     double early = 0, late = 0, worst = 0;
     for (int m = std::max(first, 1); m <= last + 1 && m <= count; ++m) {
@@ -2298,13 +2310,18 @@ void Game::EditorFixJiroDrift() {
         const double ms = drift > 0 ? std::floor(drift + 1e-6) : -std::floor(-drift + 1e-6);
         if (!changed) { EditorChange(); changed = true; }
         // 小節の頭の #DELAY (次郎は小数第 3 位 = ミリ秒まで読む)
-        tja::Document::AddCommand(course->Measures[(size_t)m], 0, 1, "#DELAY " + EditorNum(ms / 1000.0));
+        tja::Document::AddCommand(course->Measures[(size_t)m], 0, 1, "#DELAY " + EditorNum(ms / 1000.0) + " " + std::string(mark));
         ++Editor.Revision;
         ++inserted;
         (ms > 0 ? early : late) += std::abs(ms);
         worst = std::max(worst, std::abs(drift - ms));
     }
-    if (!changed) { EditorMessage("補正するずれはありませんでした (次郎の時刻と本来の時刻の差は 1ms 未満)"); return; }
+    if (inserted == 0) {
+        if (changed) { ++Editor.Revision; }
+        EditorMessage(changed ? "前の補正の #DELAY (" + std::to_string(removedFix) + " か所) を外しました。補正するずれはありません"
+                              : "補正するずれはありませんでした (次郎の時刻と本来の時刻の差は 1ms 未満)");
+        return;
+    }
     ++Editor.Revision;
     std::string detail;
     if (early > 0) { detail += "早くなる分 " + EditorNum(early) + "ms"; }
@@ -2639,8 +2656,10 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
         push(std::move(tail), sub(total, end), sub(total, end));
     }
     // 次郎は #BPMCHANGE のたびに小節の時間をミリ秒の整数に切り捨てるので、そのままでは区切りごとに最大 1ms ずつ早くなる。
-    // 小節ごとに「本来の時刻を丸めた整数ミリ秒」までの時間 D を決め、切り捨てても D になる拍子 (D + 0.5 ミリ秒分) と、
-    // HBSCROLL で流れる距離 (= D × BPM / 240000) が狙いの距離になる BPM を書く
+    // 小節ごとに「本来の時刻を丸めた整数ミリ秒」までの時間 D を決め、拍子 (= 流れる距離) はそのままで、小節の時間が
+    // D よりほんの少しだけ長く (D + 0.002ms 程度) なる BPM を書く。次郎 (切り捨て) では D ちょうど、通常の読み方でも
+    // ほぼ D になるので、どちらの形式でも本来の時刻からのずれは 0.5ms 程度に収まる
+    // (拍子を D + 0.5ms 分に伸ばすと、通常の読み方では区切りごとに 0.5ms ずつ遅れ、距離も変わってしまう)
     {
         double origin = 0;
         const auto ideal = EditorJiroMeasureMaps(false, &origin);
@@ -2658,17 +2677,18 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
             const auto f = EditorParseFrac(std::string_view(m.Commands[1].Text).substr(8));
             return bv != 0 && f && f->Den != 0 ? JiroTrunc(60000.0 / bv * (4.0 * f->Value())) : 0.0;
         };
-        auto fit = [&](tja::Measure& m, double D, double distance) {
-            const std::string bpmText = JiroBpm(240000.0 * distance / D);
-            const double bv = std::strtod(bpmText.c_str(), nullptr);
-            if (bv == 0 || !std::isfinite(bv)) { return false; }
-            for (double extra : { 0.5, 0.25, 0.75, 0.1, 0.9 }) {
-                const double rv = (D + extra) * bv / 240000.0;
-                const auto [n, d] = JiroFraction(std::llround(rv * 1e9), 1000000000);
-                const double r = (double)n / (double)d;
-                if (n != 0 && JiroTrunc(60000.0 / bv * (4.0 * r)) == D && JiroTrunc(60000.0 / bv * 4.0 * r) == D) {
+        auto fit = [&](tja::Measure& m, double D) {
+            const auto f = EditorParseFrac(std::string_view(m.Commands[1].Text).substr(8));
+            if (!f || f->Den == 0 || f->Value() == 0) { return false; }
+            const double r = f->Value();
+            for (double extra : { 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.4 }) {
+                const std::string bpmText = JiroBpm(240000.0 * r / (D + extra));
+                const double bv = std::strtod(bpmText.c_str(), nullptr);
+                if (bv == 0 || !std::isfinite(bv)) { continue; }
+                const double ms = 60000.0 / bv * (4.0 * r);
+                // 掛ける順番による誤差でも D を下回らない余裕を持たせる (ゲームと次郎の計算の順番は違うことがある)
+                if (ms - D >= 1e-4 && ms - D < 0.5 && JiroTrunc(ms) == D && JiroTrunc(60000.0 / bv * 4.0 * r) == D && JiroTrunc(240000.0 * r / bv) == D) {
                     m.Commands[0].Text = "#BPMCHANGE " + bpmText;
-                    m.Commands[1].Text = "#MEASURE " + std::to_string(n) + "/" + std::to_string(d);
                     return true;
                 }
             }
@@ -2678,7 +2698,7 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
             want += plans[k].Ms;
             if (plans[k].Adjust && plans[k].Distance != 0) {
                 const double target = std::round(want), D = target - now;
-                if (D >= 1 && D < 1e9 && fit(built[k], D, plans[k].Distance)) { now = target; continue; }
+                if (D >= 1 && D < 1e9 && fit(built[k], D)) { now = target; continue; }
             }
             now += plans[k].Adjust ? writtenMs(built[k]) : 0.0;
         }
@@ -4677,8 +4697,9 @@ void Game::EditorProc() {
 #else
     if (ctrl) {
         Input::GetInstance().HitKeyProcess('S', KeyState::Down, [&] { EditorSave(); });
-        Input::GetInstance().HitKeyProcess('Z', KeyState::Down, [&] { EditorUndo(false); });
-        Input::GetInstance().HitKeyProcess('Y', KeyState::Down, [&] { EditorUndo(true); });
+        // 長押しで続けて戻す・やり直す
+        Input::GetInstance().HitKeyProcess('Z', KeyState::Down, [&] { EditorUndo(false); }, Config.KeyHoldProcInterval);
+        Input::GetInstance().HitKeyProcess('Y', KeyState::Down, [&] { EditorUndo(true); }, Config.KeyHoldProcInterval);
         Input::GetInstance().HitKeyProcess('C', KeyState::Down, [&] { EditorCopy(false); });
         Input::GetInstance().HitKeyProcess('X', KeyState::Down, [&] { if (EditorCopy(true)) { Editor.Selecting = false; } });
         Input::GetInstance().HitKeyProcess('V', KeyState::Down, [&] { EditorPaste(); });
@@ -4686,7 +4707,9 @@ void Game::EditorProc() {
     }
     // Shift+矢印で範囲を選ぶ (矢印だけなら選択を解除して移動)
     auto Select = [&] { if (shift) { EditorBeginSelection(); } else { Editor.Selecting = false; } };
-    for (char c = '0'; c <= '9'; ++c) {
+    // 休符 (0) の種類は無くした (音符は BackSpace / Delete で消す)
+    if (Editor.Palette < '1' || Editor.Palette > '9') { Editor.Palette = '1'; }
+    for (char c = '1'; c <= '9'; ++c) {
         Input::GetInstance().HitKeyProcess(c, KeyState::Down, [&] { Editor.Palette = c; });
         Input::GetInstance().HitKeyProcess(VK_NUMPAD0 + (c - '0'), KeyState::Down, [&] { Editor.Palette = c; });
     }
@@ -4694,7 +4717,10 @@ void Game::EditorProc() {
     Input::GetInstance().HitKeyProcess(VK_DOWN, KeyState::Down, [&] { Select(); StepMeasure(1); EditorClamp(); }, Config.KeyHoldProcInterval);
     Input::GetInstance().HitKeyProcess(VK_LEFT, KeyState::Down, [&] { Select(); MoveSlot(-1); }, Config.KeyHoldProcInterval);
     Input::GetInstance().HitKeyProcess(VK_RIGHT, KeyState::Down, [&] { Select(); MoveSlot(1); }, Config.KeyHoldProcInterval);
-    Input::GetInstance().HitKeyProcess(VK_RETURN, KeyState::Down, [&] { PlaceAtCursor(Editor.Palette); MoveSlot(1); });
+    // Enter: 置いて次のグリッドへ (長押しで続けて置く)。BackSpace: 1 つ前のグリッドへ戻ってその音符を消す (長押しで続けて消す)。
+    // Delete: カーソルの位置の音符を消す
+    Input::GetInstance().HitKeyProcess(VK_RETURN, KeyState::Down, [&] { PlaceAtCursor(Editor.Palette); MoveSlot(1); }, Config.KeyHoldProcInterval);
+    Input::GetInstance().HitKeyProcess(VK_BACK, KeyState::Down, [&] { Editor.Selecting = false; MoveSlot(-1); PlaceAtCursor('0'); }, Config.KeyHoldProcInterval);
     Input::GetInstance().HitKeyProcess(VK_DELETE, KeyState::Down, [&] { PlaceAtCursor('0'); });
     Input::GetInstance().HitKeyProcess(VK_F5, KeyState::Down, [&] { EditorTestPlay(); });
     Input::GetInstance().HitKeyProcess(VK_SPACE, KeyState::Down, [&] { EditorTogglePreview(); });
