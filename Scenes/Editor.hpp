@@ -222,6 +222,10 @@
     void EditorFixJiroDrift();
     // 範囲をコマ送りに見せる: 範囲を interval ごとの段に分け、段の間は疑似停止、段の終わりに distance だけ瞬間移動する
     void EditorInsertFrameStep(const std::string& params);
+    // 範囲を痙攣させる: 間隔ごとに「速く前へ進む → 振れ幅だけ戻る」に作り直す (音符は元の時刻・元の速さで来ながら震える)
+    void EditorInsertConvulsion(const std::string& params);
+    // 範囲を別の小節に分けて作り直す (kind 0: コマ送り / 1: 痙攣)
+    void EditorRebuildRange(int kind, const std::string& params);
     // 折りたたみを譜面・コースごとに editorfolds.json へ保存・読み込む (エディタを閉じる・コースを切り替える・保存する時に保存)
     void EditorStoreFolds();
     void EditorLoadFolds();
