@@ -2,6 +2,63 @@
 #include "../Library/EditorLayout.hpp"
 #include "../Library/PreviewRoll.hpp"
 #include "../Library/UniformScroll.hpp"
+namespace {
+    // 次郎は #MEASURE の値を命令名の後の 10 文字 (空白を含む) までしか読まないので、空白の後 9 文字に収まる分数にする。
+    // 収まらない時は連分数で近い分数を選ぶ (呼ぶ側は、書いた値に合わせて BPM を決め直して時間を保つ)
+    std::pair<int64_t, int64_t> JiroFraction(int64_t n, int64_t d) {
+        if (d < 0) { n = -n; d = -d; }
+        tja::Reduce(n, d);
+        auto fits = [](int64_t a, int64_t b) { return (std::to_string(a) + "/" + std::to_string(b)).size() <= 9; };
+        if (fits(n, d)) { return { n, d }; }
+        const int64_t sign = n < 0 ? -1 : 1;
+        int64_t x = n < 0 ? -n : n, y = d, p0 = 0, q0 = 1, p1 = 1, q1 = 0;
+        std::pair<int64_t, int64_t> best{ sign * std::max<int64_t>(1, (int64_t)std::llround((double)x / (double)y)), 1 };
+        while (y != 0) {
+            const int64_t q = x / y, p2 = q * p1 + p0, q2 = q * q1 + q0;
+            if (!fits(sign * p2, q2)) { break; }
+            if (p2 != 0) { best = { sign * p2, q2 }; }
+            p0 = p1; q0 = q1; p1 = p2; q1 = q2;
+            const int64_t t = x % y; x = y; y = t;
+        }
+        return best;
+    }
+    // 小数の値を、次郎が読める長さ (9 文字) の整数の分数にする。割り切れる値 (4/3 なども) はそのまま、収まらない時は近い分数
+    std::pair<int64_t, int64_t> JiroRational(double v) {
+        if (!std::isfinite(v)) { return { 0, 1 }; }
+        auto fits = [](int64_t a, int64_t b) { return (std::to_string(a) + "/" + std::to_string(b)).size() <= 9; };
+        const int64_t sign = v < 0 ? -1 : 1;
+        const double x0 = std::abs(v);
+        // 連分数の近似分数を順に作り、ほぼ一致したら止める (9 文字に収まる最後のものを使う)
+        int64_t p0 = 0, q0 = 1, p1 = 1, q1 = 0;
+        std::pair<int64_t, int64_t> best{ sign * (int64_t)std::llround(x0), 1 };
+        double x = x0;
+        for (int i = 0; i < 40; ++i) {
+            const double a = std::floor(x);
+            if (a > 9e15) { break; }
+            const int64_t ai = (int64_t)a, p2 = ai * p1 + p0, q2 = ai * q1 + q0;
+            if (q2 <= 0 || !fits(sign * p2, q2)) { break; }
+            best = { sign * p2, q2 };
+            if (std::abs((double)p2 / (double)q2 - x0) <= 1e-12 * std::max(1.0, x0)) { break; }
+            p0 = p1; q0 = q1; p1 = p2; q1 = q2;
+            const double frac = x - a;
+            if (frac < 1e-15) { break; }
+            x = 1.0 / frac;
+        }
+        if (best.first == 0 && v != 0) { best = { sign, std::max<int64_t>(1, (int64_t)std::llround(1.0 / x0)) }; }
+        return best;
+    }
+    // 次郎は #BPMCHANGE の値を命令名の後の 8 文字 (空白を含む) までしか読まないので、7 文字に収める
+    std::string JiroBpm(double v, size_t maxLength = 7) {
+        for (int precision = 6; precision >= 0; --precision) {
+            std::string text = std::format("{:.{}f}", v, precision);
+            if (text.find('.') != std::string::npos) { while (text.back() == '0') { text.pop_back(); } if (text.back() == '.') { text.pop_back(); } }
+            if (text == "-0") { text = "0"; }
+            if (text.size() <= maxLength) { return text; }
+        }
+        return std::format("{:.0f}", v);
+    }
+}
+
 double Game::EditorCommandValue(const std::string& text, size_t keylength) {
     if (text.size() <= keylength) { return 0.0; }
     return std::atof(std::string(tja::Trim(std::string_view(text).substr(keylength))).c_str());
@@ -1018,12 +1075,13 @@ void Game::EditorAnalyzeBpm(double tolerance, int digits, bool perBeat) {
             const double length = beatAt(j + 1) - beatAt(j);
             double next = chart + length * 60 / current;
             if (std::abs(next - p[j + 1]) > tol && p[j + 1] > chart && length > 0) {
-                const double v = std::round(length * 60 / (p[j + 1] - chart) * scale) / scale;
+                // 次郎が読める 7 文字に収めた値 (書いた値で以降の時刻を計算する)
+                const double v = std::strtod(JiroBpm(std::round(length * 60 / (p[j + 1] - chart) * scale) / scale).c_str(), nullptr);
                 if (v > 0 && std::abs(v - current) > 1e-9) {
                     // 小節の中の位置 = 拍 / (拍子 × 4) = j × rd / (4 × rn)
                     int64_t num = (int64_t)std::llround(beatAt(j)) * rd, den = 4 * rn;
                     tja::Reduce(num, den);
-                    tja::Document::AddCommand(course->Measures[(size_t)first + i], num, den, "#BPMCHANGE " + EditorNum(v));
+                    tja::Document::AddCommand(course->Measures[(size_t)first + i], num, den, "#BPMCHANGE " + JiroBpm(v));
                     current = v;
                     next = chart + length * 60 / current;
                     ++inserted;
@@ -1035,7 +1093,7 @@ void Game::EditorAnalyzeBpm(double tolerance, int digits, bool perBeat) {
         }
     }
     if (hasNext && !nextHasOwn && std::abs(current - nextBpm) > 1e-9) {
-        tja::Document::AddCommand(course->Measures[(size_t)last + 1], 0, 1, "#BPMCHANGE " + EditorNum(nextBpm));
+        tja::Document::AddCommand(course->Measures[(size_t)last + 1], 0, 1, "#BPMCHANGE " + JiroBpm(nextBpm));
     }
     ++Editor.Revision;
     const std::string range = "小節 " + std::to_string(first + 1) + "～" + std::to_string(last + 1) + " (BPM " + EditorNum(lowest) + "～" + EditorNum(highest)
@@ -1762,7 +1820,8 @@ void Game::EditorInsertCommand(const std::string& text) {
             auto& cmds = course->Measures[m].Commands;
             // 同じ位置の同じ命令は置き換える
             std::erase_if(cmds, [&](const tja::Command& c) { return tja::ComparePos(c.Num, c.Den, num, den) == 0 && tja::StartsWithKey(c.Text, key); });
-            tja::Document::AddCommand(course->Measures[m], num, den, key + " " + EditorNum(v));
+            // 次郎は #BPMCHANGE・#SCROLL の値を 7 文字までしか読まないので収める
+            tja::Document::AddCommand(course->Measures[m], num, den, key + " " + JiroBpm(v));
         }
         EditorMessage(key + " を " + EditorNum(v0) + " から " + EditorNum(v1) + " まで、" + std::to_string(points.size()) + (bars ? " 本の小節線" : " 個の音符") + "に入れました");
         return;
@@ -1833,7 +1892,12 @@ std::string Game::EditorNum(double v) {
     return out == "-0" ? "0" : out;
 }
 
-std::string Game::EditorFracText(double num, double den) { return EditorNum(num) + "/" + EditorNum(den); }
+// 分数の文字 (#MEASURE など): 小数を使わない整数の分数にする (次郎が読める 9 文字に収める)。次郎・他のシミュレーターで同じ値に読まれる
+std::string Game::EditorFracText(double num, double den) {
+    if (den == 0 || !std::isfinite(num / den)) { return EditorNum(num) + "/" + EditorNum(den); }
+    const auto [n, d] = JiroRational(num / den);
+    return std::to_string(n) + "/" + std::to_string(d);
+}
 
 auto Game::EditorTimingAt(int measure) -> EditorTiming {
     const auto* course = EditorCourse();
@@ -1897,7 +1961,8 @@ std::optional<std::vector<std::string>> Game::EditorBuildGimmick(int index, cons
     };
     const EditorTiming t = EditorTimingAt(Editor.CursorMeasure);
     const double B = t.Bpm;
-    const std::string bpm = EditorNum(B), nbpm = EditorNum(-B);
+    // BPM は次郎が読める 7 文字に収める。X と -X を組で使う所は、符号の分の桁を空けて同じ桁にする (前半と後半が打ち消し合うように)
+    const std::string bpm = JiroBpm(B), nbpm = JiroBpm(-B), pairBpm = JiroBpm(std::abs(B), 6);
     const std::string restoreMeasure = "#MEASURE " + EditorFracText(t.Measure.Num, t.Measure.Den);
     std::vector<std::string> out;
     auto restore = [&] { out.push_back("#BPMCHANGE " + bpm); out.push_back(restoreMeasure); };
@@ -1909,14 +1974,14 @@ std::optional<std::vector<std::string>> Game::EditorBuildGimmick(int index, cons
         if (!x || !len || x->Value() <= 0 || len->Value() <= 0) { return bad("倍率と長さは正の値にしてください (例: 2 1/1)"); }
         const double k = x->Value();
         if (B * k >= 120000) { return bad("BPM が 120000 以上になります (次郎では落ちます)"); }
-        out = { "#BPMCHANGE " + EditorNum(B * k), "#MEASURE " + EditorFracText(len->Num * k, len->Den), "0," };
+        out = { "#BPMCHANGE " + JiroBpm(B * k), "#MEASURE " + EditorFracText(len->Num * k, len->Den), "0," };
         restore();
         break;
     }
     case 1: {   // 逆走
         const auto len = frac(0, "1/2"), x = frac(1, "1");
         if (!len || !x || len->Value() <= 0 || x->Value() <= 0) { return bad("長さと倍率は正の値にしてください (例: 1/2 1)"); }
-        out = { "#BPMCHANGE " + EditorNum(-B * x->Value()), "#MEASURE " + EditorFracText(-len->Num * x->Value(), len->Den), "0," };
+        out = { "#BPMCHANGE " + JiroBpm(-B * x->Value()), "#MEASURE " + EditorFracText(-len->Num * x->Value(), len->Den), "0," };
         restore();
         break;
     }
@@ -1930,14 +1995,14 @@ std::optional<std::vector<std::string>> Game::EditorBuildGimmick(int index, cons
     case 3: {   // 疑似停止
         const auto len = frac(0, "1/1");
         if (!len || len->Value() <= 0) { return bad("長さは正の値にしてください"); }
-        out = { "#BPMCHANGE " + EditorNum(B / 1000.0), "#MEASURE " + EditorFracText(len->Num, len->Den * 1000.0), "0," };
+        out = { "#BPMCHANGE " + JiroBpm(B / 1000.0), "#MEASURE " + EditorFracText(len->Num, len->Den * 1000.0), "0," };
         restore();
         break;
     }
     case 4: {   // 瞬間移動 (バグ式)
         const auto d = frac(0, "2");
         if (!d || d->Value() <= 0) { return bad("距離は正の値にしてください"); }
-        out = { "#BPMCHANGE " + bpm, "#MEASURE " + EditorFracText(d->Num, d->Den), "0", "#BPMCHANGE " + nbpm, "0," };
+        out = { std::string("#BPMCHANGE ") + (B < 0 ? "-" : "") + pairBpm, "#MEASURE " + EditorFracText(d->Num, d->Den), "0", std::string("#BPMCHANGE ") + (B < 0 ? "" : "-") + pairBpm, "0," };
         restore();
         break;
     }
@@ -1952,7 +2017,7 @@ std::optional<std::vector<std::string>> Game::EditorBuildGimmick(int index, cons
         const auto len = frac(0, "1/4"), n = frac(1, "100");
         if (!len || !n || len->Value() <= 0 || n->Value() <= 0) { return bad("長さと倍率は正の値にしてください (例: 1/4 100)"); }
         if (B * n->Value() >= 120000) { return bad("BPM × 倍率 が 120000 以上になります (倍率を下げてください)"); }
-        out = { "#BPMCHANGE " + EditorNum(B * n->Value()), "#MEASURE " + EditorFracText(len->Num * n->Value(), len->Den), "#BARLINEOFF", "0," };
+        out = { "#BPMCHANGE " + JiroBpm(B * n->Value()), "#MEASURE " + EditorFracText(len->Num * n->Value(), len->Den), "#BARLINEOFF", "0," };
         restore();
         out.push_back("#BARLINEON");
         break;
@@ -1961,8 +2026,8 @@ std::optional<std::vector<std::string>> Game::EditorBuildGimmick(int index, cons
         const auto pos = frac(0, "1/2");
         if (!pos || pos->Value() <= 0 || pos->Value() >= t.Measure.Value()) { return bad("出現する位置は 0 より大きく、小節の長さより小さくしてください"); }
         const double rest = t.Measure.Value() - pos->Value();
-        out = { "#BPMCHANGE " + bpm, "#MEASURE " + EditorFracText(pos->Num, pos->Den), "0,", "#MEASURE 2/1", "0", "#BPMCHANGE " + nbpm, "0,",
-            "#BPMCHANGE " + bpm, "#MEASURE " + EditorFracText(rest * 1000.0, 1000.0), "0," };
+        out = { "#BPMCHANGE " + bpm, "#MEASURE " + EditorFracText(pos->Num, pos->Den), "0,", "#MEASURE 2/1", "0", std::string("#BPMCHANGE ") + (B < 0 ? "" : "-") + pairBpm, "0,",
+            "#BPMCHANGE " + bpm, "#MEASURE " + EditorFracText(t.Measure.Num * pos->Den - pos->Num * t.Measure.Den, t.Measure.Den * pos->Den), "0," };
         restore();
         break;
     }
@@ -2001,7 +2066,7 @@ std::optional<std::vector<std::string>> Game::EditorBuildGimmick(int index, cons
     case 12: {  // 背面停止
         const auto len = frac(0, "1/1");
         if (!len || len->Value() <= 0) { return bad("長さは正の値にしてください"); }
-        out = { "#BPMCHANGE " + EditorNum(B / 1000.0), "#MEASURE " + EditorFracText(len->Num, len->Den * 1000.0), "#SCROLL 1000", "0," };
+        out = { "#BPMCHANGE " + JiroBpm(B / 1000.0), "#MEASURE " + EditorFracText(len->Num, len->Den * 1000.0), "#SCROLL 1000", "0," };
         restore();
         out.push_back("#SCROLL 1");
         break;
@@ -2017,7 +2082,7 @@ std::optional<std::vector<std::string>> Game::EditorBuildGimmick(int index, cons
     case 14: {  // 連打背景
         if (Editor.CursorMeasure == 0) { return bad("1 小節目の前には置けません (重ねる小節がありません)"); }
         const EditorTiming prev = EditorTimingAt(Editor.CursorMeasure - 1);
-        out = { "#BPMCHANGE " + EditorNum(prev.Bpm), "#MEASURE " + EditorFracText(-prev.Measure.Num, prev.Measure.Den), "0,",
+        out = { "#BPMCHANGE " + JiroBpm(prev.Bpm), "#MEASURE " + EditorFracText(-prev.Measure.Num, prev.Measure.Den), "0,",
             "#MEASURE " + EditorFracText(prev.Measure.Num, prev.Measure.Den), "5000000000000000000000000000008," };
         restore();
         break;
@@ -2049,7 +2114,7 @@ std::optional<std::vector<std::string>> Game::EditorBuildGimmick(int index, cons
         }
         if (notes.find_first_not_of('0') == std::string::npos) { return bad("カーソルの小節に音符がありません (ダミーにしたい音符を置いた小節を選んでください)"); }
         place = 2;
-        out = { "#BPMCHANGE " + EditorNum(-end.Bpm), "#MEASURE " + EditorFracText(-distance * 1000.0, 1000.0), "0,",
+        out = { "#BPMCHANGE " + JiroBpm(-end.Bpm), "#MEASURE " + EditorFracText(-distance, 1), "0,",
             "#BPMCHANGE " + bpm, "#MEASURE " + EditorFracText(t.Measure.Num, t.Measure.Den), notes + "," };
         break;
     }
@@ -2091,7 +2156,13 @@ std::optional<std::vector<std::string>> Game::EditorBuildGimmick(int index, cons
                 }
             }
             tja::Reduce(num, den);
-            out.insert(out.end(), { "#BPMCHANGE " + EditorNum(std::round(speed * 1000.0) / 1000.0), "#MEASURE " + std::to_string(num) + "/" + std::to_string(den), "," });
+            // 次郎が読めない長さの分数は近い分数にし、段の時間が変わらないよう BPM をその値から決め直す
+            double written = (double)num / (double)den, stepBpm = speed;
+            if ((std::to_string(num) + "/" + std::to_string(den)).size() > 9) {
+                std::tie(num, den) = JiroRational(written);
+                stepBpm = speed * ((double)num / (double)den) / written;
+            }
+            out.insert(out.end(), { "#BPMCHANGE " + JiroBpm(stepBpm), "#MEASURE " + std::to_string(num) + "/" + std::to_string(den), "," });
         }
         restore();
         break;
@@ -2404,37 +2475,6 @@ void Game::EditorLoadFolds() {
     EditorNormalizeFolds();     // 譜面が外で書き換えられていても、小節の数を超えない・重ならないようにする
 }
 
-namespace {
-    // 次郎は #MEASURE の値を命令名の後の 10 文字 (空白を含む) までしか読まないので、空白の後 9 文字に収まる分数にする。
-    // 収まらない時は連分数で近い分数を選ぶ (呼ぶ側は、書いた値に合わせて BPM を決め直して時間を保つ)
-    std::pair<int64_t, int64_t> JiroFraction(int64_t n, int64_t d) {
-        if (d < 0) { n = -n; d = -d; }
-        tja::Reduce(n, d);
-        auto fits = [](int64_t a, int64_t b) { return (std::to_string(a) + "/" + std::to_string(b)).size() <= 9; };
-        if (fits(n, d)) { return { n, d }; }
-        const int64_t sign = n < 0 ? -1 : 1;
-        int64_t x = n < 0 ? -n : n, y = d, p0 = 0, q0 = 1, p1 = 1, q1 = 0;
-        std::pair<int64_t, int64_t> best{ sign * std::max<int64_t>(1, (int64_t)std::llround((double)x / (double)y)), 1 };
-        while (y != 0) {
-            const int64_t q = x / y, p2 = q * p1 + p0, q2 = q * q1 + q0;
-            if (!fits(sign * p2, q2)) { break; }
-            if (p2 != 0) { best = { sign * p2, q2 }; }
-            p0 = p1; q0 = q1; p1 = p2; q1 = q2;
-            const int64_t t = x % y; x = y; y = t;
-        }
-        return best;
-    }
-    // 次郎は #BPMCHANGE の値を命令名の後の 8 文字 (空白を含む) までしか読まないので、7 文字に収める
-    std::string JiroBpm(double v, size_t maxLength = 7) {
-        for (int precision = 6; precision >= 0; --precision) {
-            std::string text = std::format("{:.{}f}", v, precision);
-            if (text.find('.') != std::string::npos) { while (text.back() == '0') { text.pop_back(); } if (text.back() == '.') { text.pop_back(); } }
-            if (text == "-0") { text = "0"; }
-            if (text.size() <= maxLength) { return text; }
-        }
-        return std::format("{:.0f}", v);
-    }
-}
 
 void Game::EditorInsertFrameStep(const std::string& params) { EditorRebuildRange(0, params); }
 void Game::EditorInsertConvulsion(const std::string& params) { EditorRebuildRange(1, params); }
