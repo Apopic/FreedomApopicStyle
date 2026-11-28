@@ -1167,11 +1167,6 @@ auto Game::EditorButtons() -> std::vector<EditorButton> {
         }, false, EditorIcon::Insert },
         { "折りたたむ", [this] { EditorFold(); }, false, EditorIcon::Fold },
         { "登録解除", [this] { EditorRemoveFoldRegistration(Editor.CursorMeasure); }, false, EditorIcon::Unfold },
-        { std::string(Config.EditorKeepSpacingOnShrink ? "■" : "□") + " 縮めても間隔を保つ", [this] {
-            Config.EditorKeepSpacingOnShrink = !Config.EditorKeepSpacingOnShrink;
-            Config.Write();
-            EditorMessage(Config.EditorKeepSpacingOnShrink ? "#MEASURE で小節を縮めても音符の間隔を保ちます (はみ出した音符・命令は消します)" : "#MEASURE で小節を縮めると、音符は小節の長さに合わせて縮みます");
-        }, Config.EditorKeepSpacingOnShrink },
         { "削除", [this] {
             auto& ms = EditorCourse()->Measures;
             // 範囲を選んでいる時は、範囲にかかる小節をまとめて消す
@@ -1236,7 +1231,6 @@ std::string Game::EditorButtonHelp(const std::string& label) {
         { "切り取り", "選んだ範囲の音符・命令を切り取る (Ctrl+X)" },
         { "貼り付け", "カーソルの位置に貼り付ける (Ctrl+V)" },
         { "次郎ずれ補正", "太鼓さん次郎で BPM の小数以下の切り捨てにより譜面が早くなる分を、小節の頭の #DELAY で打ち消す。範囲を選んでいればその範囲、無ければコース全体 (Ctrl+Z で戻せる)" },
-        { "縮めても間隔を保つ", "ON: #MEASURE で小節を縮めても音符の間隔・命令の位置を保ち、小節の終わりからはみ出したものは消す。OFF: 音符は小節の長さに合わせて縮む (伸ばす時はいつも間隔を保つ)" },
         { "命令を消す", "選んだ範囲の命令を、すべて・または種類 (#SCROLL など) を選んでまとめて消す (Ctrl+Z で戻せる)" },
         { "範囲のBPMを解析", "選んだ範囲の小節の頭を音源から 1 小節ずつ求め、譜面が音源から指定の ms 以上ずれる小節に #BPMCHANGE を入れる (範囲の #BPMCHANGE は入れ直す。Ctrl+Z で戻せる)" },
         { "前のコース", "編集するコースを切り替える (コースの追加はヘッダーから)" },
@@ -1585,8 +1579,8 @@ void Game::EditorBeginGradient() {
     if (!Editor.Selecting) { EditorMessage("グラデーションは範囲を選んでから開いてください"); return; }
     EditorBeginFields("範囲選択のグラデーション", {
         { "命令", "#SCROLL", { "#SCROLL", "#BPMCHANGE", "#DELAY" } }, { "開始値", "1" }, { "終了値", "2" },
-        { "曲線", "sine", { "linear", "sine", "quad", "cubic", "quart", "quint", "expo", "circ", "back", "elastic", "bounce" } },
-        { "向き", "inout", { "in", "out", "inout", "outin" } }, { "適用先", "音符ごと", { "音符ごと", "小節ごと" } }
+        { "曲線", "linear", { "linear", "sine", "quad", "cubic", "quart", "quint", "expo", "circ", "back", "elastic", "bounce" } },
+        { "向き", "in", { "in", "out", "inout", "outin" } }, { "適用先", "音符ごと", { "音符ごと", "小節ごと" } }
     }, [this](const auto& v) { EditorInsertCommand(v[0] + " " + v[1] + ">" + v[2] + " " + v[3] + " " + v[4] + (v[5] == "小節ごと" ? " bar" : "")); });
 }
 
@@ -1622,6 +1616,18 @@ void Game::EditorBeginUniformScroll() {
 void Game::EditorEditCommandValues(const std::string& text, std::function<void(const std::string&)> done) {
     const auto command = editform::SplitCommand(text);
     if (command.Fields.empty() || command.Fields.size() > 12) { EditorBeginEdit("命令を編集", text, std::move(done)); return; }
+    if (command.Key == "#MEASURE") {
+        // #MEASURE: 小節を縮める時に音符の間隔を保つか (設定に残す)。伸ばす時はいつも保つ
+        auto fields = command.Fields;
+        fields.push_back({ "縮めても間隔を保つ", Config.EditorKeepSpacingOnShrink ? "ON" : "OFF", { "OFF", "ON" } });
+        EditorBeginFields(command.Key + " の値 (縮めても間隔を保つ ON: はみ出した音符は消す)", std::move(fields), [this, command, done = std::move(done)](const auto& values) {
+            if (values.empty()) { return; }
+            const bool keep = values.back() == "ON";
+            if (keep != Config.EditorKeepSpacingOnShrink) { Config.EditorKeepSpacingOnShrink = keep; Config.Write(); }
+            done(command.Join(std::vector<std::string>(values.begin(), values.end() - 1)));
+        });
+        return;
+    }
     EditorBeginFields(command.Key + " の値", command.Fields, [command, done = std::move(done)](const auto& values) { done(command.Join(values)); });
 }
 
@@ -1645,7 +1651,7 @@ const std::vector<std::pair<std::string, std::string>>& Game::EditorCommandTempl
         { "#GOGOSTART", "#GOGOSTART" }, { "#GOGOEND", "#GOGOEND" }, { "#BARLINEOFF", "#BARLINEOFF" }, { "#BARLINEON", "#BARLINEON" },
         { "#SECTION", "#SECTION" }, { "#BRANCHSTART", "#BRANCHSTART p,80,90" }, { "#N", "#N" }, { "#E", "#E" }, { "#M", "#M" },
         { "#BRANCHEND", "#BRANCHEND" }, { "#LEVELHOLD", "#LEVELHOLD" }, { "自由入力…", "#" },
-        { "グラデーション…", "#SCROLL 1>2 sine inout" },
+        { "グラデーション…", "#SCROLL 1>2 linear in" },
         { "見た目BPMを統一…", "uniform-scroll" },
     };
     return list;
@@ -1703,7 +1709,7 @@ void Game::EditorInsertCommand(const std::string& text) {
         const std::string key = t.substr(0, sp);
         std::string rest(strtrim(std::string_view(t).substr(sp)));
         bool bars = false;
-        ease::Base easingBase = ease::Base::InOut;
+        ease::Base easingBase = ease::Base::In;      // 書かなければ linear in (等間隔に変える)
         ease::Line easingLine = ease::Line::Linear;
         if (const size_t w = rest.find_first_of(" \t"); w != std::string::npos) {
             const std::string opt(strtrim(std::string_view(rest).substr(w)));
@@ -2442,12 +2448,27 @@ void Game::EditorInsertFrameStep(const std::string& params) {
     for (size_t i = 0; i + 1 < cuts.size(); ++i) {
         const Q length = sub(cuts[i + 1], cuts[i]);
         if (length.N <= 0) { continue; }
+        // 音符は元の BPM のごく短い小節 (1/1000 小節。区間の半分まで) に置く: 1/1000 の BPM の所に置くと、
+        // 次郎では音符もその BPM で流れて、判定を過ぎてもレーンに長く残ってしまう
+        const bool noteHere = std::ranges::any_of(inside, [&](const Item& it) { return it.Text.empty() && it.Type != '8' && it.At.N == cuts[i].N && it.At.D == cuts[i].D; });
+        Q stopFrom = cuts[i];
+        if (noteHere) {
+            Q eps{ 1, 1000 };
+            if (!less(norm({ eps.N * 2, eps.D }), length)) { eps = norm({ length.N, length.D * 2 }); }
+            stopFrom = norm({ cuts[i].N * eps.D + eps.N * cuts[i].D, cuts[i].D * eps.D });
+            tja::Measure hold;
+            hold.Commands.push_back({ 0, 1, "#BPMCHANGE " + bpmText });
+            hold.Commands.push_back({ 0, 1, "#MEASURE " + fracText(eps, 1) });
+            if (i == 0) { hold.Commands.push_back({ 0, 1, "#BARLINEOFF" }); }
+            fill(hold, inside, cuts[i], stopFrom);
+            built.push_back(std::move(hold));
+        }
         // 止まる: BPM と拍子を 1/1000 にする (時間はそのまま、流れる距離はほぼ 0)
         tja::Measure stop;
         stop.Commands.push_back({ 0, 1, "#BPMCHANGE " + stopBpm });
-        stop.Commands.push_back({ 0, 1, "#MEASURE " + fracText(length, 1000) });
-        if (built.empty() || i == 0) { stop.Commands.push_back({ 0, 1, "#BARLINEOFF" }); }
-        fill(stop, inside, cuts[i], cuts[i + 1]);
+        stop.Commands.push_back({ 0, 1, "#MEASURE " + fracText(sub(cuts[i + 1], stopFrom), 1000) });
+        if (i == 0 && !noteHere) { stop.Commands.push_back({ 0, 1, "#BARLINEOFF" }); }
+        fill(stop, inside, stopFrom, cuts[i + 1]);
         built.push_back(std::move(stop));
         // 瞬間移動 (バグ式): BPM X と -X の 0 秒の小節で、次の音符までの距離 × 倍率だけ進める
         Q distance = norm({ length.N * kn, length.D * kd });
