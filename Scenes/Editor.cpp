@@ -2161,8 +2161,10 @@ bool Game::EditorToRational(const EditorFrac& f, int64_t& num, int64_t& den) {
     return true;
 }
 
-auto Game::EditorJiroMeasureMaps() -> std::vector<EditorTimeline::Measure> {
+auto Game::EditorJiroMeasureMaps(bool truncate, double* originOut) -> std::vector<EditorTimeline::Measure> {
     std::vector<EditorTimeline::Measure> out;
+    // truncate = false: 次郎と同じ読み方 (決まった文字数・小節の途中の #MEASURE は次の小節から) のまま、ミリ秒の切り捨てだけをしない「本来の時刻」
+    auto trunc = [truncate](double v) { return truncate ? JiroTrunc(v) : v; };
     const auto* course = EditorCourse();
     if (course == nullptr) { return out; }
     double bpm = 120;
@@ -2181,7 +2183,8 @@ auto Game::EditorJiroMeasureMaps() -> std::vector<EditorTimeline::Measure> {
         const double offset = std::atof(tja::Document::GetValue(Editor.Doc.Header, "OFFSET").c_str());
         origin = 240.0 / bpm > -offset ? 240000.0 / bpm : offset * -1000.0 - Config.SongOffset;
         origin = std::max(0.0, origin + Config.ChartOffset);
-        evTime = next = std::max(0.0, JiroTrunc(origin));
+        evTime = next = std::max(0.0, trunc(origin));
+        if (originOut != nullptr) { *originOut = origin; }
     }
     // 次郎は命令名の後の決まった文字数 (#BPMCHANGE は 8、#MEASURE・#DELAY は 10) を sscanf で読み、読めなければ前に読んだ値のまま
     double scanValue = 0;
@@ -2215,7 +2218,7 @@ auto Game::EditorJiroMeasureMaps() -> std::vector<EditorTimeline::Measure> {
         measureDelay = 0;
         auto posTime = [&](double p) {
             const double beat = 60000.0 / bpm;
-            const double base = evHere ? JiroTrunc(beat * 4.0 * ratio * (p - evPos)) + evTime : JiroTrunc(beat * 4.0 * ratio * p) + measureStart;
+            const double base = evHere ? trunc(beat * 4.0 * ratio * (p - evPos)) + evTime : trunc(beat * 4.0 * ratio * p) + measureStart;
             return std::max(0.0, base + measureDelay);
         };
         // 命令と音符の位置を順に (同じ位置では命令が先)
@@ -2237,7 +2240,7 @@ auto Game::EditorJiroMeasureMaps() -> std::vector<EditorTimeline::Measure> {
                     evTime = posTime(p); bpm = v; evPos = p; evHere = true; after = 0; measureDelay = 0; totalDelay = 0;
                 }
                 else if (tja::StartsWithKey(c.Text, "#DELAY")) {
-                    const double d = JiroTrunc(scanDouble(jiroArg(c.Text, 6, 10)) * 1000.0);
+                    const double d = trunc(scanDouble(jiroArg(c.Text, 6, 10)) * 1000.0);
                     if (std::isfinite(d) && std::abs(d) <= 2e9) { measureDelay += d; totalDelay += d; }
                 }
                 else if (c.Num != 0 && tja::StartsWithKey(c.Text, "#MEASURE")) {
@@ -2254,7 +2257,7 @@ auto Game::EditorJiroMeasureMaps() -> std::vector<EditorTimeline::Measure> {
         if (evHere) { evRemain = (1.0 - evPos) * 4.0 * ratio; after = 0; evHere = false; }
         else { after += 4.0 * ratio; }
         const double beat = 60000.0 / bpm;
-        next = std::max(0.0, evTime + JiroTrunc(beat * evRemain) + JiroTrunc(beat * after) + totalDelay);
+        next = std::max(0.0, evTime + trunc(beat * evRemain) + trunc(beat * after) + totalDelay);
         map.Map.push_back({ 1.0, next });
         for (auto& point : map.Map) { point.second -= origin; }
         out.push_back(std::move(map));
@@ -2272,17 +2275,14 @@ void Game::EditorFixJiroDrift() {
     const int count = (int)course->Measures.size();
     int first = 0, last = count - 1;
     if (Editor.Selecting) { const auto [a, b] = EditorSelection(); first = std::clamp(a.Measure, 0, count - 1); last = std::clamp(b.Measure, first, count - 1); }
-    // 本来の時刻 (切り捨てない計算) の小節の頭
-    const bool savedJiro = Editor.PreviewJiro;
-    Editor.PreviewJiro = false;
-    ++Editor.Revision;
+    // 本来の時刻の小節の頭: 次郎と同じ読み方 (命令の決まった文字数・小節の途中の #MEASURE は次の小節から) で、
+    // ミリ秒の切り捨てだけをしない時刻。通常の読み方の時刻と比べると、ギミックの譜面では読み方の違いを「ずれ」と取り違えてしまう
     std::vector<double> exact;
     {
-        const auto tl = EditorBuildTimeline();
-        for (const auto& m : tl.Measures) { exact.push_back(m.Map.empty() ? 0 : m.Map.front().second); }
-        exact.push_back(tl.Measures.empty() || tl.Measures.back().Map.empty() ? 0 : tl.Measures.back().Map.back().second);
+        const auto maps = EditorJiroMeasureMaps(false);
+        for (const auto& m : maps) { exact.push_back(m.Map.front().second); }
+        exact.push_back(maps.back().Map.back().second);
     }
-    Editor.PreviewJiro = savedJiro;
     // 小節の頭ごとに、次郎の時刻が本来より 1ms 以上ずれていれば、その分 (ミリ秒の整数) の #DELAY を小節の頭に入れる
     //   drift = 本来 - 次郎。正 = 次郎が早い (正の拍の長さの切り捨て) → 正の #DELAY で遅らせる
     //                        負 = 次郎が遅い (負の BPM・負の #DELAY の 0 方向への切り捨て) → 負の #DELAY で早める
@@ -2487,13 +2487,27 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
         }
     };
     std::vector<tja::Measure> built;
+    // 作った小節ごとの本来の時間 (ミリ秒) と、流れる距離 (小節)。Adjust の小節は最後に次郎の整数ミリ秒に合わせて BPM と拍子を書き直す
+    struct Plan { double Ms = 0; double Distance = 0; bool Adjust = true; };
+    std::vector<Plan> plans;
+    auto push = [&](tja::Measure m, const Q& duration, const Q& distance, bool adjust = true) {
+        plans.push_back({ 240000.0 * qValue(duration) / B, qValue(distance), adjust });
+        built.push_back(std::move(m));
+    };
+    // 範囲の始まりの小節の頭の #DELAY は残す (補正の #DELAY などを消さない)
+    std::vector<std::string> headDelays;
+    for (const auto& c : course->Measures[(size_t)first].Commands) {
+        if (c.Num == 0 && tja::StartsWithKey(c.Text, "#DELAY")) { headDelays.push_back(c.Text); }
+    }
+    auto addHeadDelays = [&](tja::Measure& m) { for (const auto& t : headDelays) { m.Commands.insert(m.Commands.begin() + 2, { 0, 1, t }); } };
     // 範囲の前の部分: 元の BPM・拍子のまま、長さだけ短い小節
     if (less(Q{ 0, 1 }, start)) {
         tja::Measure head;
         head.Commands.push_back({ 0, 1, "#BPMCHANGE " + bpmText });
         head.Commands.push_back({ 0, 1, "#MEASURE " + qText(jiroQ(start)) });
         fill(head, before, Q{ 0, 1 }, start);
-        built.push_back(std::move(head));
+        addHeadDelays(head);
+        push(std::move(head), start, start);
     }
     std::string summary;
     if (kind == 1) {
@@ -2551,13 +2565,14 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
             go.Commands.push_back({ 0, 1, "#MEASURE " + qText(forward) });
             if (firstMeasure) { go.Commands.push_back({ 0, 1, "#BARLINEOFF" }); firstMeasure = false; }
             fill(go, inside, from, turn);
-            built.push_back(std::move(go));
+            if (built.empty()) { addHeadDelays(go); }
+            push(std::move(go), sub(turn, from), add(len, back));
             tja::Measure ret;
             // 時間を a に保つ BPM = -B × 書いた距離 / a
             ret.Commands.push_back({ 0, 1, "#BPMCHANGE " + JiroBpm(B * qValue(backward) / qValue(back)) });
             ret.Commands.push_back({ 0, 1, "#MEASURE " + qText(backward) });
             fill(ret, inside, turn, to);     // 音符以外の命令 (#SCROLL など) だけが入る
-            built.push_back(std::move(ret));
+            push(std::move(ret), back, norm({ -back.N, back.D }));
         }
         summary = std::to_string(slices.size()) + " 区切り (1 区切り " + qText(unit) + " 小節前後) の痙攣にしました";
     }
@@ -2588,7 +2603,8 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
             hold.Commands.push_back({ 0, 1, "#MEASURE " + qText(eps) });
             if (i == 0) { hold.Commands.push_back({ 0, 1, "#BARLINEOFF" }); }
             fill(hold, inside, cuts[i], stopFrom);
-            built.push_back(std::move(hold));
+            if (built.empty()) { addHeadDelays(hold); }
+            push(std::move(hold), eps, eps);
         }
         // 止まる: 拍子を 1/1000 にして (流れる距離はほぼ 0)、時間を保つ BPM にする。拍子は次郎が読める長さの分数にし、
         // その値に合わせて BPM = B × 書いた拍子 / 長さ にする (長い分数を書くと次郎では途中で切れて、譜面がとても遅くなる)
@@ -2599,7 +2615,8 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
         stop.Commands.push_back({ 0, 1, "#MEASURE " + qText(stopMeasure) });
         if (i == 0 && !noteHere) { stop.Commands.push_back({ 0, 1, "#BARLINEOFF" }); }
         fill(stop, inside, stopFrom, cuts[i + 1]);
-        built.push_back(std::move(stop));
+        if (built.empty()) { addHeadDelays(stop); }
+        push(std::move(stop), stopLength, stopMeasure);
         // 瞬間移動 (バグ式): BPM X と -X の 0 秒の小節で、次の音符までの距離 × 倍率だけ進める
         Q distance = norm({ length.N * kn, length.D * kd });
         tja::Measure jump;
@@ -2607,7 +2624,7 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
         jump.Commands.push_back({ 0, 1, "#BPMCHANGE " + bpmText });
         jump.Commands.push_back({ 0, 1, "#MEASURE " + qText(jiroQ(distance)) });
         jump.Commands.push_back({ 1, 2, "#BPMCHANGE " + JiroBpm(-B) });
-        built.push_back(std::move(jump));
+        push(std::move(jump), Q{ 0, 1 }, distance, false);     // 0 秒 (X と -X の切り捨ては打ち消し合う)
     }
     summary = std::to_string(cuts.size() - 1) + " コマのコマ送りにしました";
     }
@@ -2616,9 +2633,55 @@ void Game::EditorRebuildRange(int kind, const std::string& params) {
         tja::Measure tail;
         tail.Commands.push_back({ 0, 1, "#BPMCHANGE " + bpmText });
         tail.Commands.push_back({ 0, 1, "#MEASURE " + qText(jiroQ(sub(total, end))) });
-        tail.Commands.push_back({ 0, 1, barline ? "#BARLINEON" : "#BARLINEOFF" });
+        // 元の小節の途中なので小節線は出さない (次の小節の頭で元の小節線の表示に戻す)
+        tail.Commands.push_back({ 0, 1, "#BARLINEOFF" });
         fill(tail, after, end, total);
-        built.push_back(std::move(tail));
+        push(std::move(tail), sub(total, end), sub(total, end));
+    }
+    // 次郎は #BPMCHANGE のたびに小節の時間をミリ秒の整数に切り捨てるので、そのままでは区切りごとに最大 1ms ずつ早くなる。
+    // 小節ごとに「本来の時刻を丸めた整数ミリ秒」までの時間 D を決め、切り捨てても D になる拍子 (D + 0.5 ミリ秒分) と、
+    // HBSCROLL で流れる距離 (= D × BPM / 240000) が狙いの距離になる BPM を書く
+    {
+        double origin = 0;
+        const auto ideal = EditorJiroMeasureMaps(false, &origin);
+        const auto real = EditorJiroMeasureMaps(true);
+        double delayIdeal = 0, delayJiro = 0;
+        for (const auto& t : headDelays) {
+            const double v = std::atof(tja::Trim(std::string_view(t).substr(6)).data());
+            delayIdeal += v * 1000.0; delayJiro += JiroTrunc(v * 1000.0);
+        }
+        double want = ideal[(size_t)first].Map.front().second + origin + delayIdeal;
+        double now = std::round(real[(size_t)first].Map.front().second + origin) + delayJiro;
+        auto value = [](const std::string& text, size_t key) { return std::strtod(std::string(tja::Trim(std::string_view(text).substr(key))).c_str(), nullptr); };
+        auto writtenMs = [&](const tja::Measure& m) {
+            const double bv = value(m.Commands[0].Text, 10);
+            const auto f = EditorParseFrac(std::string_view(m.Commands[1].Text).substr(8));
+            return bv != 0 && f && f->Den != 0 ? JiroTrunc(60000.0 / bv * (4.0 * f->Value())) : 0.0;
+        };
+        auto fit = [&](tja::Measure& m, double D, double distance) {
+            const std::string bpmText = JiroBpm(240000.0 * distance / D);
+            const double bv = std::strtod(bpmText.c_str(), nullptr);
+            if (bv == 0 || !std::isfinite(bv)) { return false; }
+            for (double extra : { 0.5, 0.25, 0.75, 0.1, 0.9 }) {
+                const double rv = (D + extra) * bv / 240000.0;
+                const auto [n, d] = JiroFraction(std::llround(rv * 1e9), 1000000000);
+                const double r = (double)n / (double)d;
+                if (n != 0 && JiroTrunc(60000.0 / bv * (4.0 * r)) == D && JiroTrunc(60000.0 / bv * 4.0 * r) == D) {
+                    m.Commands[0].Text = "#BPMCHANGE " + bpmText;
+                    m.Commands[1].Text = "#MEASURE " + std::to_string(n) + "/" + std::to_string(d);
+                    return true;
+                }
+            }
+            return false;
+        };
+        for (size_t k = 0; k < built.size(); ++k) {
+            want += plans[k].Ms;
+            if (plans[k].Adjust && plans[k].Distance != 0) {
+                const double target = std::round(want), D = target - now;
+                if (D >= 1 && D < 1e9 && fit(built[k], D, plans[k].Distance)) { now = target; continue; }
+            }
+            now += plans[k].Adjust ? writtenMs(built[k]) : 0.0;
+        }
     }
     EditorChange();
     const int removed = last - first + 1;

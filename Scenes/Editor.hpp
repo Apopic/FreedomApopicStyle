@@ -372,7 +372,8 @@
     EditorTimeline EditorBuildTimeline();
     const EditorTimeline& EditorTimelineCached();
     // 次郎形式の小節ごとの時刻 (分岐の無いコース用)。taikojiro と同じく #BPMCHANGE ごとに整数ミリ秒へ切り捨てて足す
-    std::vector<EditorTimeline::Measure> EditorJiroMeasureMaps();
+    // truncate = false で切り捨てない本来の時刻。originOut に譜面の始まりの絶対時刻 (曲の始まりからのミリ秒) を返す
+    std::vector<EditorTimeline::Measure> EditorJiroMeasureMaps(bool truncate = true, double* originOut = nullptr);
     EditorTimeline EditorTimelineCache;
     uint64_t EditorTimelineRevision = std::numeric_limits<uint64_t>::max();
     int EditorTimelineCourse = -1;
